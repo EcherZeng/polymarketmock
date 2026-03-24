@@ -46,6 +46,27 @@ export async function fetchMidpoint(tokenId: string): Promise<{ token_id: string
   return data
 }
 
+export async function searchEvents(
+  q: string,
+  activeOnly = true,
+  limit = 20,
+): Promise<MarketEvent[]> {
+  const { data } = await api.get("/search/events", {
+    params: { q, active_only: activeOnly, limit },
+  })
+  return data
+}
+
+export async function resolveSlug(slug: string): Promise<MarketEvent> {
+  const { data } = await api.get(`/resolve/${slug}`)
+  return data
+}
+
+export async function fetchBtcMarkets(): Promise<Record<string, MarketEvent[]>> {
+  const { data } = await api.get("/btc/markets")
+  return data
+}
+
 // ── Trading ─────────────────────────────────────────────────────────────────
 
 export async function placeOrder(req: OrderRequest): Promise<OrderResult> {

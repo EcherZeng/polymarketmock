@@ -64,3 +64,42 @@ async def get_midpoint(token_id: str = Query(...)):
         return {"token_id": token_id, "mid": mid}
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Polymarket API error: {e}")
+
+
+@router.get("/search/events")
+async def search_events(
+    q: str = Query(..., min_length=1, max_length=200, description="搜索关键词（匹配 title/slug）"),
+    active_only: bool = Query(True),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    try:
+        return await proxy.search_events(query=q, active_only=active_only, limit=limit, offset=offset)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Polymarket API error: {e}")
+
+
+@router.get("/resolve/{slug:path}")
+async def resolve_slug(slug: str):
+    """通过 Polymarket URL slug 解析事件详情。
+
+    例：slug = 'btc-updown-5m-1774420800'
+    """
+    try:
+        event = await proxy.resolve_event_slug(slug)
+        if not event:
+            raise HTTPException(status_code=404, detail=f"Event not found: {slug}")
+        return event
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Polymarket API error: {e}")
+
+
+@router.get("/btc/markets")
+async def btc_markets():
+    """发现当前活跃的 BTC 涨跌预测市场（按 5m/15m/30m 分组）。"""
+    try:
+        return await proxy.discover_btc_markets()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Polymarket API error: {e}")

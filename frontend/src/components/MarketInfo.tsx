@@ -38,11 +38,19 @@ export default function MarketInfo({ marketId }: MarketInfoProps) {
 
   if (!market) return null
 
-  const yesPrice = market.outcomePrices?.[0]
-    ? (parseFloat(market.outcomePrices[0]) * 100).toFixed(1)
+  // outcomePrices / outcomes may be arrays (normalized) or JSON strings (legacy)
+  const prices: string[] = Array.isArray(market.outcomePrices)
+    ? market.outcomePrices
+    : (() => { try { return JSON.parse(market.outcomePrices as unknown as string) } catch { return [] } })()
+  const outcomes: string[] = Array.isArray(market.outcomes)
+    ? market.outcomes
+    : (() => { try { return JSON.parse(market.outcomes as unknown as string) } catch { return [] } })()
+
+  const yesPrice = prices[0]
+    ? (parseFloat(prices[0]) * 100).toFixed(1)
     : "–"
-  const noPrice = market.outcomePrices?.[1]
-    ? (parseFloat(market.outcomePrices[1]) * 100).toFixed(1)
+  const noPrice = prices[1]
+    ? (parseFloat(prices[1]) * 100).toFixed(1)
     : "–"
 
   return (
@@ -59,11 +67,11 @@ export default function MarketInfo({ marketId }: MarketInfoProps) {
       <CardContent>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Yes</span>
+            <span className="text-muted-foreground">{outcomes[0] ?? "Yes"}</span>
             <span className="text-2xl font-bold text-chart-2">{yesPrice}¢</span>
           </div>
           <div className="flex flex-col gap-1">
-            <span className="text-muted-foreground">No</span>
+            <span className="text-muted-foreground">{outcomes[1] ?? "No"}</span>
             <span className="text-2xl font-bold text-chart-1">{noPrice}¢</span>
           </div>
         </div>
