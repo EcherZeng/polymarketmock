@@ -221,6 +221,13 @@ const DURATION_LABELS: Record<string, string> = {
   "30m": "30 分钟",
 }
 
+const STATUS_CONFIG: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+  live: { label: "━ LIVE", variant: "destructive" },
+  upcoming: { label: "即将开始", variant: "default" },
+  ended: { label: "已结束", variant: "secondary" },
+  unknown: { label: "?", variant: "outline" },
+}
+
 function parseOutcomes(raw: unknown): string[] {
   if (Array.isArray(raw)) return raw
   if (typeof raw === "string") {
@@ -237,6 +244,15 @@ function parsePrices(raw: unknown): string[] {
   return []
 }
 
+/** Format eventStartTime to short local time string. */
+function fmtTime(iso: string | undefined): string {
+  if (!iso) return ""
+  try {
+    const d = new Date(iso)
+    return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })
+  } catch { return "" }
+}
+
 interface BtcMarketPanelProps {
   btcMarkets: Record<string, MarketEvent[]>
   onSelect: (m: Market) => void
@@ -249,70 +265,100 @@ function BtcMarketPanel({ btcMarkets, onSelect }: BtcMarketPanelProps) {
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base">Bitcoin 涨跌预测 — 快速入口</CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base">Bitcoin 涨跌预测 — 快速入口</CardTitle>
+          <span className="text-xs text-muted-foreground">每 20s 自动刷新</span>
+        </div>
       </CardHeader>
       <CardContent>
         <Tabs defaultValue={availableTabs[0][0]}>
           <TabsList>
-            {availableTabs.map(([dur]) => (
-              <TabsTrigger key={dur} value={dur}>
-                {DURATION_LABELS[dur] ?? dur}
-              </TabsTrigger>
-            ))}
+            {availableTabs.map(([dur, events]) => {
+              const liveCount = events.filter((e) => e._status === "live").length
+              return (
+                <TabsTrigger key={dur} value={dur}>
+                  {DURATION_LABELS[dur] ?? dur}
+                  {liveCount > 0 && (
+                    <span className="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-destructive-foreground">
+                      {liveCount}
+                    </span>
+                  )}
+                </TabsTrigger>
+              )
+            })}
           </TabsList>
 
-          {availableTabs.map(([dur, events]) => (
-            <TabsContent key={dur} value={dur} className="mt-2">
-              <ScrollArea className="max-h-72">
-                <div className="flex flex-col gap-1.5">
-                  {events.map((evt) => {
-                    const m = evt.markets?.[0]
-                    if (!m) return null
-                    const outcomes = parseOutcomes(m.outcomes)
-                    const prices = parsePrices(m.outcomePrices)
-                    const tokens = parseTokenIds(m.clobTokenIds)
+          {availableTabs.map(([dur, events]) => {
+            // Sort: live first, then upcoming, then ended
+            const sorted = [...events].sort((a, b) => {
+              const order: Record<string, number> = { live: 0, upcoming: 1, ended: 2, unknown: 3 }
+              return (order[a._status ?? "unknown"] ?? 3) - (order[b._status ?? "unknown"] ?? 3)
+            })
 
-                    return (
-                      <div
-                        key={evt.id}
-                        className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm hover:bg-accent cursor-pointer transition-colors"
-                        onClick={() => onSelect(m)}
-                      >
-                        <div className="flex flex-col gap-0.5 min-w-0">
-                          <span className="font-medium truncate">{evt.title}</span>
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <span>Market ID: {m.id}</span>
-                            <span>·</span>
-                            <span>Slug: {evt.slug}</span>
+            return (
+              <TabsContent key={dur} value={dur} className="mt-2">
+                <ScrollArea className="max-h-80">
+                  <div className="flex flex-col gap-1.5">
+                    {sorted.map((evt) => {
+                      const m = evt.markets?.[0]
+                      if (!m) return null
+                      const outcomes = parseOutcomes(m.outcomes)
+                      const prices = parsePrices(m.outcomePrices)
+                      const tokens = parseTokenIds(m.clobTokenIds)
+                      const status = evt._status ?? "unknown"
+                      const sc = STATUS_CONFIG[status]
+                      const isLive = status === "live"
+
+                      return (
+                        <div
+                          key={evt.id}
+                          className={`flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm cursor-pointer transition-colors ${
+                            isLive
+                              ? "border-destructive/50 bg-destructive/5 hover:bg-destructive/10"
+                              : status === "ended"
+                                ? "opacity-60 hover:opacity-80 hover:bg-accent"
+                                : "hover:bg-accent"
+                          }`}
+                          onClick={() => onSelect(m)}
+                        >
+                          <div className="flex flex-col gap-0.5 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium truncate">{evt.title}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <span>ID: {m.id}</span>
+                              <span>·</span>
+                              <span>{fmtTime(evt.startDate)} – {fmtTime(evt.endDate)}</span>
+                            </div>
+                            {tokens[0] && (
+                              <span className="text-xs text-muted-foreground font-mono truncate">
+                                Token: {tokens[0].slice(0, 24)}...
+                              </span>
+                            )}
                           </div>
-                          {tokens[0] && (
-                            <span className="text-xs text-muted-foreground font-mono truncate">
-                              Token: {tokens[0].slice(0, 20)}...
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          {outcomes[0] && prices[0] && (
-                            <Badge variant="outline" className="text-chart-2 border-chart-2">
-                              {outcomes[0]} {(parseFloat(prices[0]) * 100).toFixed(0)}¢
+                          <div className="flex items-center gap-2 shrink-0">
+                            {outcomes[0] && prices[0] && (
+                              <Badge variant="outline" className="text-chart-2 border-chart-2">
+                                {outcomes[0]} {(parseFloat(prices[0]) * 100).toFixed(0)}¢
+                              </Badge>
+                            )}
+                            {outcomes[1] && prices[1] && (
+                              <Badge variant="outline" className="text-chart-1 border-chart-1">
+                                {outcomes[1]} {(parseFloat(prices[1]) * 100).toFixed(0)}¢
+                              </Badge>
+                            )}
+                            <Badge variant={sc.variant}>
+                              {sc.label}
                             </Badge>
-                          )}
-                          {outcomes[1] && prices[1] && (
-                            <Badge variant="outline" className="text-chart-1 border-chart-1">
-                              {outcomes[1]} {(parseFloat(prices[1]) * 100).toFixed(0)}¢
-                            </Badge>
-                          )}
-                          <Badge variant={evt.closed ? "secondary" : "default"}>
-                            {evt.closed ? "Closed" : "Active"}
-                          </Badge>
+                          </div>
                         </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </ScrollArea>
-            </TabsContent>
-          ))}
+                      )
+                    })}
+                  </div>
+                </ScrollArea>
+              </TabsContent>
+            )
+          })}
         </Tabs>
       </CardContent>
     </Card>

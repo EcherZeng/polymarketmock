@@ -60,6 +60,7 @@ export interface MarketEvent {
   volume: number
   startDate: string
   endDate: string
+  _status?: "live" | "upcoming" | "ended" | "unknown"
 }
 
 export type OrderSide = "BUY" | "SELL"

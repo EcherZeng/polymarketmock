@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 import httpx
 
@@ -194,40 +195,69 @@ async def resolve_event_slug(slug: str) -> dict | None:
 
 
 async def discover_btc_markets() -> dict[str, list[dict]]:
-    """Discover active BTC up/down markets grouped by duration (5m, 15m, 30m).
+    """Discover BTC up/down markets around the current time, grouped by duration.
 
-    Uses cache (30s TTL) to avoid excessive Gamma API requests.
+    Computes slug timestamps to query Gamma API precisely, avoiding the problem
+    of current events being buried in large generic queries.  Uses cache (20s TTL)
+    to stay well under the 10 req/s rate limit.
     """
     cache_key = "btc:discovery"
     cached = await cache_get(cache_key)
     if cached:
         return json.loads(cached)
 
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+
+    # Duration configs: (slug_prefix, interval_seconds, slots_before, slots_after)
+    durations = [
+        ("btc-updown-5m", 300, 4, 6),     # 4 past + 6 upcoming = 10
+        ("btc-updown-15m", 900, 2, 4),     # 2 past + 4 upcoming = 6
+        ("btc-updown-30m", 1800, 1, 3),    # 1 past + 3 upcoming = 4
+    ]
+
+    groups: dict[str, list[dict]] = {}
     url = f"{settings.gamma_api_url}/events"
-    params = {
-        "limit": 100,
-        "active": "true",
-        "closed": "false",
-        "order": "createdAt",
-        "ascending": "false",
-    }
-    resp = await _get_client().get(url, params=params)
-    resp.raise_for_status()
-    all_events = resp.json()
+    now_utc = datetime.now(timezone.utc)
 
-    groups: dict[str, list[dict]] = {"5m": [], "15m": [], "30m": []}
-    for e in all_events:
-        slug = e.get("slug", "")
-        if "btc-updown-5m-" in slug:
-            groups["5m"].append(_normalize_event(e))
-        elif "btc-updown-15m-" in slug:
-            groups["15m"].append(_normalize_event(e))
-        elif "btc-updown-30m-" in slug:
-            groups["30m"].append(_normalize_event(e))
+    for prefix, interval, before, after in durations:
+        key = f"{interval // 60}m"
+        window_start = now_ts - (now_ts % interval)
+        events: list[dict] = []
 
-    # Keep only the most recent per group
-    for key in groups:
-        groups[key] = groups[key][:10]
+        for offset in range(-before, after + 1):
+            slug = f"{prefix}-{window_start + offset * interval}"
+            resp = await _get_client().get(url, params={"limit": 1, "slug": slug})
+            if resp.status_code != 200:
+                continue
+            data = resp.json()
+            if not data:
+                continue
+            e = _normalize_event(data[0])
+            # Compute real-time status from eventStartTime + endDate
+            end_str = e.get("endDate", "")
+            m0 = e["markets"][0] if e.get("markets") else {}
+            start_str = m0.get("eventStartTime", e.get("startDate", ""))
+            if end_str:
+                end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+                start_dt = (
+                    datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+                    if start_str
+                    else end_dt
+                )
+                if end_dt <= now_utc:
+                    e["_status"] = "ended"
+                elif start_dt <= now_utc:
+                    e["_status"] = "live"
+                else:
+                    e["_status"] = "upcoming"
+            else:
+                e["_status"] = "unknown"
+            events.append(e)
+
+        groups[key] = events
+
+    await cache_set(cache_key, json.dumps(groups), 20)
+    return groups
 
     await cache_set(cache_key, json.dumps(groups), 30)
     return groups
