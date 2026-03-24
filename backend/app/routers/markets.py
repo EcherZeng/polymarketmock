@@ -103,3 +103,20 @@ async def btc_markets():
         return await proxy.discover_btc_markets()
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Polymarket API error: {e}")
+
+
+@router.get("/prices/history")
+async def get_prices_history(
+    token_id: str = Query(..., description="Token ID (CLOB asset)"),
+    interval: str = Query("1m", description="Interval: 1m, 5m, 1h, 1d"),
+    fidelity: int = Query(60, ge=1, le=1440, description="Number of data points"),
+):
+    """获取 CLOB token 的历史价格（OHLC-style）。"""
+    try:
+        return await proxy.get_prices_history(
+            token_id=token_id,
+            interval=interval,
+            fidelity=fidelity,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"CLOB API error: {e}")

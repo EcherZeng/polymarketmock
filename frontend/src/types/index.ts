@@ -147,3 +147,9 @@ export interface TradeHistoryResponse {
   offset: number
   limit: number
 }
+
+export interface PriceHistoryPoint {
+  t: number
+  p: number
+  [key: string]: unknown
+}

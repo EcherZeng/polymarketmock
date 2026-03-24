@@ -9,6 +9,7 @@ import type {
   OrderRequest,
   OrderResult,
   Position,
+  PriceHistoryPoint,
   TradeHistoryResponse,
 } from "@/types"
 
@@ -67,6 +68,17 @@ export async function fetchBtcMarkets(): Promise<Record<string, MarketEvent[]>> 
   return data
 }
 
+export async function fetchPricesHistory(
+  tokenId: string,
+  interval = "1m",
+  fidelity = 60,
+): Promise<PriceHistoryPoint[]> {
+  const { data } = await api.get("/prices/history", {
+    params: { token_id: tokenId, interval, fidelity },
+  })
+  return data
+}
+
 // ── Trading ─────────────────────────────────────────────────────────────────
 
 export async function placeOrder(req: OrderRequest): Promise<OrderResult> {
@@ -97,8 +109,11 @@ export async function cancelOrder(orderId: string): Promise<OrderResult> {
 export async function fetchTradeHistory(
   offset = 0,
   limit = 50,
+  tokenId?: string,
 ): Promise<TradeHistoryResponse> {
-  const { data } = await api.get("/trading/history", { params: { offset, limit } })
+  const params: Record<string, unknown> = { offset, limit }
+  if (tokenId) params.token_id = tokenId
+  const { data } = await api.get("/trading/history", { params })
   return data
 }
 

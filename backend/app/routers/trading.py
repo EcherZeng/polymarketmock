@@ -64,10 +64,11 @@ async def trade_history(
     end: float = Query(float("inf"), description="End timestamp"),
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
+    token_id: str | None = Query(None, description="Filter by token ID"),
 ):
     """Get trade execution history."""
-    trades = await redis_store.get_trades(start=start, end=end, offset=offset, limit=limit)
-    total = await redis_store.get_trades_count(start=start, end=end)
+    trades = await redis_store.get_trades(start=start, end=end, offset=offset, limit=limit, token_id=token_id)
+    total = await redis_store.get_trades_count(start=start, end=end, token_id=token_id)
     return {"trades": trades, "total": total, "offset": offset, "limit": limit}
 
 

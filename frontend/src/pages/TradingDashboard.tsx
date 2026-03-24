@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import { useNavigate } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -43,6 +44,7 @@ function extractSlugOrId(input: string): { type: "slug" | "marketId"; value: str
 }
 
 export default function TradingDashboard() {
+  const navigate = useNavigate()
   const [marketIdInput, setMarketIdInput] = useState("")
   const [activeMarketId, setActiveMarketId] = useState("")
   const [activeTokenId, setActiveTokenId] = useState("")
@@ -164,7 +166,11 @@ export default function TradingDashboard() {
             {searchResults.map((evt) => (
               <div key={evt.id} className="rounded px-2 py-1 text-sm hover:bg-accent cursor-pointer"
                 onClick={() => {
-                  if (evt.markets?.[0]) handleSelectEventMarket(evt.markets[0])
+                  if (evt.slug) {
+                    navigate(`/event/${evt.slug}`)
+                  } else if (evt.markets?.[0]) {
+                    handleSelectEventMarket(evt.markets[0])
+                  }
                 }}
               >
                 <span className="font-medium">{evt.title}</span>
@@ -185,7 +191,7 @@ export default function TradingDashboard() {
 
       {/* BTC Quick Access Panel */}
       {!activeMarketId && btcMarkets && (
-        <BtcMarketPanel btcMarkets={btcMarkets} onSelect={handleSelectEventMarket} />
+        <BtcMarketPanel btcMarkets={btcMarkets} onSelect={handleSelectEventMarket} onNavigate={(slug) => navigate(`/event/${slug}`)} />
       )}
 
       {activeMarketId && activeTokenId && (
@@ -256,9 +262,10 @@ function fmtTime(iso: string | undefined): string {
 interface BtcMarketPanelProps {
   btcMarkets: Record<string, MarketEvent[]>
   onSelect: (m: Market) => void
+  onNavigate: (slug: string) => void
 }
 
-function BtcMarketPanel({ btcMarkets, onSelect }: BtcMarketPanelProps) {
+function BtcMarketPanel({ btcMarkets, onSelect, onNavigate }: BtcMarketPanelProps) {
   const availableTabs = Object.entries(btcMarkets).filter(([, events]) => events.length > 0)
   if (availableTabs.length === 0) return null
 
@@ -319,7 +326,13 @@ function BtcMarketPanel({ btcMarkets, onSelect }: BtcMarketPanelProps) {
                                 ? "opacity-60 hover:opacity-80 hover:bg-accent"
                                 : "hover:bg-accent"
                           }`}
-                          onClick={() => onSelect(m)}
+                          onClick={() => {
+                            if (evt.slug) {
+                              onNavigate(evt.slug)
+                            } else {
+                              onSelect(m)
+                            }
+                          }}
                         >
                           <div className="flex flex-col gap-0.5 min-w-0">
                             <div className="flex items-center gap-2">

@@ -160,6 +160,32 @@ async def get_orderbook_raw(token_id: str) -> dict:
     return resp.json()
 
 
+async def get_prices_history(
+    token_id: str,
+    interval: str = "1m",
+    fidelity: int = 60,
+) -> list[dict]:
+    """Fetch price history from CLOB API for a given token.
+
+    The CLOB /prices-history endpoint returns OHLC-style data.
+    """
+    cache_key = f"clob:price_history:{token_id}:{interval}:{fidelity}"
+    cached = await cache_get(cache_key)
+    if cached:
+        return json.loads(cached)
+
+    url = f"{settings.clob_api_url}/prices-history"
+    params = {"market": token_id, "interval": interval, "fidelity": fidelity}
+    resp = await _get_client().get(url, params=params)
+    resp.raise_for_status()
+    data = resp.json()
+    history = data.get("history", data) if isinstance(data, dict) else data
+    if not isinstance(history, list):
+        history = []
+    await cache_set(cache_key, json.dumps(history), settings.cache_ttl_orderbook)
+    return history
+
+
 # ── Search / Resolve ─────────────────────────────────────────────────────────
 
 async def search_events(
@@ -257,7 +283,4 @@ async def discover_btc_markets() -> dict[str, list[dict]]:
         groups[key] = events
 
     await cache_set(cache_key, json.dumps(groups), 20)
-    return groups
-
-    await cache_set(cache_key, json.dumps(groups), 30)
     return groups

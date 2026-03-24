@@ -172,13 +172,21 @@ async def add_trade(timestamp_score: float, trade_json: str) -> None:
     await get_redis().zadd(TRADES_KEY, {trade_json: timestamp_score})
 
 
-async def get_trades(start: float = 0, end: float = float("inf"), offset: int = 0, limit: int = 50) -> list[dict]:
-    raw = await get_redis().zrangebyscore(TRADES_KEY, min=start, max=end, start=offset, num=limit)
-    return [json.loads(r) for r in raw]
+async def get_trades(start: float = 0, end: float = float("inf"), offset: int = 0, limit: int = 50, token_id: str | None = None) -> list[dict]:
+    if token_id is None:
+        raw = await get_redis().zrangebyscore(TRADES_KEY, min=start, max=end, start=offset, num=limit)
+        return [json.loads(r) for r in raw]
+    # Client-side filter: fetch all in range, then filter + paginate
+    raw = await get_redis().zrangebyscore(TRADES_KEY, min=start, max=end)
+    filtered = [json.loads(r) for r in raw if json.loads(r).get("token_id") == token_id]
+    return filtered[offset:offset + limit]
 
 
-async def get_trades_count(start: float = 0, end: float = float("inf")) -> int:
-    return await get_redis().zcount(TRADES_KEY, min=start, max=end)
+async def get_trades_count(start: float = 0, end: float = float("inf"), token_id: str | None = None) -> int:
+    if token_id is None:
+        return await get_redis().zcount(TRADES_KEY, min=start, max=end)
+    raw = await get_redis().zrangebyscore(TRADES_KEY, min=start, max=end)
+    return sum(1 for r in raw if json.loads(r).get("token_id") == token_id)
 
 
 # ── Watched markets ─────────────────────────────────────────────────────────
