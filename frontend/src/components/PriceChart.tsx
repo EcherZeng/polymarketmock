@@ -7,7 +7,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { createChart, type IChartApi, type ISeriesApi, type LineData, type Time } from "lightweight-charts"
+import { createChart, LineSeries, type IChartApi, type ISeriesApi, type LineData, type Time } from "lightweight-charts"
 import { fetchMidpoint } from "@/api/client"
 
 interface PriceChartProps {
@@ -47,7 +47,7 @@ export default function PriceChart({ tokenId }: PriceChartProps) {
       },
     })
 
-    const series = chart.addLineSeries({
+    const series = chart.addSeries(LineSeries, {
       color: "hsl(var(--primary))",
       lineWidth: 2,
       priceFormat: { type: "custom", formatter: (p: number) => `${(p * 100).toFixed(1)}¢` },
