@@ -48,3 +48,35 @@ class BacktestMarketInfo(BaseModel):
     earliest_data: str
     latest_data: str
     data_points: int
+
+
+# ── Replay models ────────────────────────────────────────────────────────────
+
+
+class ReplaySnapshot(BaseModel):
+    timestamp: str
+    mid_price: float = 0
+    best_bid: float = 0
+    best_ask: float = 0
+    spread: float = 0
+    bid_prices: list[str] = []
+    bid_sizes: list[str] = []
+    ask_prices: list[str] = []
+    ask_sizes: list[str] = []
+
+
+class ReplayTimeline(BaseModel):
+    slug: str
+    start_time: str
+    end_time: str
+    total_snapshots: int
+    timestamps: list[str] = []
+
+
+class ReplaySessionInfo(BaseModel):
+    session_id: str
+    slug: str
+    initial_balance: float
+    balance: float
+    positions: dict = {}
+    trades: list[dict] = []

@@ -77,6 +77,12 @@ class EstimateResult(BaseModel):
     estimated_slippage_pct: float
     estimated_total_cost: float
     orderbook_depth_available: float
+    # Phase 2: Polymarket-aligned fields
+    probability_price: float = 0
+    potential_profit_per_share: float = 0
+    potential_loss_per_share: float = 0
+    complementary_price: float = 0
+    complementary_token_id: str = ""
 
 
 class Position(BaseModel):

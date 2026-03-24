@@ -1,10 +1,11 @@
-import { useState, useEffect } from "react"
-import { useParams, Link } from "react-router-dom"
+import { useState, useEffect, useCallback } from "react"
+import { useParams, Link, useNavigate } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Separator } from "@/components/ui/separator"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import PolymarketEmbed from "@/components/PolymarketEmbed"
 import EventMarketCard from "@/components/EventMarketCard"
 import MarketInfo from "@/components/MarketInfo"
@@ -13,8 +14,8 @@ import PriceChart from "@/components/PriceChart"
 import TradingPanel from "@/components/TradingPanel"
 import PositionTable from "@/components/PositionTable"
 import ActivityFeed from "@/components/ActivityFeed"
-import { resolveSlug } from "@/api/client"
-import type { Market, MarketEvent } from "@/types"
+import { resolveSlug, fetchEventStatus, fetchNextEvent } from "@/api/client"
+import type { Market, MarketEvent, EventStatusResponse, NextEventResponse } from "@/types"
 
 function parseTokenIds(raw: unknown): string[] {
   if (Array.isArray(raw)) return raw.filter(Boolean)
@@ -38,6 +39,7 @@ function parseOutcomes(raw: unknown): string[] {
 
 export default function EventDetailPage() {
   const { slug } = useParams<{ slug: string }>()
+  const navigate = useNavigate()
   const [selectedMarket, setSelectedMarket] = useState<Market | null>(null)
   const [selectedTokenId, setSelectedTokenId] = useState("")
   const [selectedOutcomeIdx, setSelectedOutcomeIdx] = useState(0)
@@ -47,6 +49,23 @@ export default function EventDetailPage() {
     queryFn: () => resolveSlug(slug!),
     enabled: !!slug,
     staleTime: 30_000,
+  })
+
+  // ── Event lifecycle polling ───────────────────────────────
+  const { data: eventStatus } = useQuery<EventStatusResponse>({
+    queryKey: ["eventStatus", slug],
+    queryFn: () => fetchEventStatus(slug!),
+    enabled: !!slug,
+    refetchInterval: 5_000,
+  })
+
+  const isEnded = eventStatus?.status === "ended" || eventStatus?.status === "settled"
+
+  const { data: nextEvent } = useQuery<NextEventResponse>({
+    queryKey: ["nextEvent", slug],
+    queryFn: () => fetchNextEvent(slug!),
+    enabled: !!slug && isEnded,
+    staleTime: 10_000,
   })
 
   // Auto-select first market when event loads
@@ -61,6 +80,13 @@ export default function EventDetailPage() {
       }
     }
   }, [event?.id])
+
+  // Reset selection when slug changes (navigation to next event)
+  useEffect(() => {
+    setSelectedMarket(null)
+    setSelectedTokenId("")
+    setSelectedOutcomeIdx(0)
+  }, [slug])
 
   function handleSelectMarket(m: Market) {
     setSelectedMarket(m)
@@ -79,6 +105,19 @@ export default function EventDetailPage() {
       setSelectedOutcomeIdx(idx)
     }
   }
+
+  const handleSwitchToken = useCallback(
+    (tokenId: string) => {
+      if (!selectedMarket) return
+      const tokens = parseTokenIds(selectedMarket.clobTokenIds)
+      const idx = tokens.indexOf(tokenId)
+      if (idx >= 0) {
+        setSelectedTokenId(tokenId)
+        setSelectedOutcomeIdx(idx)
+      }
+    },
+    [selectedMarket],
+  )
 
   if (isLoading) {
     return (
@@ -116,6 +155,36 @@ export default function EventDetailPage() {
 
   return (
     <div className="flex flex-col gap-4">
+      {/* ── Ended event banner ───────────────────────────────── */}
+      {isEnded && (
+        <Alert className="border-rose-500/50 bg-rose-500/5">
+          <AlertDescription className="flex items-center justify-between">
+            <span className="text-sm font-medium">
+              🏁 本场已结束
+              {eventStatus?.ended_at && (
+                <span className="ml-2 text-muted-foreground text-xs">
+                  {new Date(eventStatus.ended_at).toLocaleString("zh-CN")}
+                </span>
+              )}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" asChild>
+                <Link to={`/replay/${slug}`}>回放此场次</Link>
+              </Button>
+              {nextEvent?.slug && (
+                <Button
+                  size="sm"
+                  className="animate-pulse bg-emerald-600 hover:bg-emerald-700"
+                  onClick={() => navigate(`/event/${nextEvent.slug}`)}
+                >
+                  跳转到最新场次 →
+                </Button>
+              )}
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* ── Event Header ─────────────────────────────────────── */}
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
@@ -126,11 +195,24 @@ export default function EventDetailPage() {
         <div className="flex items-start justify-between gap-2">
           <h1 className="text-xl font-semibold leading-tight">{event.title}</h1>
           <div className="flex shrink-0 gap-1">
-            {event.active && !event.closed ? (
+            {isEnded ? (
+              <Badge variant="secondary">已结束</Badge>
+            ) : eventStatus?.status === "live" ? (
+              <Badge variant="default">LIVE</Badge>
+            ) : eventStatus?.status === "upcoming" ? (
+              <Badge variant="outline">即将开始</Badge>
+            ) : event.active && !event.closed ? (
               <Badge variant="default">Active</Badge>
             ) : (
               <Badge variant="secondary">Closed</Badge>
             )}
+            {eventStatus?.seconds_remaining != null &&
+              eventStatus.seconds_remaining > 0 && (
+                <Badge variant="outline" className="tabular-nums">
+                  {Math.floor(eventStatus.seconds_remaining / 60)}:
+                  {String(Math.floor(eventStatus.seconds_remaining % 60)).padStart(2, "0")}
+                </Badge>
+              )}
           </div>
         </div>
         {event.description && (
@@ -196,15 +278,29 @@ export default function EventDetailPage() {
             </div>
           )}
 
-          {/* Activity Feed — simulated trades */}
+          {/* Activity Feed */}
           {selectedTokenId && (
-            <ActivityFeed tokenId={selectedTokenId} />
+            <ActivityFeed tokenId={selectedTokenId} enabled={!isEnded} />
           )}
         </div>
 
         {/* Right column: trading panel + positions (sticky) */}
         <div className="flex flex-col gap-4 lg:col-span-4 lg:sticky lg:top-4 lg:self-start">
-          {selectedTokenId && <TradingPanel tokenId={selectedTokenId} />}
+          {selectedTokenId && !isEnded && (
+            <TradingPanel
+              tokenId={selectedTokenId}
+              outcomes={outcomes}
+              tokenIds={tokens}
+              onSwitchToken={handleSwitchToken}
+            />
+          )}
+          {selectedTokenId && isEnded && (
+            <Alert>
+              <AlertDescription className="text-center text-sm">
+                本场已结束，无法交易
+              </AlertDescription>
+            </Alert>
+          )}
           <PositionTable />
         </div>
       </div>

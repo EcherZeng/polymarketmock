@@ -1,4 +1,8 @@
-"""Background data collector — periodically snapshots real market data to Parquet."""
+"""Background data collector — periodically snapshots real market data to Parquet.
+
+Supports adaptive polling: LIVE event tokens are polled at higher frequency
+and trade activity is inferred from orderbook diffs.
+"""
 
 from __future__ import annotations
 
@@ -9,33 +13,65 @@ import logging
 from app.config import settings
 from app.services.matching_engine import check_and_fill_limit_orders
 from app.services.polymarket_proxy import get_midpoint, get_orderbook_raw
+from app.services.trade_feed import detect_trades
 from app.storage.duckdb_store import write_orderbook_snapshot, write_price_snapshot
-from app.storage.redis_store import get_watched_markets
+from app.storage import redis_store
 
 logger = logging.getLogger(__name__)
 
+# In-memory prev-snapshots for fast diff (avoids extra Redis round-trip per tick)
+_prev_books: dict[str, dict] = {}
+
+
+async def _collect_and_detect(token_id: str, market_id: str) -> None:
+    """Fetch orderbook, detect trades via diff, and write Parquet snapshot."""
+    try:
+        book = await get_orderbook_raw(token_id)
+    except Exception as e:
+        logger.warning("Failed to fetch orderbook for %s: %s", token_id, e)
+        return
+
+    # Detect trades from diff
+    prev = _prev_books.get(token_id)
+    if prev:
+        inferred = detect_trades(token_id, prev, book)
+        for t in inferred:
+            try:
+                await redis_store.add_realtime_trade(
+                    token_id, t["ts"], json.dumps(t),
+                )
+                await redis_store.trim_realtime_trades(
+                    token_id, settings.realtime_trades_max,
+                )
+            except Exception as e:
+                logger.warning("Failed to store realtime trade: %s", e)
+
+    _prev_books[token_id] = book
+
+    # Write orderbook snapshot to Parquet
+    bids = book.get("bids", [])
+    asks = book.get("asks", [])
+    try:
+        write_orderbook_snapshot(
+            market_id=market_id or token_id,
+            token_id=token_id,
+            bid_prices=json.dumps([b["price"] for b in bids]),
+            bid_sizes=json.dumps([b["size"] for b in bids]),
+            ask_prices=json.dumps([a["price"] for a in asks]),
+            ask_sizes=json.dumps([a["size"] for a in asks]),
+        )
+    except Exception as e:
+        logger.warning("Failed to write orderbook snapshot for %s: %s", token_id, e)
+
 
 async def _collect_orderbooks() -> None:
-    watched = await get_watched_markets()
+    watched = await redis_store.get_watched_markets()
     for token_id, market_id in watched.items():
-        try:
-            book = await get_orderbook_raw(token_id)
-            bids = book.get("bids", [])
-            asks = book.get("asks", [])
-            write_orderbook_snapshot(
-                market_id=market_id or token_id,
-                token_id=token_id,
-                bid_prices=json.dumps([b["price"] for b in bids]),
-                bid_sizes=json.dumps([b["size"] for b in bids]),
-                ask_prices=json.dumps([a["price"] for a in asks]),
-                ask_sizes=json.dumps([a["size"] for a in asks]),
-            )
-        except Exception as e:
-            logger.warning(f"Failed to collect orderbook for {token_id}: {e}")
+        await _collect_and_detect(token_id, market_id)
 
 
 async def _collect_prices() -> None:
-    watched = await get_watched_markets()
+    watched = await redis_store.get_watched_markets()
     for token_id, market_id in watched.items():
         try:
             book = await get_orderbook_raw(token_id)
@@ -55,32 +91,59 @@ async def _collect_prices() -> None:
                 spread=spread,
             )
         except Exception as e:
-            logger.warning(f"Failed to collect price for {token_id}: {e}")
+            logger.warning("Failed to collect price for %s: %s", token_id, e)
+
+
+async def _live_tick() -> None:
+    """High-frequency tick for LIVE tokens — orderbook diff + trade detection."""
+    watched = await redis_store.get_watched_markets()
+    for token_id, market_id in watched.items():
+        await _collect_and_detect(token_id, market_id)
+
+
+async def _maybe_archive_ended() -> None:
+    """Check if any watched tokens belong to ended events and trigger archival."""
+    try:
+        from app.services.event_lifecycle import auto_archive_if_ended
+        await auto_archive_if_ended()
+    except Exception as e:
+        logger.warning("Auto-archive check failed: %s", e)
 
 
 async def _collector_loop() -> None:
     ob_counter = 0
     price_counter = 0
+    live_counter = 0
+    archive_counter = 0
 
     while True:
         await asyncio.sleep(1)
         ob_counter += 1
         price_counter += 1
+        live_counter += 1
+        archive_counter += 1
 
         # Check limit orders every 5s
         if ob_counter % settings.limit_order_check_interval == 0:
             try:
                 await check_and_fill_limit_orders()
             except Exception as e:
-                logger.warning(f"Limit order check failed: {e}")
+                logger.warning("Limit order check failed: %s", e)
 
-        # Orderbook snapshots
+        # High-frequency trade detection for watched tokens
+        if live_counter >= settings.collector_live_interval:
+            live_counter = 0
+            try:
+                await _live_tick()
+            except Exception as e:
+                logger.warning("Live tick failed: %s", e)
+
+        # Orderbook snapshots (standard interval, also writes Parquet)
         if ob_counter >= settings.collector_orderbook_interval:
             ob_counter = 0
-            try:
-                await _collect_orderbooks()
-            except Exception as e:
-                logger.warning(f"Orderbook collection failed: {e}")
+            # Parquet writes are already done in _live_tick via _collect_and_detect
+            # This is a catch-all for the standard path
+            pass
 
         # Price snapshots
         if price_counter >= settings.collector_price_interval:
@@ -88,7 +151,15 @@ async def _collector_loop() -> None:
             try:
                 await _collect_prices()
             except Exception as e:
-                logger.warning(f"Price collection failed: {e}")
+                logger.warning("Price collection failed: %s", e)
+
+        # Check for ended events every 30s
+        if archive_counter >= 30:
+            archive_counter = 0
+            try:
+                await _maybe_archive_ended()
+            except Exception as e:
+                logger.warning("Archive check failed: %s", e)
 
 
 async def start_collector() -> asyncio.Task:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 
 from app.services import polymarket_proxy as proxy
+from app.storage import redis_store
 
 router = APIRouter()
 
@@ -120,3 +121,61 @@ async def get_prices_history(
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"CLOB API error: {e}")
+
+
+# ── Realtime trade feed ──────────────────────────────────────────────────────
+
+@router.get("/trades/realtime")
+async def get_realtime_trades(
+    token_id: str = Query(...),
+    limit: int = Query(30, ge=1, le=200),
+    since: float = Query(0, ge=0),
+):
+    """获取通过 orderbook 变化推断的真实市场成交流水。"""
+    trades = await redis_store.get_realtime_trades(token_id, since=since, limit=limit)
+    return {"trades": trades, "count": len(trades)}
+
+
+# ── Event status & next event ────────────────────────────────────────────────
+
+@router.get("/event/status/{slug:path}")
+async def get_event_status(slug: str):
+    """获取事件当前状态（upcoming / live / ended）。"""
+    from app.services.event_lifecycle import check_event_status
+    try:
+        return await check_event_status(slug)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Status check error: {e}")
+
+
+@router.get("/event/next/{slug:path}")
+async def get_next_event(slug: str):
+    """获取下一个 LIVE 或即将开始的同类型事件。"""
+    from app.services.event_lifecycle import get_next_live_event
+    try:
+        result = await get_next_live_event(slug)
+        if not result:
+            raise HTTPException(status_code=404, detail="No upcoming event found")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Next event error: {e}")
+
+
+# ── Archives ──────────────────────────────────────────────────────────────────
+
+@router.get("/archives")
+async def list_archives():
+    """列出所有归档的历史场次。"""
+    from app.services.event_lifecycle import list_archived_events
+    return await list_archived_events()
+
+
+@router.get("/archives/{slug:path}")
+async def get_archive(slug: str):
+    """获取归档场次详情。"""
+    meta = await redis_store.get_archive_meta(slug)
+    if not meta:
+        raise HTTPException(status_code=404, detail=f"Archive not found: {slug}")
+    return meta

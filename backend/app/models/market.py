@@ -82,3 +82,23 @@ class EventSchema(BaseModel):
     neg_risk: bool = Field(False, alias="negRisk")
 
     model_config = {"populate_by_name": True}
+
+
+# ── Realtime trade (inferred from orderbook diffs) ──────────────────────────
+
+
+class RealtimeTrade(BaseModel):
+    timestamp: str
+    token_id: str
+    side: str = ""  # BUY / SELL / UNKNOWN
+    price: float = 0
+    size: float = 0
+    inferred: bool = True
+
+
+class EventStatusResponse(BaseModel):
+    slug: str
+    status: str  # upcoming / live / ended / settled
+    ended_at: str | None = None
+    seconds_remaining: float | None = None
+    next_slug: str | None = None

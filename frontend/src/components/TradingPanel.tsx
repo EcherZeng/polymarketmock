@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -11,21 +11,48 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
-import { estimateOrder, placeOrder } from "@/api/client"
+import { estimateOrder, fetchMidpoint, placeOrder } from "@/api/client"
 import type { EstimateResult, OrderSide, OrderType } from "@/types"
 
 interface TradingPanelProps {
   tokenId: string
+  outcomes?: string[]
+  tokenIds?: string[]
+  onSwitchToken?: (tokenId: string) => void
 }
 
-export default function TradingPanel({ tokenId }: TradingPanelProps) {
+export default function TradingPanel({
+  tokenId,
+  outcomes = [],
+  tokenIds = [],
+  onSwitchToken,
+}: TradingPanelProps) {
   const queryClient = useQueryClient()
   const [side, setSide] = useState<OrderSide>("BUY")
   const [orderType, setOrderType] = useState<OrderType>("MARKET")
   const [amount, setAmount] = useState("")
   const [price, setPrice] = useState("")
   const [estimate, setEstimate] = useState<EstimateResult | null>(null)
+
+  // Real-time midpoint for probability display
+  const { data: midData } = useQuery({
+    queryKey: ["midpoint", tokenId],
+    queryFn: () => fetchMidpoint(tokenId),
+    enabled: !!tokenId,
+    refetchInterval: 3_000,
+  })
+
+  const midPrice = midData?.mid ?? 0
+  const compPrice = midPrice > 0 ? 1 - midPrice : 0
+
+  // Determine current outcome index
+  const currentIdx = tokenIds.indexOf(tokenId)
+  const currentOutcome = currentIdx >= 0 && currentIdx < outcomes.length ? outcomes[currentIdx] : "Yes"
+  const compIdx = currentIdx === 0 ? 1 : 0
+  const compOutcome = compIdx < outcomes.length ? outcomes[compIdx] : "No"
+  const compTokenId = compIdx < tokenIds.length ? tokenIds[compIdx] : ""
 
   const estimateMutation = useMutation({
     mutationFn: () =>
@@ -52,28 +79,65 @@ export default function TradingPanel({ tokenId }: TradingPanelProps) {
       queryClient.invalidateQueries({ queryKey: ["account"] })
       queryClient.invalidateQueries({ queryKey: ["positions"] })
       queryClient.invalidateQueries({ queryKey: ["orders"] })
+      queryClient.invalidateQueries({ queryKey: ["activityFeed"] })
       setAmount("")
       setPrice("")
       setEstimate(null)
     },
   })
 
-  const canEstimate = parseFloat(amount) > 0 && (orderType === "MARKET" || parseFloat(price) > 0)
+  const canEstimate =
+    parseFloat(amount) > 0 && (orderType === "MARKET" || parseFloat(price) > 0)
   const canOrder = canEstimate && !orderMutation.isPending
+
+  const shares = parseFloat(amount) || 0
 
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm">Trade</CardTitle>
+        <CardTitle className="text-sm">交易</CardTitle>
       </CardHeader>
       <CardContent>
+        {/* ── Probability overview ── */}
+        {midPrice > 0 && outcomes.length >= 2 && (
+          <>
+            <div className="mb-3 grid grid-cols-2 gap-2 text-center">
+              <div
+                className={`rounded-md px-2 py-1.5 ${
+                  currentIdx === 0
+                    ? "bg-emerald-500/10 ring-1 ring-emerald-500/30"
+                    : "bg-muted"
+                }`}
+              >
+                <div className="text-xs text-muted-foreground">{outcomes[0]}</div>
+                <div className="text-lg font-bold tabular-nums">
+                  {(midPrice * 100).toFixed(1)}¢
+                </div>
+              </div>
+              <div
+                className={`rounded-md px-2 py-1.5 ${
+                  currentIdx === 1
+                    ? "bg-rose-500/10 ring-1 ring-rose-500/30"
+                    : "bg-muted"
+                }`}
+              >
+                <div className="text-xs text-muted-foreground">{outcomes[1]}</div>
+                <div className="text-lg font-bold tabular-nums">
+                  {(compPrice * 100).toFixed(1)}¢
+                </div>
+              </div>
+            </div>
+            <Separator className="mb-3" />
+          </>
+        )}
+
         <Tabs value={side} onValueChange={(v) => setSide(v as OrderSide)}>
           <TabsList className="w-full">
             <TabsTrigger value="BUY" className="flex-1">
-              Buy
+              买入
             </TabsTrigger>
             <TabsTrigger value="SELL" className="flex-1">
-              Sell
+              卖出
             </TabsTrigger>
           </TabsList>
 
@@ -86,18 +150,20 @@ export default function TradingPanel({ tokenId }: TradingPanelProps) {
                 className="w-full"
               >
                 <ToggleGroupItem value="MARKET" className="flex-1 text-xs">
-                  Market
+                  市价单
                 </ToggleGroupItem>
                 <ToggleGroupItem value="LIMIT" className="flex-1 text-xs">
-                  Limit
+                  限价单
                 </ToggleGroupItem>
               </ToggleGroup>
 
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs text-muted-foreground">Shares</label>
+                <label className="text-xs text-muted-foreground">
+                  份数（每份赢 = $1）
+                </label>
                 <Input
                   type="number"
-                  placeholder="0.00"
+                  placeholder="0"
                   min={0}
                   step={1}
                   value={amount}
@@ -106,12 +172,17 @@ export default function TradingPanel({ tokenId }: TradingPanelProps) {
                     setEstimate(null)
                   }}
                 />
+                {shares > 0 && midPrice > 0 && (
+                  <span className="text-xs text-muted-foreground">
+                    ≈ ${(shares * midPrice).toFixed(2)} 成本估算
+                  </span>
+                )}
               </div>
 
               {orderType === "LIMIT" && (
                 <div className="flex flex-col gap-1.5">
                   <label className="text-xs text-muted-foreground">
-                    Price (0–1)
+                    限价 (0–1)
                   </label>
                   <Input
                     type="number"
@@ -135,27 +206,61 @@ export default function TradingPanel({ tokenId }: TradingPanelProps) {
                 onClick={() => estimateMutation.mutate()}
               >
                 {estimateMutation.isPending && <Spinner data-icon="inline-start" />}
-                Estimate
+                估算
               </Button>
 
               {estimate && (
                 <Alert>
                   <AlertDescription className="text-xs">
-                    <div className="flex flex-col gap-1">
+                    <div className="flex flex-col gap-1.5">
                       <div className="flex justify-between">
-                        <span>Avg Price</span>
-                        <span>{(estimate.estimated_avg_price * 100).toFixed(2)}¢</span>
+                        <span>每份成本</span>
+                        <span className="font-mono">
+                          {(estimate.probability_price * 100).toFixed(2)}¢
+                        </span>
                       </div>
                       <div className="flex justify-between">
-                        <span>Total Cost</span>
-                        <span>${estimate.estimated_total_cost.toFixed(4)}</span>
+                        <span>总成本</span>
+                        <span className="font-mono">
+                          ${estimate.estimated_total_cost.toFixed(4)}
+                        </span>
                       </div>
+                      <Separator />
+                      <div className="flex justify-between text-emerald-600">
+                        <span>如果赢 (每份)</span>
+                        <span className="font-mono">
+                          +${estimate.potential_profit_per_share.toFixed(4)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-emerald-600">
+                        <span>如果赢 (总计)</span>
+                        <span className="font-mono">
+                          +$
+                          {(
+                            estimate.potential_profit_per_share *
+                            estimate.orderbook_depth_available
+                          ).toFixed(4)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-rose-600">
+                        <span>如果输 (每份)</span>
+                        <span className="font-mono">
+                          -${estimate.potential_loss_per_share.toFixed(4)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-rose-600">
+                        <span>如果输 (总计)</span>
+                        <span className="font-mono">
+                          -${estimate.estimated_total_cost.toFixed(4)}
+                        </span>
+                      </div>
+                      <Separator />
                       <div className="flex justify-between">
-                        <span>Slippage</span>
+                        <span>滑点</span>
                         <span>{estimate.estimated_slippage_pct.toFixed(3)}%</span>
                       </div>
                       <div className="flex justify-between">
-                        <span>Depth Available</span>
+                        <span>可用深度</span>
                         <span>{estimate.orderbook_depth_available.toFixed(2)}</span>
                       </div>
                     </div>
@@ -169,8 +274,8 @@ export default function TradingPanel({ tokenId }: TradingPanelProps) {
                 onClick={() => orderMutation.mutate()}
               >
                 {orderMutation.isPending && <Spinner data-icon="inline-start" />}
-                {side === "BUY" ? "Buy" : "Sell"}{" "}
-                {orderType === "LIMIT" ? "(Limit)" : "(Market)"}
+                {side === "BUY" ? "买入" : "卖出"} {currentOutcome}{" "}
+                {orderType === "LIMIT" ? "(限价)" : "(市价)"}
               </Button>
 
               {orderMutation.isError && (
@@ -184,9 +289,28 @@ export default function TradingPanel({ tokenId }: TradingPanelProps) {
               {orderMutation.isSuccess && (
                 <Alert>
                   <AlertDescription className="text-xs">
-                    Order placed successfully
+                    ✓ 订单已执行
                   </AlertDescription>
                 </Alert>
+              )}
+
+              {/* Complementary result suggestion */}
+              {compTokenId && compOutcome && onSwitchToken && (
+                <>
+                  <Separator />
+                  <button
+                    type="button"
+                    className="text-left text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    onClick={() => onSwitchToken(compTokenId)}
+                  >
+                    或者: 买入 <span className="font-medium">{compOutcome}</span>{" "}
+                    @ {(compPrice * 100).toFixed(1)}¢, 赢利{" "}
+                    <span className="text-emerald-600">
+                      +${(1 - compPrice).toFixed(2)}/份
+                    </span>{" "}
+                    →
+                  </button>
+                </>
               )}
             </div>
           </TabsContent>

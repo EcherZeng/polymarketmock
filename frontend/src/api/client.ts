@@ -1,15 +1,23 @@
 import axios from "axios"
 import type {
   AccountOverview,
+  ArchivedEvent,
   EstimateRequest,
   EstimateResult,
+  EventStatusResponse,
   Market,
   MarketEvent,
+  NextEventResponse,
   Orderbook,
   OrderRequest,
   OrderResult,
   Position,
   PriceHistoryPoint,
+  RealtimeTradesResponse,
+  ReplaySession,
+  ReplaySnapshot,
+  ReplayTimeline,
+  ReplayTradeResult,
   TradeHistoryResponse,
 } from "@/types"
 
@@ -163,6 +171,88 @@ export async function fetchBacktestData(
 ): Promise<unknown[]> {
   const { data } = await api.get(`/backtest/data/${marketId}`, {
     params: { start, end },
+  })
+  return data
+}
+
+// ── Realtime Trade Feed ─────────────────────────────────────────────────────
+
+export async function fetchRealtimeTrades(
+  tokenId: string,
+  limit = 30,
+  since = 0,
+): Promise<RealtimeTradesResponse> {
+  const { data } = await api.get("/trades/realtime", {
+    params: { token_id: tokenId, limit, since },
+  })
+  return data
+}
+
+// ── Event Lifecycle ─────────────────────────────────────────────────────────
+
+export async function fetchEventStatus(slug: string): Promise<EventStatusResponse> {
+  const { data } = await api.get(`/event/status/${slug}`)
+  return data
+}
+
+export async function fetchNextEvent(slug: string): Promise<NextEventResponse> {
+  const { data } = await api.get(`/event/next/${slug}`)
+  return data
+}
+
+// ── Archives ────────────────────────────────────────────────────────────────
+
+export async function fetchArchives(): Promise<ArchivedEvent[]> {
+  const { data } = await api.get("/archives")
+  return data
+}
+
+export async function fetchArchive(slug: string): Promise<ArchivedEvent> {
+  const { data } = await api.get(`/archives/${slug}`)
+  return data
+}
+
+// ── Replay ──────────────────────────────────────────────────────────────────
+
+export async function fetchReplayTimeline(slug: string): Promise<ReplayTimeline> {
+  const { data } = await api.get(`/backtest/replay/${slug}/timeline`)
+  return data
+}
+
+export async function fetchReplaySnapshot(
+  slug: string,
+  timestamp: string,
+): Promise<ReplaySnapshot> {
+  const { data } = await api.get(`/backtest/replay/${slug}/snapshot`, {
+    params: { t: timestamp },
+  })
+  return data
+}
+
+export async function createReplaySession(
+  slug: string,
+  initialBalance = 10000,
+): Promise<ReplaySession> {
+  const { data } = await api.post(`/backtest/replay/${slug}/session`, {
+    initial_balance: initialBalance,
+  })
+  return data
+}
+
+export async function executeReplayTrade(
+  slug: string,
+  sessionId: string,
+  timestamp: string,
+  tokenId: string,
+  side: string,
+  amount: number,
+): Promise<ReplayTradeResult> {
+  const { data } = await api.post(`/backtest/replay/${slug}/trade`, {
+    session_id: sessionId,
+    timestamp,
+    token_id: tokenId,
+    side,
+    amount,
   })
   return data
 }

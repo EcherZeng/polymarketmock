@@ -3,9 +3,17 @@
 from __future__ import annotations
 
 import json
+import uuid
 
 from app.models.backtest import BacktestRequest, BacktestResult, BacktestTradeResult
-from app.storage.duckdb_store import list_available_markets, query_orderbooks, query_prices
+from app.storage.duckdb_store import (
+    list_available_markets,
+    query_archive_orderbooks,
+    query_archive_prices,
+    query_orderbooks,
+    query_prices,
+)
+from app.storage import redis_store
 from app.utils.price_impact import calculate_slippage, calculate_vwap_from_levels
 
 
@@ -129,3 +137,153 @@ def _find_nearest_price(prices: list[dict], target_ts: str) -> dict | None:
 
 def get_backtest_markets() -> list[dict]:
     return list_available_markets()
+
+
+# ── Replay engine ────────────────────────────────────────────────────────────
+
+
+async def get_replay_timeline(slug: str) -> dict:
+    """Return the list of available timestamps for an archived event."""
+    prices = query_archive_prices(slug)
+    orderbooks = query_archive_orderbooks(slug)
+
+    all_ts: list[str] = []
+    seen: set[str] = set()
+    for row in prices:
+        ts = row.get("timestamp", "")
+        if ts and ts not in seen:
+            all_ts.append(ts)
+            seen.add(ts)
+    for row in orderbooks:
+        ts = row.get("timestamp", "")
+        if ts and ts not in seen:
+            all_ts.append(ts)
+            seen.add(ts)
+
+    all_ts.sort()
+
+    return {
+        "slug": slug,
+        "start_time": all_ts[0] if all_ts else "",
+        "end_time": all_ts[-1] if all_ts else "",
+        "total_snapshots": len(all_ts),
+        "timestamps": all_ts,
+    }
+
+
+async def get_replay_snapshot(slug: str, timestamp: str) -> dict:
+    """Return the full state at a given timestamp from archived data."""
+    prices = query_archive_prices(slug)
+    orderbooks = query_archive_orderbooks(slug)
+
+    # Find nearest price
+    price_row = _find_nearest_price(prices, timestamp) or {}
+    ob_row = _find_nearest_orderbook(
+        [(ob["timestamp"], ob) for ob in orderbooks], timestamp
+    ) or {}
+
+    return {
+        "timestamp": timestamp,
+        "mid_price": price_row.get("mid_price", 0),
+        "best_bid": price_row.get("best_bid", 0),
+        "best_ask": price_row.get("best_ask", 0),
+        "spread": price_row.get("spread", 0),
+        "bid_prices": json.loads(ob_row.get("bid_prices", "[]")) if isinstance(ob_row.get("bid_prices"), str) else ob_row.get("bid_prices", []),
+        "bid_sizes": json.loads(ob_row.get("bid_sizes", "[]")) if isinstance(ob_row.get("bid_sizes"), str) else ob_row.get("bid_sizes", []),
+        "ask_prices": json.loads(ob_row.get("ask_prices", "[]")) if isinstance(ob_row.get("ask_prices"), str) else ob_row.get("ask_prices", []),
+        "ask_sizes": json.loads(ob_row.get("ask_sizes", "[]")) if isinstance(ob_row.get("ask_sizes"), str) else ob_row.get("ask_sizes", []),
+    }
+
+
+async def create_replay_session(slug: str, initial_balance: float = 10000) -> dict:
+    """Create a new replay trading session (independent context)."""
+    session_id = str(uuid.uuid4())
+    session = {
+        "session_id": session_id,
+        "slug": slug,
+        "initial_balance": initial_balance,
+        "balance": initial_balance,
+        "positions": {},  # token_id → {shares, avg_cost, side}
+        "trades": [],
+    }
+    await redis_store.set_replay_session(session_id, json.dumps(session))
+    return session
+
+
+async def execute_replay_trade(
+    session_id: str,
+    slug: str,
+    timestamp: str,
+    token_id: str,
+    side: str,
+    amount: float,
+) -> dict:
+    """Execute a trade within a replay session using historical orderbook."""
+    session = await redis_store.get_replay_session(session_id)
+    if not session:
+        return {"error": "Session not found"}
+
+    snapshot = await get_replay_snapshot(slug, timestamp)
+
+    if side == "BUY":
+        levels = [
+            {"price": str(p), "size": str(s)}
+            for p, s in zip(snapshot.get("ask_prices", []), snapshot.get("ask_sizes", []))
+        ]
+    else:
+        levels = [
+            {"price": str(p), "size": str(s)}
+            for p, s in zip(snapshot.get("bid_prices", []), snapshot.get("bid_sizes", []))
+        ]
+
+    filled, avg_price, total_cost = calculate_vwap_from_levels(levels, amount)
+    if filled <= 0:
+        return {"error": "No depth available", "filled": 0}
+
+    mid = snapshot.get("mid_price", avg_price)
+    slippage = calculate_slippage(mid, avg_price, side) if avg_price > 0 else 0.0
+
+    balance = session["balance"]
+    positions = session["positions"]
+
+    if side == "BUY":
+        if balance < total_cost:
+            filled = balance / avg_price if avg_price > 0 else 0
+            total_cost = balance
+        balance -= total_cost
+        pos = positions.get(token_id, {"shares": 0, "avg_cost": 0, "side": side})
+        old_shares = pos["shares"]
+        old_avg = pos["avg_cost"]
+        new_shares = old_shares + filled
+        new_avg = (old_avg * old_shares + avg_price * filled) / new_shares if new_shares > 0 else 0
+        positions[token_id] = {"shares": round(new_shares, 6), "avg_cost": round(new_avg, 6), "side": side}
+    else:
+        pos = positions.get(token_id)
+        if not pos or pos["shares"] < filled:
+            filled = pos["shares"] if pos else 0
+            total_cost = filled * avg_price
+        balance += total_cost
+        if pos:
+            new_shares = pos["shares"] - filled
+            if new_shares <= 0.000001:
+                positions.pop(token_id, None)
+            else:
+                pos["shares"] = round(new_shares, 6)
+
+    trade = {
+        "timestamp": timestamp,
+        "token_id": token_id,
+        "side": side,
+        "amount": round(filled, 6),
+        "avg_price": round(avg_price, 6),
+        "total_cost": round(total_cost, 6),
+        "slippage_pct": round(slippage, 4),
+        "balance_after": round(balance, 6),
+    }
+
+    session["balance"] = round(balance, 6)
+    session["positions"] = positions
+    session["trades"].append(trade)
+    await redis_store.set_replay_session(session_id, json.dumps(session))
+
+    return trade

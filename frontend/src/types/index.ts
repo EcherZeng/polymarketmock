@@ -105,6 +105,11 @@ export interface EstimateResult {
   estimated_slippage_pct: number
   estimated_total_cost: number
   orderbook_depth_available: number
+  probability_price: number
+  potential_profit_per_share: number
+  potential_loss_per_share: number
+  complementary_price: number
+  complementary_token_id: string
 }
 
 export interface Position {
@@ -152,4 +157,91 @@ export interface PriceHistoryPoint {
   t: number
   p: number
   [key: string]: unknown
+}
+
+// ── Realtime trade (inferred from orderbook diffs) ──────────────────────────
+
+export interface RealtimeTrade {
+  timestamp: string
+  token_id: string
+  side: string
+  price: number
+  size: number
+  inferred: boolean
+}
+
+export interface RealtimeTradesResponse {
+  trades: RealtimeTrade[]
+  count: number
+}
+
+// ── Event status ────────────────────────────────────────────────────────────
+
+export interface EventStatusResponse {
+  slug: string
+  status: "upcoming" | "live" | "ended" | "settled" | "unknown"
+  ended_at: string | null
+  seconds_remaining: number | null
+}
+
+export interface NextEventResponse {
+  slug: string
+  event: MarketEvent
+  status: string
+}
+
+// ── Archives ────────────────────────────────────────────────────────────────
+
+export interface ArchivedEvent {
+  slug: string
+  title: string
+  market_id: string
+  start_time: string
+  end_time: string
+  token_ids: string[]
+  prices_count: number
+  orderbooks_count: number
+  archived_at: string
+}
+
+// ── Replay ──────────────────────────────────────────────────────────────────
+
+export interface ReplayTimeline {
+  slug: string
+  start_time: string
+  end_time: string
+  total_snapshots: number
+  timestamps: string[]
+}
+
+export interface ReplaySnapshot {
+  timestamp: string
+  mid_price: number
+  best_bid: number
+  best_ask: number
+  spread: number
+  bid_prices: string[]
+  bid_sizes: string[]
+  ask_prices: string[]
+  ask_sizes: string[]
+}
+
+export interface ReplaySession {
+  session_id: string
+  slug: string
+  initial_balance: number
+  balance: number
+  positions: Record<string, { shares: number; avg_cost: number; side: string }>
+  trades: ReplayTradeResult[]
+}
+
+export interface ReplayTradeResult {
+  timestamp: string
+  token_id: string
+  side: string
+  amount: number
+  avg_price: number
+  total_cost: number
+  slippage_pct: number
+  balance_after: number
 }

@@ -5,6 +5,7 @@ import EventListPage from "@/pages/EventListPage"
 import EventDetailPage from "@/pages/EventDetailPage"
 import TradingDashboard from "@/pages/TradingDashboard"
 import HistoryPage from "@/pages/HistoryPage"
+import ReplayPage from "@/pages/ReplayPage"
 
 const navItems = [
   { to: "/", label: "Events" },
@@ -45,6 +46,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<EventListPage />} />
             <Route path="/event/:slug" element={<EventDetailPage />} />
+            <Route path="/replay/:slug" element={<ReplayPage />} />
             <Route path="/trading" element={<TradingDashboard />} />
             <Route path="/history" element={<HistoryPage />} />
           </Routes>

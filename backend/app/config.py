@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     # Limit order check interval (seconds)
     limit_order_check_interval: int = 5
 
+    # Live event: faster orderbook polling (seconds)
+    collector_live_interval: int = 2
+
+    # Max realtime trades per token kept in Redis
+    realtime_trades_max: int = 500
+
     model_config = {"env_prefix": "PM_"}
 
 

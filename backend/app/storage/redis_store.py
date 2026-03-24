@@ -204,3 +204,111 @@ async def get_watched_markets() -> dict[str, str]:
 
 async def remove_watched_market(token_id: str) -> None:
     await get_redis().hdel(WATCHED_MARKETS_KEY, token_id)
+
+
+# ── Realtime trades (inferred from orderbook diffs) ─────────────────────────
+
+REALTIME_TRADES_PREFIX = "realtime:trades:"
+
+
+async def add_realtime_trade(token_id: str, timestamp_score: float, trade_json: str) -> None:
+    await get_redis().zadd(f"{REALTIME_TRADES_PREFIX}{token_id}", {trade_json: timestamp_score})
+
+
+async def get_realtime_trades(
+    token_id: str,
+    since: float = 0,
+    limit: int = 30,
+) -> list[dict]:
+    raw = await get_redis().zrangebyscore(
+        f"{REALTIME_TRADES_PREFIX}{token_id}",
+        min=since,
+        max=float("inf"),
+        start=0,
+        num=limit,
+    )
+    return [json.loads(r) for r in reversed(raw)]
+
+
+async def trim_realtime_trades(token_id: str, max_count: int) -> None:
+    key = f"{REALTIME_TRADES_PREFIX}{token_id}"
+    count = await get_redis().zcard(key)
+    if count > max_count:
+        await get_redis().zremrangebyrank(key, 0, count - max_count - 1)
+
+
+# ── Event status ─────────────────────────────────────────────────────────────
+
+EVENT_STATUS_PREFIX = "event:status:"
+
+
+async def set_event_status(event_slug: str, status: str) -> None:
+    await get_redis().set(f"{EVENT_STATUS_PREFIX}{event_slug}", status, ex=120)
+
+
+async def get_event_status(event_slug: str) -> str | None:
+    return await get_redis().get(f"{EVENT_STATUS_PREFIX}{event_slug}")
+
+
+# ── Token → Market mapping ──────────────────────────────────────────────────
+
+TOKEN_MARKET_PREFIX = "token:market:"
+
+
+async def set_token_market_info(token_id: str, market_json: str) -> None:
+    await get_redis().set(f"{TOKEN_MARKET_PREFIX}{token_id}", market_json, ex=300)
+
+
+async def get_token_market_info(token_id: str) -> dict | None:
+    val = await get_redis().get(f"{TOKEN_MARKET_PREFIX}{token_id}")
+    return json.loads(val) if val else None
+
+
+# ── Orderbook prev-snapshot (for trade feed diff) ───────────────────────────
+
+PREV_BOOK_PREFIX = "prev:book:"
+
+
+async def set_prev_orderbook(token_id: str, book_json: str) -> None:
+    await get_redis().set(f"{PREV_BOOK_PREFIX}{token_id}", book_json, ex=60)
+
+
+async def get_prev_orderbook(token_id: str) -> dict | None:
+    val = await get_redis().get(f"{PREV_BOOK_PREFIX}{token_id}")
+    return json.loads(val) if val else None
+
+
+# ── Archived events ──────────────────────────────────────────────────────────
+
+ARCHIVE_PREFIX = "archive:events:"
+
+
+async def set_archive_meta(slug: str, meta_json: str) -> None:
+    await get_redis().set(f"{ARCHIVE_PREFIX}{slug}", meta_json)
+
+
+async def get_archive_meta(slug: str) -> dict | None:
+    val = await get_redis().get(f"{ARCHIVE_PREFIX}{slug}")
+    return json.loads(val) if val else None
+
+
+async def list_archive_slugs() -> list[str]:
+    r = get_redis()
+    slugs: list[str] = []
+    async for key in r.scan_iter(match=f"{ARCHIVE_PREFIX}*"):
+        slugs.append(key.replace(ARCHIVE_PREFIX, ""))
+    return slugs
+
+
+# ── Replay sessions ─────────────────────────────────────────────────────────
+
+REPLAY_SESSION_PREFIX = "replay:session:"
+
+
+async def set_replay_session(session_id: str, session_json: str, ttl: int = 3600) -> None:
+    await get_redis().set(f"{REPLAY_SESSION_PREFIX}{session_id}", session_json, ex=ttl)
+
+
+async def get_replay_session(session_id: str) -> dict | None:
+    val = await get_redis().get(f"{REPLAY_SESSION_PREFIX}{session_id}")
+    return json.loads(val) if val else None

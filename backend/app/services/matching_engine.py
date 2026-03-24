@@ -32,6 +32,34 @@ async def estimate_order(req: EstimateResult | OrderRequest, token_id: str | Non
     filled, avg_price, total_cost = calculate_vwap_from_levels(levels, req.amount)
     slippage = calculate_slippage(mid, avg_price, req.side.value) if avg_price > 0 else 0.0
 
+    # Complementary token info
+    comp_token_id = ""
+    comp_price = 0.0
+    try:
+        from app.storage.redis_store import get_token_market_info
+        market_info = await get_token_market_info(tid)
+        if market_info:
+            token_ids = market_info.get("clobTokenIds", [])
+            if isinstance(token_ids, list) and len(token_ids) == 2:
+                comp_token_id = token_ids[1] if token_ids[0] == tid else token_ids[0]
+                if comp_token_id:
+                    try:
+                        comp_price = round(await get_midpoint(comp_token_id), 6)
+                    except Exception:
+                        comp_price = round(1.0 - mid, 6)
+        if not comp_token_id:
+            comp_price = round(1.0 - mid, 6)
+    except Exception:
+        comp_price = round(1.0 - mid, 6)
+
+    prob_price = avg_price if avg_price > 0 else mid
+    if req.side == OrderSide.BUY:
+        profit_per_share = round(1.0 - prob_price, 6)
+        loss_per_share = round(prob_price, 6)
+    else:
+        profit_per_share = round(prob_price, 6)
+        loss_per_share = round(1.0 - prob_price, 6)
+
     return EstimateResult(
         token_id=tid,
         side=req.side,
@@ -39,6 +67,11 @@ async def estimate_order(req: EstimateResult | OrderRequest, token_id: str | Non
         estimated_slippage_pct=round(slippage, 4),
         estimated_total_cost=round(total_cost, 6),
         orderbook_depth_available=round(filled, 6),
+        probability_price=round(prob_price, 6),
+        potential_profit_per_share=profit_per_share,
+        potential_loss_per_share=loss_per_share,
+        complementary_price=comp_price,
+        complementary_token_id=comp_token_id,
     )
 
 

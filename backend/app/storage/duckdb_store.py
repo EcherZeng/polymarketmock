@@ -210,3 +210,114 @@ def list_available_markets() -> list[dict]:
             con.close()
 
     return markets
+
+
+# ── Archive helpers ──────────────────────────────────────────────────────────
+
+def archive_event_data(
+    slug: str,
+    market_id: str,
+    data_type: str,
+    start_time: str | None = None,
+    end_time: str | None = None,
+) -> int:
+    """Copy price or orderbook data for a market into the archive directory.
+
+    Returns the number of rows archived.
+    """
+    src_dir = os.path.join(settings.data_dir, data_type, market_id)
+    if not os.path.isdir(src_dir):
+        return 0
+
+    archive_dir = os.path.join(settings.data_dir, "archives", slug)
+    _ensure_dir(archive_dir)
+    dest_path = os.path.join(archive_dir, f"{data_type}.parquet")
+
+    glob_path = os.path.join(src_dir, "*.parquet").replace("\\", "/")
+
+    con = duckdb.connect()
+    try:
+        sql = f"SELECT * FROM read_parquet('{glob_path}')"
+        conditions: list[str] = []
+        if start_time:
+            conditions.append(f"timestamp >= '{start_time}'")
+        if end_time:
+            conditions.append(f"timestamp <= '{end_time}'")
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+        sql += " ORDER BY timestamp"
+
+        result = con.execute(sql).fetchdf()
+        if result.empty:
+            return 0
+
+        import pyarrow as pa
+        table = pa.Table.from_pandas(result)
+        pq.write_table(table, dest_path)
+        return len(result)
+    except Exception:
+        return 0
+    finally:
+        con.close()
+
+
+def query_archive_prices(
+    slug: str,
+    start_time: str | None = None,
+    end_time: str | None = None,
+) -> list[dict]:
+    """Query archived price data for a completed event."""
+    file_path = os.path.join(settings.data_dir, "archives", slug, "prices.parquet")
+    if not os.path.exists(file_path):
+        return []
+    return _query_parquet_file(file_path, start_time, end_time)
+
+
+def query_archive_orderbooks(
+    slug: str,
+    start_time: str | None = None,
+    end_time: str | None = None,
+) -> list[dict]:
+    """Query archived orderbook data for a completed event."""
+    file_path = os.path.join(settings.data_dir, "archives", slug, "orderbooks.parquet")
+    if not os.path.exists(file_path):
+        return []
+    return _query_parquet_file(file_path, start_time, end_time)
+
+
+def _query_parquet_file(
+    file_path: str,
+    start_time: str | None = None,
+    end_time: str | None = None,
+) -> list[dict]:
+    """Generic helper to query a single parquet file with optional time range."""
+    fp = file_path.replace("\\", "/")
+    sql = f"SELECT * FROM read_parquet('{fp}')"
+    conditions: list[str] = []
+    if start_time:
+        conditions.append(f"timestamp >= '{start_time}'")
+    if end_time:
+        conditions.append(f"timestamp <= '{end_time}'")
+    if conditions:
+        sql += " WHERE " + " AND ".join(conditions)
+    sql += " ORDER BY timestamp"
+
+    con = duckdb.connect()
+    try:
+        result = con.execute(sql).fetchdf()
+        return result.to_dict(orient="records")
+    except Exception:
+        return []
+    finally:
+        con.close()
+
+
+def list_archives() -> list[str]:
+    """List all archived event slugs by scanning the archives directory."""
+    archive_dir = os.path.join(settings.data_dir, "archives")
+    if not os.path.isdir(archive_dir):
+        return []
+    return [
+        d for d in os.listdir(archive_dir)
+        if os.path.isdir(os.path.join(archive_dir, d))
+    ]
