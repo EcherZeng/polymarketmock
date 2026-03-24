@@ -1,9 +1,13 @@
-INFO:     Application startup complete.
-INFO:     127.0.0.1:55307 - "GET /api/btc/markets HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50193 - "GET /api/resolve/btc-updown-5m-1774339200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61956 - "GET /api/trading/history?offset=0&limit=20&token_id=60549891765758750026080035291538330731344218743672589531848768327613606614718 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53089 - "GET /api/account HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51683 - "GET /api/markets/1689689 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61954 - "GET /api/clob/trades?token_id=60549891765758750026080035291538330731344218743672589531848768327613606614718&limit=20 HTTP/1.1" 502 Bad Gateway
-INFO:     127.0.0.1:51687 - "GET /api/midpoint?token_id=60549891765758750026080035291538330731344218743672589531848768327613606614718 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51686 - "GET /api/orderbook?token_id=60549891765758750026080035291538330731344218743672589531848768327613606614718 HTTP/1.1" 200 OK
+Something went wrong
+Failed to parse color: oklch(0.556 0 0)
+Error: Failed to parse color: oklch(0.556 0 0)
+    at ColorParser._private__parseColor (http://localhost:5173/node_modules/.vite/deps/lightweight-charts.js?v=a02a04fc:701:10)
+    at ColorParser._internal_colorStringToGrayscale (http://localhost:5173/node_modules/.vite/deps/lightweight-charts.js?v=a02a04fc:676:31)
+    at AttributionLogoWidget._private__themeToUse (http://localhost:5173/node_modules/.vite/deps/lightweight-charts.js?v=a02a04fc:7379:73)
+    at AttributionLogoWidget._private__render (http://localhost:5173/node_modules/.vite/deps/lightweight-charts.js?v=a02a04fc:7394:32)
+    at new AttributionLogoWidget (http://localhost:5173/node_modules/.vite/deps/lightweight-charts.js?v=a02a04fc:7364:8)
+    at PaneWidget._internal_setState (http://localhost:5173/node_modules/.vite/deps/lightweight-charts.js?v=a02a04fc:7960:83)
+    at ChartWidget._private__adjustSizeImpl (http://localhost:5173/node_modules/.vite/deps/lightweight-charts.js?v=a02a04fc:9063:15)
+    at ChartWidget._private__syncGuiWithModel (http://localhost:5173/node_modules/.vite/deps/lightweight-charts.js?v=a02a04fc:9224:8)
+    at new ChartWidget (http://localhost:5173/node_modules/.vite/deps/lightweight-charts.js?v=a02a04fc:8833:8)
+    at new ChartApi (http://localhost:5173/node_modules/.vite/deps/lightweight-charts.js?v=a02a04fc:10632:32)

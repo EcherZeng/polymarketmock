@@ -29,26 +29,28 @@ export default function PriceChart({ tokenId }: PriceChartProps) {
   useEffect(() => {
     if (!containerRef.current) return
 
-    const chart = createChart(containerRef.current, {
-      width: containerRef.current.clientWidth,
+    const el = containerRef.current
+
+    const chart = createChart(el, {
+      width: el.clientWidth,
       height: 200,
       layout: {
-        background: { color: "transparent" },
-        textColor: "hsl(var(--muted-foreground))",
+        background: { color: "#ffffff" },
+        textColor: "#787878",
         fontSize: 10,
       },
       grid: {
-        vertLines: { color: "hsl(var(--border))" },
-        horzLines: { color: "hsl(var(--border))" },
+        vertLines: { color: "#e8e8e8" },
+        horzLines: { color: "#e8e8e8" },
       },
       timeScale: { timeVisible: true, secondsVisible: true },
       rightPriceScale: {
-        borderColor: "hsl(var(--border))",
+        borderColor: "#e8e8e8",
       },
     })
 
     const series = chart.addSeries(LineSeries, {
-      color: "hsl(var(--primary))",
+      color: "#2962ff",
       lineWidth: 2,
       priceFormat: { type: "custom", formatter: (p: number) => `${(p * 100).toFixed(1)}¢` },
     })

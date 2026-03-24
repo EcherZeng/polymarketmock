@@ -1,5 +1,6 @@
 import { Routes, Route, Link, useLocation } from "react-router-dom"
 import { cn } from "@/lib/utils"
+import ErrorBoundary from "@/components/ErrorBoundary"
 import EventListPage from "@/pages/EventListPage"
 import EventDetailPage from "@/pages/EventDetailPage"
 import TradingDashboard from "@/pages/TradingDashboard"
@@ -40,12 +41,14 @@ export default function App() {
         </div>
       </header>
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-4">
-        <Routes>
-          <Route path="/" element={<EventListPage />} />
-          <Route path="/event/:slug" element={<EventDetailPage />} />
-          <Route path="/trading" element={<TradingDashboard />} />
-          <Route path="/history" element={<HistoryPage />} />
-        </Routes>
+        <ErrorBoundary>
+          <Routes>
+            <Route path="/" element={<EventListPage />} />
+            <Route path="/event/:slug" element={<EventDetailPage />} />
+            <Route path="/trading" element={<TradingDashboard />} />
+            <Route path="/history" element={<HistoryPage />} />
+          </Routes>
+        </ErrorBoundary>
       </main>
     </div>
   )
