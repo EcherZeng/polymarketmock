@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useParams, Link, useNavigate } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { Badge } from "@/components/ui/badge"
@@ -60,6 +60,34 @@ export default function EventDetailPage() {
   })
 
   const isEnded = eventStatus?.status === "ended" || eventStatus?.status === "settled"
+
+  // ── Client-side countdown (synced from server every 5s) ────
+  const [countdown, setCountdown] = useState<number | null>(null)
+  const countdownRef = useRef<number | null>(null)
+
+  // Sync from server
+  useEffect(() => {
+    if (eventStatus?.seconds_remaining != null && eventStatus.seconds_remaining > 0) {
+      setCountdown(Math.floor(eventStatus.seconds_remaining))
+      countdownRef.current = Math.floor(eventStatus.seconds_remaining)
+    } else {
+      setCountdown(null)
+      countdownRef.current = null
+    }
+  }, [eventStatus?.seconds_remaining])
+
+  // Tick every second
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setCountdown((prev) => {
+        if (prev == null || prev <= 0) return null
+        const next = prev - 1
+        countdownRef.current = next
+        return next
+      })
+    }, 1_000)
+    return () => window.clearInterval(id)
+  }, [])
 
   const { data: nextEvent } = useQuery<NextEventResponse>({
     queryKey: ["nextEvent", slug],
@@ -206,13 +234,12 @@ export default function EventDetailPage() {
             ) : (
               <Badge variant="secondary">Closed</Badge>
             )}
-            {eventStatus?.seconds_remaining != null &&
-              eventStatus.seconds_remaining > 0 && (
-                <Badge variant="outline" className="tabular-nums">
-                  {Math.floor(eventStatus.seconds_remaining / 60)}:
-                  {String(Math.floor(eventStatus.seconds_remaining % 60)).padStart(2, "0")}
-                </Badge>
-              )}
+            {countdown != null && countdown > 0 && (
+              <Badge variant="outline" className="tabular-nums">
+                {Math.floor(countdown / 60)}:
+                {String(countdown % 60).padStart(2, "0")}
+              </Badge>
+            )}
           </div>
         </div>
         {event.description && (

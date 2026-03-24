@@ -23,7 +23,7 @@ export default function PriceChart({ tokenId }: PriceChartProps) {
   const { data: midData } = useQuery({
     queryKey: ["midpoint", tokenId],
     queryFn: () => fetchMidpoint(tokenId),
-    refetchInterval: 3_000,
+    refetchInterval: 1_000,
   })
 
   useEffect(() => {

@@ -1,13 +1,9 @@
-Something went wrong
-Failed to parse color: oklch(0.556 0 0)
-Error: Failed to parse color: oklch(0.556 0 0)
-    at ColorParser._private__parseColor (http://localhost:5173/node_modules/.vite/deps/lightweight-charts.js?v=a02a04fc:701:10)
-    at ColorParser._internal_colorStringToGrayscale (http://localhost:5173/node_modules/.vite/deps/lightweight-charts.js?v=a02a04fc:676:31)
-    at AttributionLogoWidget._private__themeToUse (http://localhost:5173/node_modules/.vite/deps/lightweight-charts.js?v=a02a04fc:7379:73)
-    at AttributionLogoWidget._private__render (http://localhost:5173/node_modules/.vite/deps/lightweight-charts.js?v=a02a04fc:7394:32)
-    at new AttributionLogoWidget (http://localhost:5173/node_modules/.vite/deps/lightweight-charts.js?v=a02a04fc:7364:8)
-    at PaneWidget._internal_setState (http://localhost:5173/node_modules/.vite/deps/lightweight-charts.js?v=a02a04fc:7960:83)
-    at ChartWidget._private__adjustSizeImpl (http://localhost:5173/node_modules/.vite/deps/lightweight-charts.js?v=a02a04fc:9063:15)
-    at ChartWidget._private__syncGuiWithModel (http://localhost:5173/node_modules/.vite/deps/lightweight-charts.js?v=a02a04fc:9224:8)
-    at new ChartWidget (http://localhost:5173/node_modules/.vite/deps/lightweight-charts.js?v=a02a04fc:8833:8)
-    at new ChartApi (http://localhost:5173/node_modules/.vite/deps/lightweight-charts.js?v=a02a04fc:10632:32)
+INFO:     127.0.0.1:50466 - "GET /api/event/next/btc-updown-5m-1774344600 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57093 - "GET /api/archives/btc-updown-5m-1774344600 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:57096 - "GET /api/backtest/replay/btc-updown-5m-1774344600/timeline HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59502 - "GET /api/archives/btc-updown-5m-1774344600 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59504 - "GET /api/backtest/replay/btc-updown-5m-1774344600/timeline HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60925 - "GET /api/backtest/replay/btc-updown-5m-1774344600/timeline HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60923 - "GET /api/archives/btc-updown-5m-1774344600 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:55250 - "GET /api/backtest/replay/btc-updown-5m-1774344600/timeline HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:55251 - "GET /api/archives/btc-updown-5m-1774344600 HTTP/1.1" 404 Not Found

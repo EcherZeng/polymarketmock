@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useRef, useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -38,12 +38,18 @@ function fmtTime(iso: string): string {
   }
 }
 
+function tradeKey(t: RealtimeTrade): string {
+  return `${t.timestamp}|${t.side}|${t.price}|${t.size}`
+}
+
 export default function ActivityFeed({ tokenId, enabled = true }: ActivityFeedProps) {
   const [tab, setTab] = useState("market")
+  const lastTsRef = useRef(0)
+  const seenKeysRef = useRef<Set<string>>(new Set())
 
   const { data: realtimeData, isLoading: realtimeLoading } = useQuery({
     queryKey: ["realtimeTrades", tokenId],
-    queryFn: () => fetchRealtimeTrades(tokenId, 30),
+    queryFn: () => fetchRealtimeTrades(tokenId, 30, lastTsRef.current),
     enabled: !!tokenId && enabled && tab === "market",
     refetchInterval: 1_000,
   })
@@ -55,7 +61,30 @@ export default function ActivityFeed({ tokenId, enabled = true }: ActivityFeedPr
     refetchInterval: 3_000,
   })
 
-  const realtimeTrades: RealtimeTrade[] = realtimeData?.trades ?? []
+  // Deduplicate realtime trades and track latest timestamp
+  const realtimeTrades: RealtimeTrade[] = useMemo(() => {
+    const raw = realtimeData?.trades ?? []
+    const deduped: RealtimeTrade[] = []
+    for (const t of raw) {
+      const k = tradeKey(t)
+      if (!seenKeysRef.current.has(k)) {
+        seenKeysRef.current.add(k)
+        deduped.push(t)
+      }
+    }
+    // Update since cursor from the freshest trade
+    if (raw.length > 0) {
+      const newest = raw[0]
+      const ts = new Date(newest.timestamp).getTime() / 1000
+      if (ts > lastTsRef.current) lastTsRef.current = ts
+    }
+    // Cap seen set size to prevent memory leak
+    if (seenKeysRef.current.size > 500) {
+      const arr = Array.from(seenKeysRef.current)
+      seenKeysRef.current = new Set(arr.slice(arr.length - 300))
+    }
+    return deduped.length > 0 ? deduped : raw
+  }, [realtimeData])
   const myTrades: TradeRecord[] = myData?.trades ?? []
 
   return (
@@ -96,9 +125,9 @@ export default function ActivityFeed({ tokenId, enabled = true }: ActivityFeedPr
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {realtimeTrades.map((t, i) => (
+                  {realtimeTrades.map((t) => (
                     <TableRow
-                      key={`${t.timestamp}-${i}`}
+                      key={tradeKey(t)}
                       className="animate-in fade-in-0 duration-300"
                     >
                       <TableCell className="text-xs text-muted-foreground">

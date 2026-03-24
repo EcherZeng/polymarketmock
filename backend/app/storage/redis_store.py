@@ -243,7 +243,7 @@ EVENT_STATUS_PREFIX = "event:status:"
 
 
 async def set_event_status(event_slug: str, status: str) -> None:
-    await get_redis().set(f"{EVENT_STATUS_PREFIX}{event_slug}", status, ex=120)
+    await get_redis().set(f"{EVENT_STATUS_PREFIX}{event_slug}", status, ex=5)
 
 
 async def get_event_status(event_slug: str) -> str | None:

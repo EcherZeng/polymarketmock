@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     # Cache TTL (seconds)
     cache_ttl_markets: int = 60
     cache_ttl_orderbook: int = 5
-    cache_ttl_midpoint: int = 3
+    cache_ttl_midpoint: int = 1
 
     # Data collector intervals (seconds)
     collector_orderbook_interval: int = 15
@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     limit_order_check_interval: int = 5
 
     # Live event: faster orderbook polling (seconds)
-    collector_live_interval: int = 2
+    collector_live_interval: int = 1
 
     # Max realtime trades per token kept in Redis
     realtime_trades_max: int = 500

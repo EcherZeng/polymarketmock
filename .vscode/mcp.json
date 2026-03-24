@@ -1,0 +1,8 @@
+{
+  "servers": {
+    "polymarket-docs": {
+      "type": "http",
+      "url": "https://docs.polymarket.com/mcp"
+    }
+  }
+}
