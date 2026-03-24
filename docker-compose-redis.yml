@@ -6,6 +6,8 @@ services:
     volumes:
       - redis-data:/data
     command: redis-server --appendonly yes
+    networks:
+      - app-network
 
   backend:
     build: ./backend
@@ -20,6 +22,23 @@ services:
       - PM_GAMMA_API_URL=https://gamma-api.polymarket.com
       - PM_CLOB_API_URL=https://clob.polymarket.com
       - PM_DATA_DIR=/app/data
+    networks:
+      - app-network
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3021:3021"
+    depends_on:
+      - backend
+    environment:
+      - VITE_API_BASE_URL=http://backend:8071
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
 
 volumes:
   redis-data:

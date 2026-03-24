@@ -1,334 +1,112 @@
-# Polymarket Mock Trading Platform — AI Agent Rules
+# Polymarket Mock Trading — AI Agent Rules
 
-> 本文档为 AI 编码助手提供项目上下文、编码规范和操作指南。任何对本项目的修改都必须遵守以下规则。
+Polymarket mock trading platform. Proxies real market data (Gamma + CLOB API) for simulated order matching against real orderbook depth. Single-user, no auth.
 
----
+## STACK (locked — no substitutions)
 
-## 1. 项目身份
+**Backend**: Python >=3.11, FastAPI >=0.115, uvicorn >=0.30, httpx(async) >=0.27, Pydantic v2 + pydantic-settings, Redis 7 (redis-py async + hiredis), DuckDB >=1.0 + PyArrow >=17.0
+**Frontend**: React + TypeScript + Vite 8, shadcn/ui (style:`radix-nova`, icons:`lucide`, Tailwind CSS v4), Lightweight Charts (TradingView), @tanstack/react-query, React Router, axios
+**Infra**: Docker Compose
+**BANNED**: styled-components, MUI, Ant Design, SQLAlchemy, Flask, Django, Next.js, Zustand, Redux
 
-这是一个 **Polymarket 模拟交易平台**，代理 Polymarket 真实市场数据（Gamma + CLOB API），提供基于真实 orderbook 深度的模拟撮合引擎。目标用户是量化策略开发者和交易研究人员。系统为 **单用户无认证** 模式。
-
----
-
-## 2. 技术栈（不可替换）
-
-| 层 | 技术 | 版本要求 |
-|---|------|---------|
-| 后端语言 | Python | >= 3.11 |
-| Web 框架 | FastAPI | >= 0.115 |
-| ASGI 服务器 | uvicorn | >= 0.30 |
-| HTTP 客户端 | httpx (async) | >= 0.27 |
-| 数据验证 | Pydantic v2 + pydantic-settings | >= 2.0 |
-| 缓存/模拟数据存储 | Redis 7 (redis-py async, hiredis) | >= 5.0 |
-| 历史数据存储 | DuckDB + Apache Parquet (PyArrow) | DuckDB >= 1.0, PyArrow >= 17.0 |
-| 前端框架 | React + TypeScript + Vite | Vite 8 |
-| UI 组件库 | **shadcn/ui** (style: `radix-nova`, icons: `lucide`) | Tailwind CSS v4 |
-| 图表 | Lightweight Charts (TradingView) | - |
-| 状态管理 | @tanstack/react-query | - |
-| 路由 | React Router | - |
-| HTTP 请求 | axios | - |
-| 容器化 | Docker Compose | - |
-
-**禁止引入**: styled-components, MUI, Ant Design, SQLAlchemy, Flask, Django, Next.js, Zustand, Redux。
-如需新增依赖，必须有充分理由且不与现有技术栈冲突。
-
----
-
-## 3. 项目结构规范
+## PROJECT STRUCTURE
 
 ```
-polymarketmock/
-├── docker-compose.yml
-├── docs/
-│   ├── architecture.md          # 架构文档 (只读参考)
-│   └── rule.md                  # 本文件
-├── backend/
-│   ├── pyproject.toml           # PEP 621 格式，不使用 setup.py/requirements.txt
-│   ├── Dockerfile
-│   └── app/
-│       ├── main.py              # FastAPI 入口 (lifespan 管理)
-│       ├── config.py            # pydantic-settings，环境变量前缀 PM_
-│       ├── models/              # Pydantic 数据模型（不含业务逻辑）
-│       ├── routers/             # FastAPI 路由（薄层，不写业务逻辑）
-│       ├── services/            # 业务逻辑（撮合引擎、代理、结算、回测）
-│       ├── storage/             # 存储层（Redis 封装、DuckDB/Parquet、采集器）
-│       └── utils/               # 纯工具函数（无 I/O 副作用）
-├── frontend/
-│   ├── components.json          # shadcn/ui 配置
-│   └── src/
-│       ├── api/client.ts        # axios 封装，一个函数对应一个 API
-│       ├── types/index.ts       # TypeScript 类型（与后端 Pydantic 模型对齐）
-│       ├── pages/               # 页面级组件
-│       ├── components/          # 业务组件
-│       └── components/ui/       # shadcn/ui 自动生成（不手动修改）
+backend/app/
+  main.py          — FastAPI entry (lifespan)
+  config.py        — pydantic-settings, env prefix PM_
+  models/          — Pydantic models only (no logic)
+  routers/         — thin route handlers (delegate to services)
+  services/        — business logic (matching, proxy, settlement, backtest)
+  storage/         — Redis wrapper, DuckDB/Parquet, data collector
+  utils/           — pure functions (NO I/O, NO async)
+frontend/src/
+  api/client.ts    — axios wrapper, one function per endpoint
+  types/index.ts   — TS types aligned with backend Pydantic models
+  pages/           — page components
+  components/      — business components
+  components/ui/   — shadcn auto-generated (NEVER edit manually)
 ```
 
-### 新增文件规则
-- 后端新增 model → `backend/app/models/`
-- 后端新增 API → `backend/app/routers/` 并在 `main.py` 注册
-- 后端新增业务逻辑 → `backend/app/services/`
-- 后端新增存储操作 → `backend/app/storage/`
-- 前端新增页面 → `frontend/src/pages/` 并在 `App.tsx` 注册路由
-- 前端新增组件 → `frontend/src/components/`
-- 前端新增 shadcn 组件 → 使用 `npx shadcn@latest add <component>` 命令，不手写
-- 前端新增 API 调用 → `frontend/src/api/client.ts` 中添加函数
-- 前端新增类型 → `frontend/src/types/index.ts`
+**Where to put new files:**
+- Model → `models/` | API route → `routers/` + register in `main.py` | Logic → `services/` | Storage → `storage/`
+- Page → `pages/` + register in `App.tsx` | Component → `components/` | shadcn → `npx shadcn@latest add <name>`
+- API fn → `api/client.ts` | TS type → `types/index.ts`
 
----
+## BACKEND RULES
 
-## 4. 后端编码规范
+**Async-first**: ALL functions use `async def` (routers, services, storage). `await` all I/O. Redis via `redis.asyncio`, HTTP via `httpx.AsyncClient`. No sync blocking in async.
 
-### 4.1 异步优先
-- **所有函数使用 `async def`**，包括路由、服务、存储层
-- 使用 `await` 调用所有 I/O 操作
-- Redis 使用 `redis.asyncio`，HTTP 使用 `httpx.AsyncClient`
-- 禁止在 async 函数中使用同步阻塞调用
+**Pydantic v2**:
+- `from __future__ import annotations` at top of every file
+- `X | None` (NOT `Optional[X]`), `list[dict]`, `dict[str, Any]`
+- Serialize: `model_dump(mode="json")` (NOT `.dict()`)
+- Enums: `class Side(str, enum.Enum): BUY = "BUY"`
 
-### 4.2 Pydantic v2
-```python
-# 正确 ✅
-from __future__ import annotations
-from pydantic import BaseModel, Field
+**Financial precision**: VWAP/slippage/price calcs use `decimal.Decimal` internally. API I/O uses `float`. Round to 6 dp (price/amount) or 4 dp (percentage).
 
-class OrderRequest(BaseModel):
-    token_id: str
-    side: OrderSide
-    amount: float = Field(gt=0)
-    price: float | None = Field(None, ge=0, le=1)
+**Time**: `datetime.now(timezone.utc).isoformat()` — always UTC ISO 8601.
 
-# 序列化
-result.model_dump(mode="json")
+**Config**: All settings via `app/config.py` `Settings` class. Env prefix `PM_`. No hardcoded URLs/ports/TTLs.
 
-# 不要使用 ❌
-from typing import Optional  # 用 X | None 代替
-result.dict()                # 用 model_dump() 代替
-```
+**Redis keys**: `entity:subentity:id` pattern. Examples: `account:balance`, `account:positions:{token_id}`, `orders:pending:{order_id}`, `trades:history`. Store numbers as `str()`, complex data as JSON string. Define key constants.
 
-### 4.3 枚举
-```python
-# 必须继承 str 和 enum.Enum
-class OrderSide(str, enum.Enum):
-    BUY = "BUY"
-    SELL = "SELL"
-```
+**Routers**: `APIRouter()` registered via `include_router`. Route functions ONLY validate params + call service. Errors via `HTTPException`. Use `response_model=`. Use `Query()` with constraints.
 
-### 4.4 金融计算精度
-- **VWAP / 滑点 / 价格相关计算**使用 `decimal.Decimal`
-- 输入/输出接口使用 `float`，内部计算使用 `Decimal`
-- 结果 round 到 6 位小数（价格/金额）或 4 位小数（百分比）
+**Code style**: Module-level docstring. `from __future__ import annotations` first line. Import order: stdlib → third-party → local (blank lines between). Section separators: `# ── SectionName ────────`.
 
-### 4.5 时间
-```python
-from datetime import datetime, timezone
-now = datetime.now(timezone.utc).isoformat()  # ISO 8601 字符串
-```
+## FRONTEND RULES
 
-### 4.6 配置
-- 所有配置项通过 `app/config.py` 的 `Settings` 类管理
-- 环境变量前缀统一为 `PM_`（如 `PM_REDIS_URL`、`PM_DATA_DIR`）
-- 不要在代码中硬编码 URL、端口、TTL 等
+**Components**: Function components + hooks only. Export: `export default function Name()`. Props: `interface NameProps {}`. Pages in `pages/`, reusable in `components/`.
 
-### 4.7 Redis Key 命名
-- 格式：`entity:subentity:id`
-- 示例：`account:balance`、`account:positions:{token_id}`、`orders:pending:{order_id}`、`trades:history`
-- 数值存为字符串（`str(balance)`），复杂结构存为 JSON 字符串
-- 使用 Key 前缀常量：`ACCOUNT_BALANCE_KEY = "account:balance"`
+**shadcn/ui**: Add via `npx shadcn@latest add <name>` — NEVER manually edit `components/ui/`. Use `cn()` for className merging. Prefer shadcn semantic components. Tailwind v4 syntax.
 
-### 4.8 路由层
-- 使用 `APIRouter()`，在 `main.py` 通过 `include_router` 注册
-- 路由函数只做参数校验和调用 service 层，不写业务逻辑
-- 错误通过 `HTTPException(status_code=..., detail=...)` 抛出
-- 使用 `response_model=` 声明返回类型
-- Query 参数使用 `Query()` 带约束
+**Data fetching**: `useQuery` for reads (with `queryKey`, `queryFn`, optional `refetchInterval`). `useMutation` for writes (with `onSuccess` → `invalidateQueries`).
 
-### 4.9 代码风格
-- 文件头使用 `"""模块级 docstring"""`
-- 首行 `from __future__ import annotations`
-- import 顺序：标准库 → 第三方 → 本项目（空行分隔）
-- 模块内用 `# ── 分节名 ────────` 注释分隔代码区域
-- 类型注解使用 Python 3.10+ 语法：`str | None`、`list[dict]`、`dict[str, Any]`
+**API client**: All requests via `src/api/client.ts`. One function per endpoint. axios baseURL `/api` (Vite proxy → backend). Explicit TS return types. camelCase params → snake_case for backend.
 
----
+**Types**: All in `types/index.ts`. `interface` for objects, `type` for unions. Match backend Pydantic field names. Use `import type`.
 
-## 5. 前端编码规范
+**Styles**: Tailwind utility classes ONLY (except CSS vars in `index.css`). Semantic colors: `text-foreground`, `text-muted-foreground`, `bg-background`, `border`. Chart colors: `chart-1` (red/asks), `chart-2` (green/bids).
 
-### 5.1 组件
-- 使用**函数组件 + Hooks**，不使用 class 组件
-- 组件使用 `export default function ComponentName()` 导出
-- Props 定义 interface：`interface ComponentNameProps { ... }`
-- 页面组件放 `pages/`，可复用组件放 `components/`
+**Imports**: Always use `@/` prefix. Configured in `vite.config.ts` + `tsconfig.json`.
 
-### 5.2 shadcn/ui（关键）
-- 配置：style `radix-nova`、icons `lucide`、aliases `@/components`
-- 添加组件：`npx shadcn@latest add <name>`，**永远不要手动修改 `components/ui/` 下的文件**
-- 使用 `cn()` 工具函数合并 className
-- 优先使用 shadcn 提供的语义组件（Card, Button, Input, Table, Tabs, Alert, Badge, Dialog, ScrollArea, ToggleGroup 等）
-- Tailwind 类名使用 v4 语法
+## DATA PERSISTENCE (critical)
 
-### 5.3 数据获取
-```typescript
-// 查询 — useQuery
-const { data } = useQuery<Market>({
-  queryKey: ["market", marketId],
-  queryFn: () => fetchMarket(marketId),
-  enabled: !!marketId,
-  refetchInterval: 30_000,  // 自动刷新（可选）
-})
+- Real market prices/orderbook snapshots → **Parquet** (DuckDB query), partitioned `{market_id}/{date}.parquet` under `backend/data/`
+- Simulated trading data (balance, positions, orders, trades, PnL) → **Redis ONLY**
+- NEVER write simulated data to Parquet/DuckDB/files
+- NEVER store real market data in Redis only — must persist to Parquet
 
-// 变更 — useMutation
-const mutation = useMutation({
-  mutationFn: () => placeOrder(req),
-  onSuccess: () => {
-    queryClient.invalidateQueries({ queryKey: ["account"] })
-  },
-})
-```
+## EXTERNAL API
 
-### 5.4 API 客户端
-- 所有后端请求通过 `src/api/client.ts` 中的函数发起
-- 一个 API 端点对应一个函数：`fetchMarket()`, `placeOrder()`, `estimateOrder()` 等
-- axios 实例 baseURL 为 `/api`（由 Vite proxy 转发到后端）
-- 返回值使用明确的 TypeScript 类型
-- 参数命名：前端 camelCase → 传给后端时转为 snake_case
+**Gamma API** (`https://gamma-api.polymarket.com`): markets, events. Cache TTL: 60s (`PM_CACHE_TTL_MARKETS`).
+**CLOB API** (`https://clob.polymarket.com`): orderbook, midpoint. Cache TTL: orderbook 5s, midpoint 3s. Order execution MUST use `get_orderbook_raw` (bypass cache).
+**Proxy rules**: All external requests via `polymarket_proxy.py`. Frontend NEVER calls Polymarket directly. Cache in Redis: `cache:{api_name}:{params_hash}`.
 
-### 5.5 类型
-- 所有类型集中在 `src/types/index.ts`
-- 使用 `interface` 定义对象类型，使用 `type` 定义联合类型
-- 与后端 Pydantic 模型字段名保持一致（后端字段名即 API 字段名）
-- 使用 `import type { ... }` 导入类型
+## MATCHING ENGINE
 
-### 5.6 样式
-- 只使用 **Tailwind CSS** 工具类，不写自定义 CSS（`index.css` 中的 CSS 变量除外）
-- 布局用 `flex`、`grid`、`gap`
-- 响应式用 `lg:grid-cols-12`、`lg:col-span-4` 等
-- 颜色使用语义变量：`text-foreground`、`text-muted-foreground`、`bg-background`、`border`
-- 图表颜色使用 CSS 变量：`chart-1`（红/asks）、`chart-2`（绿/bids）
+- **Market order**: fetch CLOB orderbook → consume levels (VWAP) → update balance/positions → record trade
+- **Limit order**: reserve funds → store pending → check midpoint every 5s → fill on trigger
+- Validate: sufficient position (sell), sufficient balance (buy)
+- Read-only: simulated trades NEVER modify real orderbook
+- Partial fills are valid when depth insufficient
+- Settlement: winning token → $1/share, losing → $0/share
 
-### 5.7 路径别名
-- 所有 import 使用 `@/` 前缀：`import { Button } from "@/components/ui/button"`
-- 配置在 `vite.config.ts`（resolve.alias）和 `tsconfig.json`（paths）
+## DOCKER
 
----
+Services: `redis` :6379 (AOF), `backend` :8071 (depends redis, mount `./backend/data:/app/data`), `frontend` :3021 (depends backend).
+Env: `PM_REDIS_URL=redis://redis:6379`, `PM_GAMMA_API_URL=https://gamma-api.polymarket.com`, `PM_CLOB_API_URL=https://clob.polymarket.com`, `PM_DATA_DIR=/app/data`.
+Local dev: Vite proxies `/api` → `http://localhost:8071`.
 
-## 6. 数据持久化规则（核心约束）
+## SECURITY
 
-| 数据类型 | 存储位置 | 原因 |
-|---------|---------|------|
-| 真实市场价格快照 | Parquet (DuckDB 查询) | 需要持久化用于回测 |
-| 真实 orderbook 快照 | Parquet (DuckDB 查询) | 需要持久化用于回测 |
-| 用户模拟交易数据（余额、持仓、订单、交易记录、PnL） | **Redis 缓存** | 不持久化到磁盘文件 |
+Single-user, no auth/JWT/session. CORS allow-all (dev). No real funds. Validate all numeric input in router/Pydantic (`gt=0`, `ge=0`, `le=1`). Parameterized DuckDB queries only — no SQL string concatenation.
 
-**严格规则**：
-- ❌ 不要把模拟交易数据写入 Parquet / DuckDB / 任何文件
-- ❌ 不要把真实市场数据只存 Redis（必须写 Parquet）
-- ✅ Parquet 文件按 `{market_id}/{date}.parquet` 分区存储在 `backend/data/` 下
-- ✅ Redis AOF 持久化已开启，但这只是 Redis 自身的恢复机制，不等于「持久化到文件」
+## WORKFLOWS
 
----
+**New API endpoint**: models/ (Pydantic) → services/ (async logic) → routers/ (thin handler) → main.py (register) → types/index.ts (TS type) → api/client.ts (request fn) → component (useQuery/useMutation).
 
-## 7. 外部 API 交互
+**New shadcn component**: `cd frontend && npx shadcn@latest add <name>`. Never create/edit `components/ui/` manually.
 
-### Polymarket Gamma API (`https://gamma-api.polymarket.com`)
-- 市场列表/详情、事件列表/详情
-- 缓存 TTL：60 秒（`PM_CACHE_TTL_MARKETS`）
-
-### Polymarket CLOB API (`https://clob.polymarket.com`)
-- Orderbook 深度、中间价
-- 缓存 TTL：orderbook 5 秒，midpoint 3 秒
-- 下单时的 orderbook 必须**不走缓存**（`get_orderbook_raw`）
-
-### 代理规则
-- 所有外部 API 请求经后端代理（`polymarket_proxy.py`）
-- 前端不直接请求 Polymarket
-- 代理层统一缓存到 Redis（`cache_get`/`cache_set`）
-- 缓存 key 格式：`cache:{api_name}:{params_hash}`
-
----
-
-## 8. 撮合引擎规则
-
-- **市价单**：实时拉取 CLOB orderbook → 逐级消耗（VWAP）→ 更新余额/持仓 → 记录交易
-- **限价单**：预留资金 → 存入 pending → 后台每 5 秒检查 midpoint 触发 → 成交
-- **卖出前验证**：必须有足够持仓
-- **买入前验证**：必须有足够余额
-- **模拟不影响真实 orderbook**：只读取，不修改
-- **部分成交**：深度不足时部分成交是合法状态
-- **结算**：赢方 token 按 $1/share 结算，输方按 $0 结算
-
----
-
-## 9. Docker 部署
-
-```yaml
-# 三个服务
-redis:    端口 6379，AOF 持久化
-backend:  端口 8071，依赖 redis，挂载 ./backend/data:/app/data
-frontend: 端口 3021，依赖 backend
-```
-
-环境变量前缀：`PM_`
-- `PM_REDIS_URL=redis://redis:6379`
-- `PM_GAMMA_API_URL=https://gamma-api.polymarket.com`
-- `PM_CLOB_API_URL=https://clob.polymarket.com`
-- `PM_DATA_DIR=/app/data`
-
-本地开发：Vite dev server 将 `/api` 代理到 `http://localhost:8071`。
-
----
-
-## 10. 安全与边界
-
-- 单用户系统，无认证，无 JWT，无 session
-- CORS 允许所有来源（开发模式）
-- 不处理真实资金，不与链上合约交互
-- 不缓存用户敏感数据
-- 所有数值输入必须在路由层或 Pydantic 模型中校验（`gt=0`、`ge=0`、`le=1`）
-- 使用参数化查询（DuckDB），不拼接 SQL 字符串
-
----
-
-## 11. 操作指南
-
-### 添加新 API 端点的步骤
-1. 在 `models/` 中定义请求/响应 Pydantic 模型
-2. 在 `services/` 中实现业务逻辑（async）
-3. 在 `routers/` 中添加路由函数（调用 service）
-4. 在 `main.py` 中注册路由（如新 router 文件）
-5. 在 `frontend/src/types/index.ts` 中添加 TypeScript 类型
-6. 在 `frontend/src/api/client.ts` 中添加请求函数
-7. 在前端组件中使用 useQuery/useMutation 调用
-
-### 添加 shadcn 组件
-```bash
-cd frontend
-npx shadcn@latest add <component-name>
-```
-不要手动创建或修改 `components/ui/` 下的文件。
-
-### 运行项目
-```bash
-# Docker 一键启动
-docker-compose up -d
-
-# 或本地开发
-docker run -d --name redis -p 6379:6379 redis:7-alpine redis-server --appendonly yes
-cd backend && pip install -e . && uvicorn app.main:app --reload --port 8071
-cd frontend && npm install && npm run dev
-```
-
----
-
-## 12. 常见陷阱
-
-| 陷阱 | 正确做法 |
-|------|---------|
-| 在 utils/ 中写了 async 函数 | utils/ 下应为纯函数，无 I/O |
-| 在 router 中写了复杂业务逻辑 | 业务逻辑放 services/，router 只做分发 |
-| 手动修改了 `components/ui/` 下的文件 | 使用 `npx shadcn add` 管理，手动改会被覆盖 |
-| 模拟交易数据写入了 Parquet | 模拟数据只存 Redis |
-| 使用 `Optional[str]` 而非 `str \| None` | 本项目使用 Python 3.11+ 语法 |
-| 使用 `result.dict()` | 使用 `result.model_dump(mode="json")` (Pydantic v2) |
-| 在前端直接请求 Polymarket API | 所有外部请求通过后端代理 |
-| 下单时使用了缓存的 orderbook | 下单必须调用 `get_orderbook_raw`（不走缓存） |
-| 前端 import 不带 `@/` 前缀 | 统一使用 `@/` 路径别名 |
-| 在 Redis 中用 float 存数值 | 用 `str()` 转字符串存储 |
+**Run project**: `docker-compose up -d` or locally: Redis (`docker run -d --name redis -p 6379:6379 redis:7-alpine redis-server --appendonly yes`) + backend (`cd backend && pip install -e . && uvicorn app.main:app --reload --port 8071`) + frontend (`cd frontend && npm install && npm run dev`).
