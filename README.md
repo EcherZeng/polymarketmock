@@ -57,7 +57,7 @@ docker run -d --name redis -p 6379:6379 redis:7-alpine
 
 ```bash
 cd backend
-pip install -e .
+pip install -e .        # 安装所有依赖（含 pandas, numpy, duckdb, pyarrow 等）
 uvicorn app.main:app --host 0.0.0.0 --port 8071 --reload
 ```
 

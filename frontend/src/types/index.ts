@@ -201,6 +201,7 @@ export interface ArchivedEvent {
   token_ids: string[]
   prices_count: number
   orderbooks_count: number
+  trades_count: number
   archived_at: string
 }
 
@@ -211,7 +212,16 @@ export interface ReplayTimeline {
   start_time: string
   end_time: string
   total_snapshots: number
+  total_trades: number
+  price_range: { min: number; max: number }
   timestamps: string[]
+}
+
+export interface ReplaySnapshotTrade {
+  timestamp: string
+  side: string
+  price: number
+  size: number
 }
 
 export interface ReplaySnapshot {
@@ -224,6 +234,7 @@ export interface ReplaySnapshot {
   bid_sizes: string[]
   ask_prices: string[]
   ask_sizes: string[]
+  trades: ReplaySnapshotTrade[]
 }
 
 export interface ReplaySession {

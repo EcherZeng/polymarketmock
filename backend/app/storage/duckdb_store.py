@@ -107,6 +107,52 @@ def write_orderbook_snapshot(
     pq.write_table(table, file_path)
 
 
+# ── Trade snapshots (inferred from orderbook diffs) ─────────────────────
+
+TRADE_SCHEMA = pa.schema([
+    ("timestamp", pa.string()),
+    ("token_id", pa.string()),
+    ("side", pa.string()),
+    ("price", pa.float64()),
+    ("size", pa.float64()),
+    ("inferred", pa.bool_()),
+])
+
+
+def write_trade_snapshot(
+    market_id: str,
+    token_id: str,
+    side: str,
+    price: float,
+    size: float,
+    timestamp: str | None = None,
+    inferred: bool = True,
+) -> None:
+    now = datetime.now(timezone.utc)
+    date_str = now.strftime("%Y-%m-%d")
+    dir_path = os.path.join(settings.data_dir, "trades", market_id)
+    _ensure_dir(dir_path)
+    file_path = os.path.join(dir_path, f"{date_str}.parquet")
+
+    table = pa.table(
+        {
+            "timestamp": [timestamp or now.isoformat()],
+            "token_id": [token_id],
+            "side": [side],
+            "price": [price],
+            "size": [size],
+            "inferred": [inferred],
+        },
+        schema=TRADE_SCHEMA,
+    )
+
+    if os.path.exists(file_path):
+        existing = pq.read_table(file_path)
+        table = pa.concat_tables([existing, table])
+
+    pq.write_table(table, file_path)
+
+
 # ── Query helpers via DuckDB ────────────────────────────────────────────────
 
 def query_prices(
@@ -145,6 +191,36 @@ def query_orderbooks(
     end_time: str | None = None,
 ) -> list[dict]:
     dir_path = os.path.join(settings.data_dir, "orderbooks", market_id)
+    if not os.path.isdir(dir_path):
+        return []
+
+    glob = os.path.join(dir_path, "*.parquet").replace("\\", "/")
+    sql = f"SELECT * FROM read_parquet('{glob}') "
+    conditions: list[str] = []
+    if start_time:
+        conditions.append(f"timestamp >= '{start_time}'")
+    if end_time:
+        conditions.append(f"timestamp <= '{end_time}'")
+    if conditions:
+        sql += " WHERE " + " AND ".join(conditions)
+    sql += " ORDER BY timestamp"
+
+    con = duckdb.connect()
+    try:
+        result = con.execute(sql).fetchdf()
+        return result.to_dict(orient="records")
+    except Exception:
+        return []
+    finally:
+        con.close()
+
+
+def query_trades(
+    market_id: str,
+    start_time: str | None = None,
+    end_time: str | None = None,
+) -> list[dict]:
+    dir_path = os.path.join(settings.data_dir, "trades", market_id)
     if not os.path.isdir(dir_path):
         return []
 
@@ -285,6 +361,18 @@ def query_archive_orderbooks(
     return _query_parquet_file(file_path, start_time, end_time)
 
 
+def query_archive_trades(
+    slug: str,
+    start_time: str | None = None,
+    end_time: str | None = None,
+) -> list[dict]:
+    """Query archived trade data for a completed event."""
+    file_path = os.path.join(settings.data_dir, "archives", slug, "trades.parquet")
+    if not os.path.exists(file_path):
+        return []
+    return _query_parquet_file(file_path, start_time, end_time)
+
+
 def _query_parquet_file(
     file_path: str,
     start_time: str | None = None,
@@ -306,7 +394,9 @@ def _query_parquet_file(
     try:
         result = con.execute(sql).fetchdf()
         return result.to_dict(orient="records")
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("DuckDB query failed for %s: %s", fp, e)
         return []
     finally:
         con.close()

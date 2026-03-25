@@ -256,7 +256,7 @@ TOKEN_MARKET_PREFIX = "token:market:"
 
 
 async def set_token_market_info(token_id: str, market_json: str) -> None:
-    await get_redis().set(f"{TOKEN_MARKET_PREFIX}{token_id}", market_json, ex=300)
+    await get_redis().set(f"{TOKEN_MARKET_PREFIX}{token_id}", market_json)
 
 
 async def get_token_market_info(token_id: str) -> dict | None:

@@ -212,6 +212,20 @@ export async function fetchArchive(slug: string): Promise<ArchivedEvent> {
   return data
 }
 
+// ── Watch / Recording ────────────────────────────────────────────────────────
+
+export async function watchEvent(
+  slug: string,
+): Promise<{ watched_tokens: string[]; recording_started: boolean }> {
+  const { data } = await api.post(`/watch/event/${slug}`)
+  return data
+}
+
+export async function getWatchedMarkets(): Promise<{ watched: Record<string, string> }> {
+  const { data } = await api.get("/watched")
+  return data
+}
+
 // ── Replay ──────────────────────────────────────────────────────────────────
 
 export async function fetchReplayTimeline(slug: string): Promise<ReplayTimeline> {

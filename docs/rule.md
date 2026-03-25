@@ -4,7 +4,7 @@ Polymarket mock trading platform. Proxies real market data (Gamma + CLOB API) fo
 
 ## STACK (locked — no substitutions)
 
-**Backend**: Python >=3.11, FastAPI >=0.115, uvicorn >=0.30, httpx(async) >=0.27, Pydantic v2 + pydantic-settings, Redis 7 (redis-py async + hiredis), DuckDB >=1.0 + PyArrow >=17.0
+**Backend**: Python >=3.11, FastAPI >=0.115, uvicorn >=0.30, httpx(async) >=0.27, Pydantic v2 + pydantic-settings, Redis 7 (redis-py async + hiredis), DuckDB >=1.0 + PyArrow >=17.0, pandas >=2.0 + numpy >=1.26 (DuckDB fetchdf)
 **Frontend**: React + TypeScript + Vite 8, shadcn/ui (style:`radix-nova`, icons:`lucide`, Tailwind CSS v4), Lightweight Charts (TradingView), @tanstack/react-query, React Router, axios
 **Infra**: Docker Compose
 **BANNED**: styled-components, MUI, Ant Design, SQLAlchemy, Flask, Django, Next.js, Zustand, Redux

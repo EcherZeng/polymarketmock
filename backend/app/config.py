@@ -1,4 +1,9 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
+
+# Resolve data_dir relative to the backend package, not cwd
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
@@ -10,7 +15,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379"
 
     # Data storage path for Parquet files
-    data_dir: str = "./data"
+    data_dir: str = str(_BACKEND_DIR / "data")
 
     # Cache TTL (seconds)
     cache_ttl_markets: int = 60

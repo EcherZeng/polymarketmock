@@ -40,4 +40,23 @@ app.include_router(backtest.router, prefix="/api/backtest", tags=["Backtest"])
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok"}
+    import os
+    from app.config import settings
+    data_dir = settings.data_dir
+    archive_dir = os.path.join(data_dir, "archives")
+    archives_exist = os.path.isdir(archive_dir)
+    archive_slugs = os.listdir(archive_dir) if archives_exist else []
+    slug_files = {}
+    for s in archive_slugs[:5]:
+        sp = os.path.join(archive_dir, s)
+        slug_files[s] = os.listdir(sp) if os.path.isdir(sp) else []
+    return {
+        "status": "ok",
+        "cwd": os.getcwd(),
+        "data_dir": data_dir,
+        "data_dir_abs": os.path.abspath(data_dir),
+        "data_dir_exists": os.path.isdir(data_dir),
+        "archives_dir_exists": archives_exist,
+        "archive_slugs": archive_slugs,
+        "slug_files": slug_files,
+    }

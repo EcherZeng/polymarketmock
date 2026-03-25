@@ -211,12 +211,16 @@ async def archive_event(slug: str, market_info: dict) -> dict:
     # Copy data to archive directory
     prices_count = 0
     ob_count = 0
+    trades_count = 0
     try:
         prices_count = archive_event_data(
             slug, market_id, "prices", start_str, end_str,
         )
         ob_count = archive_event_data(
             slug, market_id, "orderbooks", start_str, end_str,
+        )
+        trades_count = archive_event_data(
+            slug, market_id, "trades", start_str, end_str,
         )
     except Exception as e:
         logger.warning("Partial archive for %s: %s", slug, e)
@@ -230,9 +234,18 @@ async def archive_event(slug: str, market_info: dict) -> dict:
         "token_ids": token_ids,
         "prices_count": prices_count,
         "orderbooks_count": ob_count,
+        "trades_count": trades_count,
         "archived_at": datetime.now(timezone.utc).isoformat(),
     }
     await redis_store.set_archive_meta(slug, json.dumps(meta))
+
+    # Unwatch tokens after successful archival
+    for tid in token_ids:
+        try:
+            await redis_store.remove_watched_market(str(tid))
+        except Exception:
+            pass
+
     return meta
 
 

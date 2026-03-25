@@ -14,7 +14,7 @@ import PriceChart from "@/components/PriceChart"
 import TradingPanel from "@/components/TradingPanel"
 import PositionTable from "@/components/PositionTable"
 import ActivityFeed from "@/components/ActivityFeed"
-import { resolveSlug, fetchEventStatus, fetchNextEvent } from "@/api/client"
+import { resolveSlug, fetchEventStatus, fetchNextEvent, watchEvent } from "@/api/client"
 import type { Market, MarketEvent, EventStatusResponse, NextEventResponse } from "@/types"
 
 function parseTokenIds(raw: unknown): string[] {
@@ -60,6 +60,19 @@ export default function EventDetailPage() {
   })
 
   const isEnded = eventStatus?.status === "ended" || eventStatus?.status === "settled"
+
+  // ── Auto-record: watch event when LIVE ─────────────
+  const [isRecording, setIsRecording] = useState(false)
+  const watchedRef = useRef(false)
+
+  useEffect(() => {
+    if (!slug || !event || isEnded || watchedRef.current) return
+    if (eventStatus?.status !== "live") return
+    watchedRef.current = true
+    watchEvent(slug)
+      .then(() => setIsRecording(true))
+      .catch(() => { /* non-critical */ })
+  }, [slug, event?.id, eventStatus?.status])
 
   // ── Client-side countdown (synced from server every 5s) ────
   const [countdown, setCountdown] = useState<number | null>(null)
@@ -223,6 +236,12 @@ export default function EventDetailPage() {
         <div className="flex items-start justify-between gap-2">
           <h1 className="text-xl font-semibold leading-tight">{event.title}</h1>
           <div className="flex shrink-0 gap-1">
+            {isRecording && (
+              <Badge variant="destructive" className="animate-pulse gap-1">
+                <span className="inline-block h-2 w-2 rounded-full bg-white" />
+                录制中
+              </Badge>
+            )}
             {isEnded ? (
               <Badge variant="secondary">已结束</Badge>
             ) : eventStatus?.status === "live" ? (

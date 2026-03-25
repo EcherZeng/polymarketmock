@@ -10,6 +10,7 @@ from app.storage.duckdb_store import (
     list_available_markets,
     query_archive_orderbooks,
     query_archive_prices,
+    query_archive_trades,
     query_orderbooks,
     query_prices,
 )
@@ -116,10 +117,8 @@ def _find_nearest_orderbook(ob_list: list[tuple[str, dict]], target_ts: str) -> 
     if not ob_list:
         return None
     best = None
-    best_diff = float("inf")
     for ts, ob in ob_list:
         if ts <= target_ts:
-            diff = len(target_ts) - len(ts)  # simplified proximity
             if best is None or ts > best[0]:
                 best = (ts, ob)
     return best[1] if best else ob_list[0][1]
@@ -146,6 +145,7 @@ async def get_replay_timeline(slug: str) -> dict:
     """Return the list of available timestamps for an archived event."""
     prices = query_archive_prices(slug)
     orderbooks = query_archive_orderbooks(slug)
+    trades = query_archive_trades(slug)
 
     all_ts: list[str] = []
     seen: set[str] = set()
@@ -162,11 +162,20 @@ async def get_replay_timeline(slug: str) -> dict:
 
     all_ts.sort()
 
+    # Price range stats
+    mid_prices = [r["mid_price"] for r in prices if r.get("mid_price")]
+    price_range = {
+        "min": round(min(mid_prices), 6) if mid_prices else 0,
+        "max": round(max(mid_prices), 6) if mid_prices else 0,
+    }
+
     return {
         "slug": slug,
         "start_time": all_ts[0] if all_ts else "",
         "end_time": all_ts[-1] if all_ts else "",
         "total_snapshots": len(all_ts),
+        "total_trades": len(trades),
+        "price_range": price_range,
         "timestamps": all_ts,
     }
 
@@ -175,12 +184,28 @@ async def get_replay_snapshot(slug: str, timestamp: str) -> dict:
     """Return the full state at a given timestamp from archived data."""
     prices = query_archive_prices(slug)
     orderbooks = query_archive_orderbooks(slug)
+    trades = query_archive_trades(slug)
 
     # Find nearest price
     price_row = _find_nearest_price(prices, timestamp) or {}
     ob_row = _find_nearest_orderbook(
         [(ob["timestamp"], ob) for ob in orderbooks], timestamp
     ) or {}
+
+    # Find trades within ±2s of this timestamp
+    snapshot_trades = []
+    for t in trades:
+        tts = t.get("timestamp", "")
+        if not tts:
+            continue
+        # ISO string comparison works for same-format timestamps
+        if tts <= timestamp:
+            snapshot_trades.append({
+                "timestamp": tts,
+                "side": t.get("side", "UNKNOWN"),
+                "price": t.get("price", 0),
+                "size": t.get("size", 0),
+            })
 
     return {
         "timestamp": timestamp,
@@ -192,6 +217,7 @@ async def get_replay_snapshot(slug: str, timestamp: str) -> dict:
         "bid_sizes": json.loads(ob_row.get("bid_sizes", "[]")) if isinstance(ob_row.get("bid_sizes"), str) else ob_row.get("bid_sizes", []),
         "ask_prices": json.loads(ob_row.get("ask_prices", "[]")) if isinstance(ob_row.get("ask_prices"), str) else ob_row.get("ask_prices", []),
         "ask_sizes": json.loads(ob_row.get("ask_sizes", "[]")) if isinstance(ob_row.get("ask_sizes"), str) else ob_row.get("ask_sizes", []),
+        "trades": snapshot_trades,
     }
 
 

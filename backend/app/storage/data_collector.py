@@ -14,7 +14,7 @@ from app.config import settings
 from app.services.matching_engine import check_and_fill_limit_orders
 from app.services.polymarket_proxy import get_midpoint, get_orderbook_raw
 from app.services.trade_feed import detect_trades
-from app.storage.duckdb_store import write_orderbook_snapshot, write_price_snapshot
+from app.storage.duckdb_store import write_orderbook_snapshot, write_price_snapshot, write_trade_snapshot
 from app.storage import redis_store
 
 logger = logging.getLogger(__name__)
@@ -45,6 +45,18 @@ async def _collect_and_detect(token_id: str, market_id: str) -> None:
                 )
             except Exception as e:
                 logger.warning("Failed to store realtime trade: %s", e)
+            # Also persist to Parquet for archival
+            try:
+                write_trade_snapshot(
+                    market_id=market_id or token_id,
+                    token_id=token_id,
+                    side=t.get("side", "UNKNOWN"),
+                    price=t.get("price", 0),
+                    size=t.get("size", 0),
+                    timestamp=t.get("timestamp"),
+                )
+            except Exception as e:
+                logger.warning("Failed to write trade snapshot: %s", e)
 
     _prev_books[token_id] = book
 
@@ -62,6 +74,23 @@ async def _collect_and_detect(token_id: str, market_id: str) -> None:
         )
     except Exception as e:
         logger.warning("Failed to write orderbook snapshot for %s: %s", token_id, e)
+
+    # Write price snapshot from same orderbook data (1s resolution)
+    try:
+        best_bid = float(bids[0]["price"]) if bids else 0
+        best_ask = float(asks[0]["price"]) if asks else 0
+        mid_price = (best_bid + best_ask) / 2 if (best_bid and best_ask) else best_bid or best_ask
+        spread = best_ask - best_bid if (best_bid and best_ask) else 0
+        write_price_snapshot(
+            market_id=market_id or token_id,
+            token_id=token_id,
+            mid_price=mid_price,
+            best_bid=best_bid,
+            best_ask=best_ask,
+            spread=spread,
+        )
+    except Exception as e:
+        logger.warning("Failed to write price snapshot for %s: %s", token_id, e)
 
 
 async def _collect_orderbooks() -> None:

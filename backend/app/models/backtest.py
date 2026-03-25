@@ -63,6 +63,7 @@ class ReplaySnapshot(BaseModel):
     bid_sizes: list[str] = []
     ask_prices: list[str] = []
     ask_sizes: list[str] = []
+    trades: list[dict] = []
 
 
 class ReplayTimeline(BaseModel):
@@ -70,6 +71,8 @@ class ReplayTimeline(BaseModel):
     start_time: str
     end_time: str
     total_snapshots: int
+    total_trades: int = 0
+    price_range: dict = {}
     timestamps: list[str] = []
 
 

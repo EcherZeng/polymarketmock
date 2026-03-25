@@ -163,6 +163,66 @@ async def get_next_event(slug: str):
         raise HTTPException(status_code=502, detail=f"Next event error: {e}")
 
 
+# ── Watched markets (recording) ───────────────────────────────────────────────
+
+
+@router.get("/watched")
+async def list_watched():
+    """列出当前正在录制的 token 列表。"""
+    watched = await redis_store.get_watched_markets()
+    return {"watched": watched}
+
+
+@router.post("/watch/event/{slug:path}")
+async def watch_event(slug: str):
+    """进入事件后自动录制 — 注册所有 token 到数据采集器。
+
+    幂等操作：重复调用不产生副作用。
+    """
+    event = await proxy.resolve_event_slug(slug)
+    if not event:
+        raise HTTPException(status_code=404, detail=f"Event not found: {slug}")
+
+    import json as _json
+
+    markets = event.get("markets", [])
+    watched_tokens: list[str] = []
+
+    for m in markets:
+        token_ids_raw = m.get("clobTokenIds", [])
+        if isinstance(token_ids_raw, str):
+            try:
+                token_ids_raw = _json.loads(token_ids_raw)
+            except (ValueError, TypeError):
+                token_ids_raw = [token_ids_raw]
+        market_id = m.get("id", "")
+        for tid in token_ids_raw:
+            if not tid:
+                continue
+            await redis_store.add_watched_market(tid, market_id)
+            watched_tokens.append(tid)
+            # Persist full market info so archive_event can use it later
+            info = {
+                "id": market_id,
+                "question": m.get("question", ""),
+                "slug": slug,
+                "startDate": m.get("startDate", "") or m.get("eventStartTime", ""),
+                "endDate": m.get("endDate", "") or event.get("endDate", ""),
+                "clobTokenIds": token_ids_raw,
+                "outcomes": m.get("outcomes", []),
+            }
+            await redis_store.set_token_market_info(tid, _json.dumps(info))
+
+    return {"watched_tokens": watched_tokens, "recording_started": True}
+
+
+@router.delete("/watch/{token_id}")
+async def unwatch_token(token_id: str):
+    """取消监视某个 token。"""
+    await redis_store.remove_watched_market(token_id)
+    return {"removed": token_id}
+
+
 # ── Archives ──────────────────────────────────────────────────────────────────
 
 @router.get("/archives")
