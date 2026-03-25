@@ -219,6 +219,7 @@ export interface ReplayTimeline {
 
 export interface ReplaySnapshotTrade {
   timestamp: string
+  token_id: string
   side: string
   price: number
   size: number

@@ -15,6 +15,12 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import ReplayControls from "@/components/ReplayControls"
 import {
   fetchReplayTimeline,
@@ -237,17 +243,16 @@ export default function ReplayPage() {
     const askPrices = snapshot?.ask_prices ?? []
     const askSizes = snapshot?.ask_sizes ?? []
 
+    // Bids: highest price first (already sorted from API)
     const b = bidPrices.slice(0, 15).map((p, i) => ({
       price: parseFloat(String(p)),
       size: parseFloat(String(bidSizes[i] ?? "0")),
     }))
-    const a = askPrices
-      .slice(0, 15)
-      .map((p, i) => ({
-        price: parseFloat(String(p)),
-        size: parseFloat(String(askSizes[i] ?? "0")),
-      }))
-      .reverse()
+    // Asks: lowest price first (already sorted from API)
+    const a = askPrices.slice(0, 15).map((p, i) => ({
+      price: parseFloat(String(p)),
+      size: parseFloat(String(askSizes[i] ?? "0")),
+    }))
 
     const allSizes = [...a.map((l) => l.size), ...b.map((l) => l.size)]
     return { asks: a, bids: b, maxSize: Math.max(...allSizes, 1) }
@@ -257,6 +262,27 @@ export default function ReplayPage() {
   const recentTrades = useMemo(
     () => trades.slice(-30).reverse(),
     [trades],
+  )
+
+  // Map token_id to outcome label (UP/DOWN or Yes/No)
+  const tokenIds = archive?.token_ids ?? []
+  const outcomeLabel = useCallback(
+    (tokenId: string) => {
+      const idx = tokenIds.indexOf(tokenId)
+      if (idx === 0) return "UP"
+      if (idx === 1) return "DOWN"
+      return tokenId.slice(0, 6) + "…"
+    },
+    [tokenIds],
+  )
+  const outcomeBadgeClass = useCallback(
+    (tokenId: string) => {
+      const idx = tokenIds.indexOf(tokenId)
+      if (idx === 0) return "bg-emerald-100 text-emerald-700 border-emerald-300"
+      if (idx === 1) return "bg-rose-100 text-rose-700 border-rose-300"
+      return ""
+    },
+    [tokenIds],
   )
 
   // ── Loading state ────────────────────────────────────────
@@ -366,70 +392,132 @@ export default function ReplayPage() {
             </CardContent>
           </Card>
 
-          {/* 3) Orderbook with depth bars */}
+          {/* 3) Orderbook — side-by-side Bids | Asks */}
           <Card>
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-sm">Orderbook</CardTitle>
-                <span className="text-xs text-muted-foreground">
+                <div className="flex items-center gap-1.5">
+                  <CardTitle className="text-sm">挂单深度</CardTitle>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border text-[10px] text-muted-foreground">?</span>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" className="max-w-md text-left">
+                        <p className="font-medium">Orderbook 挂单深度</p>
+                        <p className="mt-1">显示当前时间点市场上<b>尚未成交</b>的挂单。</p>
+                        <p className="mt-1"><span className="text-emerald-400">Bids (买单)</span>：其他用户愿意以该价格买入的挂单量。</p>
+                        <p><span className="text-rose-400">Asks (卖单)</span>：其他用户愿意以该价格卖出的挂单量。</p>
+                        <p className="mt-1 text-muted">深度条宽度 = 该档位挂单量 ÷ 最大档位挂单量 × 100%</p>
+                        <p className="mt-1 text-muted">Spread = Best Ask - Best Bid（买卖价差）</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+                <span className="text-xs text-muted-foreground tabular-nums">
                   Spread: {spread ? `${(spread * 100).toFixed(1)}¢` : "—"}
                 </span>
               </div>
-              <div className="flex justify-between px-2 text-[10px] text-muted-foreground">
-                <span>Price</span>
-                <span>Size</span>
-              </div>
             </CardHeader>
             <CardContent className="p-0">
-              <ScrollArea className="h-72">
-                <div className="flex flex-col">
-                  {asks.length > 0 ? (
-                    asks.map((level, i) => (
-                      <LevelRow
-                        key={`a-${i}`}
-                        price={level.price}
-                        size={level.size}
-                        maxSize={maxSize}
-                        side="ask"
-                      />
-                    ))
-                  ) : (
-                    <div className="py-6 text-center text-xs text-muted-foreground">
-                      暂无卖单数据
+              <div className="grid grid-cols-2 divide-x">
+                {/* Bids (left) */}
+                <div>
+                  <div className="flex items-center justify-between border-b bg-muted/30 px-2 py-1">
+                    <span className="text-[10px] font-medium text-emerald-600">Bids (买单)</span>
+                    <div className="flex gap-6 text-[10px] text-muted-foreground">
+                      <span>Price</span>
+                      <span>Size</span>
                     </div>
-                  )}
-                  {/* Mid price separator */}
-                  <div className="border-y bg-muted/50 px-2 py-1 text-center text-xs font-medium tabular-nums">
-                    Mid: {mid ? `${(mid * 100).toFixed(1)}¢` : "—"}
                   </div>
-                  {bids.length > 0 ? (
-                    bids.map((level, i) => (
-                      <LevelRow
-                        key={`b-${i}`}
-                        price={level.price}
-                        size={level.size}
-                        maxSize={maxSize}
-                        side="bid"
-                      />
-                    ))
-                  ) : (
-                    <div className="py-6 text-center text-xs text-muted-foreground">
-                      暂无买单数据
-                    </div>
-                  )}
+                  <ScrollArea className="h-64">
+                    {bids.length > 0 ? (
+                      bids.map((level, i) => (
+                        <LevelRow
+                          key={`b-${i}`}
+                          price={level.price}
+                          size={level.size}
+                          maxSize={maxSize}
+                          side="bid"
+                        />
+                      ))
+                    ) : (
+                      <div className="py-8 text-center text-xs text-muted-foreground">
+                        暂无买单
+                      </div>
+                    )}
+                  </ScrollArea>
                 </div>
-              </ScrollArea>
+                {/* Asks (right) */}
+                <div>
+                  <div className="flex items-center justify-between border-b bg-muted/30 px-2 py-1">
+                    <span className="text-[10px] font-medium text-rose-600">Asks (卖单)</span>
+                    <div className="flex gap-6 text-[10px] text-muted-foreground">
+                      <span>Price</span>
+                      <span>Size</span>
+                    </div>
+                  </div>
+                  <ScrollArea className="h-64">
+                    {asks.length > 0 ? (
+                      asks.map((level, i) => (
+                        <LevelRow
+                          key={`a-${i}`}
+                          price={level.price}
+                          size={level.size}
+                          maxSize={maxSize}
+                          side="ask"
+                        />
+                      ))
+                    ) : (
+                      <div className="py-8 text-center text-xs text-muted-foreground">
+                        暂无卖单
+                      </div>
+                    )}
+                  </ScrollArea>
+                </div>
+              </div>
+              {/* Mid price bar */}
+              <div className="border-t bg-muted/50 px-2 py-1 text-center text-xs font-medium tabular-nums">
+                Mid: {mid ? `${(mid * 100).toFixed(1)}¢` : "—"}
+              </div>
             </CardContent>
           </Card>
 
-          {/* 4) Trades activity */}
+          {/* 4) Trades activity — with outcome (UP/DOWN) */}
           <Card>
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-sm">交易活动</CardTitle>
+                <div className="flex items-center gap-1.5">
+                  <CardTitle className="text-sm">推断成交</CardTitle>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border text-[10px] text-muted-foreground">?</span>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" className="max-w-md text-left">
+                        <p className="font-medium">推断成交 (Inferred Trades)</p>
+                        <p className="mt-1">通过对比相邻两次 Orderbook 快照（间隔 ~1秒）的差异推断出的真实成交。</p>
+                        <p className="mt-1 font-medium">计算规则：</p>
+                        <p>• Ask 侧挂单量减少 → 有人买入 (BUY)</p>
+                        <p>• Bid 侧挂单量减少 → 有人卖出 (SELL)</p>
+                        <p className="mt-1"><b>均价</b> = Σ(消耗量 × 该档价格) ÷ Σ消耗量</p>
+                        <p><b>数量</b> = 被消耗的总份额（跨多个价位累计）</p>
+                        <p className="mt-1 text-muted">注意：数量可能远大于当前 Orderbook 单档挂单量，因为成交发生在上一秒快照中存在而当前已被消耗的挂单上。</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
                 <Badge variant="outline" className="text-xs font-mono">
                   {trades.length}
                 </Badge>
+              </div>
+              {/* Column legend */}
+              <div className="flex items-center gap-2 px-3 text-[10px] text-muted-foreground mt-1">
+                <span className="w-14 shrink-0">时间</span>
+                <span className="w-12 shrink-0 text-center">标的</span>
+                <span className="w-12 shrink-0 text-center">方向</span>
+                <span className="flex-1 text-right">均价</span>
+                <span className="w-12 shrink-0 text-right">数量</span>
               </div>
             </CardHeader>
             <CardContent className="p-0">
@@ -439,15 +527,24 @@ export default function ReplayPage() {
                     {recentTrades.map((t, i) => (
                       <div
                         key={`trade-${i}`}
-                        className="flex items-center justify-between border-b px-3 py-1 text-xs last:border-b-0"
+                        className="flex items-center gap-2 border-b px-3 py-1 text-xs last:border-b-0"
                       >
-                        <span className="font-mono text-muted-foreground w-16">
+                        <span className="font-mono text-muted-foreground w-14 shrink-0">
                           {fmtTs(t.timestamp)}
                         </span>
                         <Badge
+                          variant="outline"
+                          className={cn(
+                            "text-[10px] w-12 shrink-0 justify-center px-0 py-0",
+                            outcomeBadgeClass(t.token_id),
+                          )}
+                        >
+                          {outcomeLabel(t.token_id)}
+                        </Badge>
+                        <Badge
                           variant={t.side === "BUY" ? "default" : "secondary"}
                           className={cn(
-                            "text-xs px-1.5 py-0",
+                            "text-xs w-12 shrink-0 justify-center px-0 py-0",
                             t.side === "BUY"
                               ? "bg-emerald-600 hover:bg-emerald-700"
                               : "bg-rose-600 hover:bg-rose-700 text-white",
@@ -455,10 +552,10 @@ export default function ReplayPage() {
                         >
                           {t.side === "BUY" ? "↑买" : "↓卖"}
                         </Badge>
-                        <span className="font-mono text-right w-16">
+                        <span className="font-mono text-right flex-1">
                           {(t.price * 100).toFixed(1)}¢
                         </span>
-                        <span className="font-mono text-right text-muted-foreground w-12">
+                        <span className="font-mono text-right text-muted-foreground w-12 shrink-0">
                           {t.size.toFixed(0)}
                         </span>
                       </div>

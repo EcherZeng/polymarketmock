@@ -202,6 +202,7 @@ async def get_replay_snapshot(slug: str, timestamp: str) -> dict:
         if tts <= timestamp:
             snapshot_trades.append({
                 "timestamp": tts,
+                "token_id": t.get("token_id", ""),
                 "side": t.get("side", "UNKNOWN"),
                 "price": t.get("price", 0),
                 "size": t.get("size", 0),
