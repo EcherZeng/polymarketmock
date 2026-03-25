@@ -175,6 +175,32 @@ export interface RealtimeTradesResponse {
   count: number
 }
 
+// ── Polymarket Data API trades (real on-chain) ───────────────────────────
+
+export interface PolymarketTrade {
+  proxyWallet: string
+  side: string
+  asset: string
+  conditionId: string
+  size: number
+  price: number
+  timestamp: number
+  title: string
+  slug: string
+  icon: string
+  eventSlug: string
+  outcome: string
+  outcomeIndex: number
+  name: string
+  pseudonym: string
+  transactionHash: string
+}
+
+export interface PolymarketTradesResponse {
+  trades: PolymarketTrade[]
+  count: number
+}
+
 // ── Event status ────────────────────────────────────────────────────────────
 
 export interface EventStatusResponse {

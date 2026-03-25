@@ -153,6 +153,96 @@ def write_trade_snapshot(
     pq.write_table(table, file_path)
 
 
+# ── Live trade snapshots (real on-chain trades from Data API) ────────────────
+
+LIVE_TRADE_SCHEMA = pa.schema([
+    ("timestamp", pa.string()),
+    ("transaction_hash", pa.string()),
+    ("market_id", pa.string()),
+    ("token_id", pa.string()),
+    ("condition_id", pa.string()),
+    ("side", pa.string()),
+    ("price", pa.float64()),
+    ("size", pa.float64()),
+    ("outcome", pa.string()),
+    ("pseudonym", pa.string()),
+    ("name", pa.string()),
+])
+
+
+def write_live_trade(
+    market_id: str,
+    token_id: str,
+    condition_id: str,
+    side: str,
+    price: float,
+    size: float,
+    outcome: str = "",
+    pseudonym: str = "",
+    name: str = "",
+    transaction_hash: str = "",
+    timestamp: str | None = None,
+) -> None:
+    now = datetime.now(timezone.utc)
+    date_str = now.strftime("%Y-%m-%d")
+    dir_path = os.path.join(settings.data_dir, "live_trades", market_id)
+    _ensure_dir(dir_path)
+    file_path = os.path.join(dir_path, f"{date_str}.parquet")
+
+    table = pa.table(
+        {
+            "timestamp": [timestamp or now.isoformat()],
+            "transaction_hash": [transaction_hash],
+            "market_id": [market_id],
+            "token_id": [token_id],
+            "condition_id": [condition_id],
+            "side": [side],
+            "price": [price],
+            "size": [size],
+            "outcome": [outcome],
+            "pseudonym": [pseudonym],
+            "name": [name],
+        },
+        schema=LIVE_TRADE_SCHEMA,
+    )
+
+    if os.path.exists(file_path):
+        existing = pq.read_table(file_path)
+        table = pa.concat_tables([existing, table])
+
+    pq.write_table(table, file_path)
+
+
+def query_live_trades(
+    market_id: str,
+    start_time: str | None = None,
+    end_time: str | None = None,
+) -> list[dict]:
+    dir_path = os.path.join(settings.data_dir, "live_trades", market_id)
+    if not os.path.isdir(dir_path):
+        return []
+
+    glob = os.path.join(dir_path, "*.parquet").replace("\\", "/")
+    sql = f"SELECT * FROM read_parquet('{glob}') "
+    conditions: list[str] = []
+    if start_time:
+        conditions.append(f"timestamp >= '{start_time}'")
+    if end_time:
+        conditions.append(f"timestamp <= '{end_time}'")
+    if conditions:
+        sql += " WHERE " + " AND ".join(conditions)
+    sql += " ORDER BY timestamp"
+
+    con = duckdb.connect()
+    try:
+        result = con.execute(sql).fetchdf()
+        return result.to_dict(orient="records")
+    except Exception:
+        return []
+    finally:
+        con.close()
+
+
 # ── Query helpers via DuckDB ────────────────────────────────────────────────
 
 def query_prices(

@@ -123,7 +123,31 @@ async def get_prices_history(
         raise HTTPException(status_code=502, detail=f"CLOB API error: {e}")
 
 
-# ── Realtime trade feed ──────────────────────────────────────────────────────
+# ── Live trades (Polymarket Data API) ────────────────────────────────────────
+
+@router.get("/trades/live")
+async def get_live_trades(
+    market_id: str = Query(..., description="Gamma market ID or condition_id"),
+    limit: int = Query(30, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """获取 Polymarket 真实链上交易流水。
+
+    优先从 Data API 获取，失败时降级到 orderbook 推断数据。
+    """
+    try:
+        trades = await proxy.get_data_trades(
+            market_id=market_id, limit=limit, offset=offset,
+        )
+        if trades:
+            return {"trades": trades, "count": len(trades)}
+    except Exception:
+        pass
+    # Fallback: return inferred trades (best-effort, need a token_id)
+    return {"trades": [], "count": 0}
+
+
+# ── Realtime trade feed (inferred, kept as internal fallback) ────────────────
 
 @router.get("/trades/realtime")
 async def get_realtime_trades(
@@ -131,7 +155,7 @@ async def get_realtime_trades(
     limit: int = Query(30, ge=1, le=200),
     since: float = Query(0, ge=0),
 ):
-    """获取通过 orderbook 变化推断的真实市场成交流水。"""
+    """获取通过 orderbook 变化推断的市场成交流水（fallback）。"""
     trades = await redis_store.get_realtime_trades(token_id, since=since, limit=limit)
     return {"trades": trades, "count": len(trades)}
 

@@ -186,6 +186,33 @@ async def get_prices_history(
     return history
 
 
+# ── Data API (real on-chain trades) ──────────────────────────────────────────
+
+async def get_data_trades(
+    market_id: str,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    """Fetch real trades from Polymarket Data API.
+
+    ``market_id`` can be a numeric Gamma market ID or a condition_id hex.
+    """
+    cache_key = f"data:trades:{market_id}:{limit}:{offset}"
+    cached = await cache_get(cache_key)
+    if cached:
+        return json.loads(cached)
+
+    url = f"{settings.data_api_url}/trades"
+    params: dict = {"market": market_id, "limit": limit, "offset": offset}
+    resp = await _get_client().get(url, params=params)
+    resp.raise_for_status()
+    data = resp.json()
+    if not isinstance(data, list):
+        data = []
+    await cache_set(cache_key, json.dumps(data), settings.cache_ttl_data_trades)
+    return data
+
+
 # ── Search / Resolve ─────────────────────────────────────────────────────────
 
 async def search_events(

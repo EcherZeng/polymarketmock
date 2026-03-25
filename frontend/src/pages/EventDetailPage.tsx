@@ -325,8 +325,12 @@ export default function EventDetailPage() {
           )}
 
           {/* Activity Feed */}
-          {selectedTokenId && (
-            <ActivityFeed tokenId={selectedTokenId} enabled={!isEnded} />
+          {selectedTokenId && selectedMarket && (
+            <ActivityFeed
+              tokenId={selectedTokenId}
+              marketId={selectedMarket.id}
+              enabled={!isEnded}
+            />
           )}
         </div>
 

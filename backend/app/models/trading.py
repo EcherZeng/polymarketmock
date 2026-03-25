@@ -117,3 +117,32 @@ class TradeRecord(BaseModel):
     total_cost: float
     slippage_pct: float
     timestamp: str
+
+
+# ── Polymarket Data API trades (real on-chain trades) ────────────────────────
+
+
+class PolymarketTrade(BaseModel):
+    proxy_wallet: str = Field(default="", alias="proxyWallet")
+    side: str
+    asset: str = ""
+    condition_id: str = Field(default="", alias="conditionId")
+    size: float = 0
+    price: float = 0
+    timestamp: int = 0
+    title: str = ""
+    slug: str = ""
+    icon: str = ""
+    event_slug: str = Field(default="", alias="eventSlug")
+    outcome: str = ""
+    outcome_index: int = Field(default=0, alias="outcomeIndex")
+    name: str = ""
+    pseudonym: str = ""
+    transaction_hash: str = Field(default="", alias="transactionHash")
+
+    model_config = {"populate_by_name": True}
+
+
+class PolymarketTradesResponse(BaseModel):
+    trades: list[PolymarketTrade] = []
+    count: int = 0

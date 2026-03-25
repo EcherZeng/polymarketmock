@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     # Polymarket API URLs
     gamma_api_url: str = "https://gamma-api.polymarket.com"
     clob_api_url: str = "https://clob.polymarket.com"
+    data_api_url: str = "https://data-api.polymarket.com"
 
     # Redis
     redis_url: str = "redis://localhost:6379"
@@ -21,6 +22,7 @@ class Settings(BaseSettings):
     cache_ttl_markets: int = 60
     cache_ttl_orderbook: int = 5
     cache_ttl_midpoint: int = 1
+    cache_ttl_data_trades: int = 3
 
     # Data collector intervals (seconds)
     collector_orderbook_interval: int = 15
@@ -32,8 +34,14 @@ class Settings(BaseSettings):
     # Live event: faster orderbook polling (seconds)
     collector_live_interval: int = 1
 
+    # Data API live trades collection interval (seconds)
+    collector_live_trades_interval: int = 5
+
     # Max realtime trades per token kept in Redis
     realtime_trades_max: int = 500
+
+    # Max live trades per market kept in Redis
+    live_trades_max: int = 500
 
     model_config = {"env_prefix": "PM_"}
 

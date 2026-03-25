@@ -11,6 +11,7 @@ import type {
   Orderbook,
   OrderRequest,
   OrderResult,
+  PolymarketTradesResponse,
   Position,
   PriceHistoryPoint,
   RealtimeTradesResponse,
@@ -184,6 +185,17 @@ export async function fetchRealtimeTrades(
 ): Promise<RealtimeTradesResponse> {
   const { data } = await api.get("/trades/realtime", {
     params: { token_id: tokenId, limit, since },
+  })
+  return data
+}
+
+export async function fetchLiveTrades(
+  marketId: string,
+  limit = 30,
+  offset = 0,
+): Promise<PolymarketTradesResponse> {
+  const { data } = await api.get("/trades/live", {
+    params: { market_id: marketId, limit, offset },
   })
   return data
 }

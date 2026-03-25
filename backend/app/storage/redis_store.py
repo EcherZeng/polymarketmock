@@ -237,6 +237,46 @@ async def trim_realtime_trades(token_id: str, max_count: int) -> None:
         await get_redis().zremrangebyrank(key, 0, count - max_count - 1)
 
 
+# ── Live trades (real on-chain trades from Data API) ────────────────────────
+
+LIVE_TRADES_PREFIX = "live:trades:"
+LIVE_SEEN_PREFIX = "live:seen:"
+
+
+async def add_live_trade(market_id: str, timestamp_score: float, trade_json: str) -> None:
+    await get_redis().zadd(f"{LIVE_TRADES_PREFIX}{market_id}", {trade_json: timestamp_score})
+
+
+async def get_live_trades(
+    market_id: str,
+    since: float = 0,
+    limit: int = 30,
+) -> list[dict]:
+    raw = await get_redis().zrangebyscore(
+        f"{LIVE_TRADES_PREFIX}{market_id}",
+        min=since,
+        max=float("inf"),
+        start=0,
+        num=limit,
+    )
+    return [json.loads(r) for r in reversed(raw)]
+
+
+async def trim_live_trades(market_id: str, max_count: int) -> None:
+    key = f"{LIVE_TRADES_PREFIX}{market_id}"
+    count = await get_redis().zcard(key)
+    if count > max_count:
+        await get_redis().zremrangebyrank(key, 0, count - max_count - 1)
+
+
+async def is_live_trade_seen(market_id: str, tx_hash: str) -> bool:
+    return await get_redis().sismember(f"{LIVE_SEEN_PREFIX}{market_id}", tx_hash)
+
+
+async def mark_live_trade_seen(market_id: str, tx_hash: str) -> None:
+    await get_redis().sadd(f"{LIVE_SEEN_PREFIX}{market_id}", tx_hash)
+
+
 # ── Event status ─────────────────────────────────────────────────────────────
 
 EVENT_STATUS_PREFIX = "event:status:"
