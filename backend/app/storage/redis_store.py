@@ -251,15 +251,21 @@ async def get_live_trades(
     market_id: str,
     since: float = 0,
     limit: int = 30,
+    offset: int = 0,
 ) -> list[dict]:
-    raw = await get_redis().zrangebyscore(
+    """Return latest live trades, newest first."""
+    raw = await get_redis().zrevrangebyscore(
         f"{LIVE_TRADES_PREFIX}{market_id}",
-        min=since,
         max=float("inf"),
-        start=0,
+        min=since,
+        start=offset,
         num=limit,
     )
-    return [json.loads(r) for r in reversed(raw)]
+    return [json.loads(r) for r in raw]
+
+
+async def get_live_trades_count(market_id: str) -> int:
+    return await get_redis().zcard(f"{LIVE_TRADES_PREFIX}{market_id}")
 
 
 async def trim_live_trades(market_id: str, max_count: int) -> None:

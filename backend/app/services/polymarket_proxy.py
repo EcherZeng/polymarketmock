@@ -188,6 +188,31 @@ async def get_prices_history(
 
 # ── Data API (real on-chain trades) ──────────────────────────────────────────
 
+async def _resolve_condition_id(market_id: str) -> str:
+    """If *market_id* is a numeric Gamma ID, resolve to conditionId hex.
+
+    Data API returns stale data when queried with numeric IDs but fresh data
+    when queried with the conditionId hex string.  Cache the mapping for 120 s.
+    """
+    if market_id.startswith("0x"):
+        return market_id  # already a conditionId
+
+    cache_key = f"resolve:cid:{market_id}"
+    cached = await cache_get(cache_key)
+    if cached:
+        return cached
+
+    try:
+        market = await get_market(market_id)  # uses its own 60 s cache
+        cid = market.get("conditionId", "")
+        if cid:
+            await cache_set(cache_key, cid, 120)
+            return cid
+    except Exception:
+        pass
+    return market_id  # fallback: pass as-is
+
+
 async def get_data_trades(
     market_id: str,
     limit: int = 50,
@@ -196,14 +221,17 @@ async def get_data_trades(
     """Fetch real trades from Polymarket Data API.
 
     ``market_id`` can be a numeric Gamma market ID or a condition_id hex.
+    Numeric IDs are automatically resolved to conditionId for fresh results.
     """
-    cache_key = f"data:trades:{market_id}:{limit}:{offset}"
+    condition_id = await _resolve_condition_id(market_id)
+
+    cache_key = f"data:trades:{condition_id}:{limit}:{offset}"
     cached = await cache_get(cache_key)
     if cached:
         return json.loads(cached)
 
     url = f"{settings.data_api_url}/trades"
-    params: dict = {"market": market_id, "limit": limit, "offset": offset}
+    params: dict = {"market": condition_id, "limit": limit, "offset": offset}
     resp = await _get_client().get(url, params=params)
     resp.raise_for_status()
     data = resp.json()
@@ -211,6 +239,25 @@ async def get_data_trades(
         data = []
     await cache_set(cache_key, json.dumps(data), settings.cache_ttl_data_trades)
     return data
+
+
+async def get_data_trades_raw(
+    market_id: str,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    """Fetch real trades **without caching** so every call sees the latest.
+
+    Used by the /trades/live endpoint to guarantee fresh data for Redis seeding.
+    """
+    condition_id = await _resolve_condition_id(market_id)
+
+    url = f"{settings.data_api_url}/trades"
+    params: dict = {"market": condition_id, "limit": limit, "offset": offset}
+    resp = await _get_client().get(url, params=params)
+    resp.raise_for_status()
+    data = resp.json()
+    return data if isinstance(data, list) else []
 
 
 # ── Search / Resolve ─────────────────────────────────────────────────────────

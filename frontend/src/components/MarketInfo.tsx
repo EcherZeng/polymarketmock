@@ -8,18 +8,27 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { fetchMarket } from "@/api/client"
+import { fetchMarket, fetchMidpoint } from "@/api/client"
 import type { Market } from "@/types"
 
 interface MarketInfoProps {
   marketId: string
+  tokenId?: string
 }
 
-export default function MarketInfo({ marketId }: MarketInfoProps) {
+export default function MarketInfo({ marketId, tokenId }: MarketInfoProps) {
   const { data: market, isLoading } = useQuery<Market>({
     queryKey: ["market", marketId],
     queryFn: () => fetchMarket(marketId),
     refetchInterval: 30_000,
+  })
+
+  // Real-time midpoint from CLOB API (much faster than Gamma cache)
+  const { data: midData } = useQuery({
+    queryKey: ["midpoint", tokenId],
+    queryFn: () => fetchMidpoint(tokenId!),
+    enabled: !!tokenId,
+    refetchInterval: 3_000,
   })
 
   if (isLoading) {
@@ -46,12 +55,18 @@ export default function MarketInfo({ marketId }: MarketInfoProps) {
     ? market.outcomes
     : (() => { try { return JSON.parse(market.outcomes as unknown as string) } catch { return [] } })()
 
-  const yesPrice = prices[0]
-    ? (parseFloat(prices[0]) * 100).toFixed(1)
-    : "–"
-  const noPrice = prices[1]
-    ? (parseFloat(prices[1]) * 100).toFixed(1)
-    : "–"
+  // Use real-time midpoint when available, falling back to Gamma static prices
+  const liveMid = midData?.mid
+  const yesPrice = liveMid != null
+    ? (liveMid * 100).toFixed(1)
+    : prices[0]
+      ? (parseFloat(prices[0]) * 100).toFixed(1)
+      : "–"
+  const noPrice = liveMid != null
+    ? ((1 - liveMid) * 100).toFixed(1)
+    : prices[1]
+      ? (parseFloat(prices[1]) * 100).toFixed(1)
+      : "–"
 
   return (
     <Card>
@@ -62,7 +77,14 @@ export default function MarketInfo({ marketId }: MarketInfoProps) {
             {market.active ? "Active" : "Closed"}
           </Badge>
         </div>
-        <CardDescription>ID: {market.id}</CardDescription>
+        <CardDescription className="flex flex-col gap-0.5">
+          <span>Market ID: {market.id}</span>
+          {market.conditionId && (
+            <span className="truncate text-[10px] text-muted-foreground/70">
+              Condition: {market.conditionId}
+            </span>
+          )}
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-2 gap-4 text-sm">

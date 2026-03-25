@@ -278,7 +278,7 @@ export default function EventDetailPage() {
         {/* Left column: markets list + selected market details */}
         <div className="flex flex-col gap-4 lg:col-span-8">
           {/* Market info card — prices, volume, liquidity, spread */}
-          {selectedMarket && <MarketInfo marketId={selectedMarket.id} />}
+          {selectedMarket && <MarketInfo marketId={selectedMarket.id} tokenId={selectedTokenId || undefined} />}
 
           {/* Sub-markets list */}
           {event.markets.length > 1 && (
@@ -329,6 +329,7 @@ export default function EventDetailPage() {
             <ActivityFeed
               tokenId={selectedTokenId}
               marketId={selectedMarket.id}
+              conditionId={selectedMarket.conditionId}
               enabled={!isEnded}
             />
           )}

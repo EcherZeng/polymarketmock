@@ -1,30 +1,28 @@
-WARNING:  WatchFiles detected changes in 'app\storage\duckdb_store.py', '_test_timeline.py', 'app\models\backtest.py', 'app\config.py', 'app\main.py', 'app\routers\markets.py', 'app\services\backtest_engine.py', 'app\storage\data_collector.py', 'app\storage\redis_store.py', 'app\services\event_lifecycle.py', '_health.py'. Reloading...
- INFO:     Shutting down
-INFO:     Waiting for application shutdown.
-INFO:     Application shutdown complete.
-INFO:     Finished server process [16916]
-WARNING:  WatchFiles detected changes in 'app\storage\data_collector.py'. Reloading...
- Traceback (most recent call last):
-  File "<string>", line 1, in <module>
-    from multiprocessing.spawn import spawn_main; spawn_main(parent_pid=5296, pipe_handle=612)
-                                                  ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\v-yujieceng\AppData\Local\Programs\Python\Python313\Lib\multiprocessing\spawn.py", line 122, in spawn_main
-    exitcode = _main(fd, parent_sentinel)
-  File "C:\Users\v-yujieceng\AppData\Local\Programs\Python\Python313\Lib\multiprocessing\spawn.py", line 132, in _main       
-    self = reduction.pickle.load(from_parent)
-  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\uvicorn\__init__.py", line 1, in <module>
-    from uvicorn.config import Config
-  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\uvicorn\config.py", line 3, in <module>
-    import asyncio
-  File "C:\Users\v-yujieceng\AppData\Local\Programs\Python\Python313\Lib\asyncio\__init__.py", line 8, in <module>
-    from .base_events import *
-  File "C:\Users\v-yujieceng\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 45, in <module>       
-    from . import staggered
-  File "C:\Users\v-yujieceng\AppData\Local\Programs\Python\Python313\Lib\asyncio\staggered.py", line 9, in <module>
-    from . import locks
-  File "C:\Users\v-yujieceng\AppData\Local\Programs\Python\Python313\Lib\asyncio\locks.py", line 219, in <module>
-    class Condition(_ContextManagerMixin, mixins._LoopBoundMixin):
-    ...<129 lines>...
-            self.notify(len(self._waiters))
-  File "C:\Users\v-yujieceng\AppData\Local\Programs\Python\Python313\Lib\asyncio\locks.py", line 219, in Condition
-    class Condition(_ContextManagerMixin, mixins._LoopBoundMixin):
+INFO:     127.0.0.1:62545 - "GET /api/account HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60834 - "GET /api/btc/markets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61326 - "GET /api/resolve/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61327 - "POST /api/watch/event/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61329 - "GET /api/event/status/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57830 - "GET /api/account HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62928 - "GET /api/event/status/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59062 - "GET /api/resolve/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59064 - "GET /api/event/status/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59070 - "POST /api/watch/event/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59072 - "GET /api/markets/1701571 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54731 - "GET /api/trades/live?market_id=0x04ffd4d19eaa489b6591729ca14e708ff57d2da4e6b4871b8b9b28ab0f4ceebc&limit=40&offset=0 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59068 - "GET /api/account HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59074 - "GET /api/midpoint?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50514 - "GET /api/orderbook?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51617 - "GET /api/midpoint?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52391 - "GET /api/event/status/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64402 - "GET /api/event/status/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52655 - "GET /api/trades/live?market_id=0x04ffd4d19eaa489b6591729ca14e708ff57d2da4e6b4871b8b9b28ab0f4ceebc&limit=40&offset=0 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51773 - "GET /api/midpoint?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49401 - "GET /api/orderbook?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60946 - "GET /api/event/status/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58756 - "GET /api/trades/live?market_id=0x04ffd4d19eaa489b6591729ca14e708ff57d2da4e6b4871b8b9b28ab0f4ceebc&limit=40&offset=0 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58758 - "GET /api/midpoint?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54172 - "GET /api/account HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51043 - "GET /api/orderbook?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58405 - "GET /api/midpoint?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52291 - "GET /api/trades/live?market_id=0x04ffd4d19eaa489b6591729ca14e708ff57d2da4e6b4871b8b9b28ab0f4ceebc&limit=40&offset=0 HTTP/1.1" 200 OK

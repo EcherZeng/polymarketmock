@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, HTTPException, Query
 
+from app.config import settings
 from app.services import polymarket_proxy as proxy
 from app.storage import redis_store
 
@@ -133,17 +136,48 @@ async def get_live_trades(
 ):
     """获取 Polymarket 真实链上交易流水。
 
-    优先从 Data API 获取，失败时降级到 orderbook 推断数据。
+    每次请求都从 Data API 获取最新快照，同时将新交易去重写入 Redis sorted set 以
+    实现跨轮询的累积。最终返回 API 最新数据 + Redis 历史的合并结果，按时间降序。
     """
+    # 1. Fetch fresh snapshot from Data API (NO cache — must see latest trades)
+    api_trades: list[dict] = []
     try:
-        trades = await proxy.get_data_trades(
-            market_id=market_id, limit=limit, offset=offset,
+        api_trades = await proxy.get_data_trades_raw(
+            market_id=market_id, limit=50, offset=0,
         )
-        if trades:
-            return {"trades": trades, "count": len(trades)}
     except Exception:
         pass
-    # Fallback: return inferred trades (best-effort, need a token_id)
+
+    # 2. Seed new API trades into Redis for accumulation (dedup by txHash)
+    for t in api_trades:
+        tx_hash = t.get("transactionHash", "")
+        if not tx_hash:
+            continue
+        try:
+            if await redis_store.is_live_trade_seen(market_id, tx_hash):
+                continue
+            await redis_store.mark_live_trade_seen(market_id, tx_hash)
+            ts = float(t.get("timestamp", 0))
+            await redis_store.add_live_trade(market_id, ts, json.dumps(t))
+        except Exception:
+            continue
+    try:
+        await redis_store.trim_live_trades(market_id, settings.live_trades_max)
+    except Exception:
+        pass
+
+    # 3. Read accumulated trades from Redis (includes freshly seeded + historical)
+    trades = await redis_store.get_live_trades(
+        market_id=market_id, limit=limit, offset=offset,
+    )
+    if trades:
+        total = await redis_store.get_live_trades_count(market_id)
+        return {"trades": trades, "count": total}
+
+    # 4. Fallback: Redis unavailable — return raw API snapshot
+    if api_trades:
+        page = api_trades[offset:offset + limit]
+        return {"trades": page, "count": len(api_trades)}
     return {"trades": [], "count": 0}
 
 

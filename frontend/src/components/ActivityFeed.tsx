@@ -24,6 +24,7 @@ import type { PolymarketTrade, TradeRecord } from "@/types"
 interface ActivityFeedProps {
   tokenId: string
   marketId?: string
+  conditionId?: string
   enabled?: boolean
 }
 
@@ -55,16 +56,19 @@ function shortenPseudonym(pseudonym: string, name: string): string {
   return "匿名"
 }
 
-export default function ActivityFeed({ tokenId, marketId, enabled = true }: ActivityFeedProps) {
+export default function ActivityFeed({ tokenId, marketId, conditionId, enabled = true }: ActivityFeedProps) {
   const [tab, setTab] = useState("market")
   const prevTradesRef = useRef<Set<string>>(new Set())
   const [newTxHashes, setNewTxHashes] = useState<Set<string>>(new Set())
 
+  // Prefer conditionId for Data API (returns fresher data than numeric marketId)
+  const liveQueryId = conditionId || marketId
+
   // ── Live trades from Polymarket Data API ─────────────────
   const { data: liveData, isLoading: liveLoading } = useQuery({
-    queryKey: ["liveTrades", marketId],
-    queryFn: () => fetchLiveTrades(marketId!, 40),
-    enabled: !!marketId && enabled && tab === "market",
+    queryKey: ["liveTrades", liveQueryId],
+    queryFn: () => fetchLiveTrades(liveQueryId!, 40),
+    enabled: !!liveQueryId && enabled && tab === "market",
     refetchInterval: 3_000,
   })
 
@@ -83,19 +87,27 @@ export default function ActivityFeed({ tokenId, marketId, enabled = true }: Acti
   useEffect(() => {
     if (liveTrades.length === 0) return
     const currentHashes = new Set(liveTrades.map((t) => t.transactionHash))
+
+    // First load: seed ref without triggering animations
+    if (prevTradesRef.current.size === 0) {
+      prevTradesRef.current = currentHashes
+      return
+    }
+
     const fresh = new Set<string>()
     for (const hash of currentHashes) {
       if (!prevTradesRef.current.has(hash)) {
         fresh.add(hash)
       }
     }
+    // Always update ref so stale hashes don't persist
+    prevTradesRef.current = currentHashes
+
     if (fresh.size > 0) {
       setNewTxHashes(fresh)
-      // Clear animation flags after animation duration
       const timer = setTimeout(() => setNewTxHashes(new Set()), 1500)
       return () => clearTimeout(timer)
     }
-    prevTradesRef.current = currentHashes
   }, [liveTrades])
 
   // ── Live stats: BUY/SELL counts in recent window ─────────
