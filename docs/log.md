@@ -1,28 +1,13 @@
-INFO:     127.0.0.1:62545 - "GET /api/account HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60834 - "GET /api/btc/markets HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61326 - "GET /api/resolve/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61327 - "POST /api/watch/event/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61329 - "GET /api/event/status/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57830 - "GET /api/account HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62928 - "GET /api/event/status/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59062 - "GET /api/resolve/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59064 - "GET /api/event/status/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59070 - "POST /api/watch/event/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59072 - "GET /api/markets/1701571 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54731 - "GET /api/trades/live?market_id=0x04ffd4d19eaa489b6591729ca14e708ff57d2da4e6b4871b8b9b28ab0f4ceebc&limit=40&offset=0 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59068 - "GET /api/account HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59074 - "GET /api/midpoint?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50514 - "GET /api/orderbook?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51617 - "GET /api/midpoint?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52391 - "GET /api/event/status/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64402 - "GET /api/event/status/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52655 - "GET /api/trades/live?market_id=0x04ffd4d19eaa489b6591729ca14e708ff57d2da4e6b4871b8b9b28ab0f4ceebc&limit=40&offset=0 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51773 - "GET /api/midpoint?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49401 - "GET /api/orderbook?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60946 - "GET /api/event/status/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58756 - "GET /api/trades/live?market_id=0x04ffd4d19eaa489b6591729ca14e708ff57d2da4e6b4871b8b9b28ab0f4ceebc&limit=40&offset=0 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58758 - "GET /api/midpoint?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54172 - "GET /api/account HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51043 - "GET /api/orderbook?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58405 - "GET /api/midpoint?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52291 - "GET /api/trades/live?market_id=0x04ffd4d19eaa489b6591729ca14e708ff57d2da4e6b4871b8b9b28ab0f4ceebc&limit=40&offset=0 HTTP/1.1" 200 OK
+Something went wrong
+Rendered more hooks than during the previous render.
+Error: Rendered more hooks than during the previous render.
+    at updateWorkInProgressHook (http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=a02a04fc:4327:12)
+    at updateMemo (http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=a02a04fc:4944:15)
+    at Object.useMemo (http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=a02a04fc:13276:13)
+    at exports.useMemo (http://localhost:5173/node_modules/.vite/deps/react.js?v=a02a04fc:736:31)
+    at EventDetailPage (http://localhost:5173/src/pages/EventDetailPage.tsx:243:21)
+    at Object.react_stack_bottom_frame (http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=a02a04fc:12868:12)
+    at renderWithHooks (http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=a02a04fc:4213:19)
+    at updateFunctionComponent (http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=a02a04fc:5569:16)
+    at beginWork (http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=a02a04fc:6140:20)
+    at runWithFiberInDEV (http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=a02a04fc:851:66)

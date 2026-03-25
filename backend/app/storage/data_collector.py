@@ -2,6 +2,9 @@
 
 Supports adaptive polling: LIVE event tokens are polled at higher frequency
 and trade activity is inferred from orderbook diffs.
+
+When the WebSocket manager is connected, expensive HTTP polling is suppressed
+(WS already updates Redis caches + Parquet). Polling resumes automatically as fallback.
 """
 
 from __future__ import annotations
@@ -21,6 +24,15 @@ logger = logging.getLogger(__name__)
 
 # In-memory prev-snapshots for fast diff (avoids extra Redis round-trip per tick)
 _prev_books: dict[str, dict] = {}
+
+
+def _ws_connected() -> bool:
+    """Check if the WS manager is connected (non-import-time safe)."""
+    try:
+        from app.services.ws_manager import get_ws_manager
+        return get_ws_manager().connected
+    except Exception:
+        return False
 
 
 async def _collect_and_detect(token_id: str, market_id: str) -> None:
@@ -223,12 +235,14 @@ async def _collector_loop() -> None:
                 logger.warning("Limit order check failed: %s", e)
 
         # High-frequency trade detection for watched tokens
+        # Skip when WS is connected — WS handles orderbook updates + trade detection
         if live_counter >= settings.collector_live_interval:
             live_counter = 0
-            try:
-                await _live_tick()
-            except Exception as e:
-                logger.warning("Live tick failed: %s", e)
+            if not _ws_connected():
+                try:
+                    await _live_tick()
+                except Exception as e:
+                    logger.warning("Live tick failed: %s", e)
 
         # Orderbook snapshots (standard interval, also writes Parquet)
         if ob_counter >= settings.collector_orderbook_interval:
@@ -237,16 +251,19 @@ async def _collector_loop() -> None:
             # This is a catch-all for the standard path
             pass
 
-        # Price snapshots
+        # Price snapshots — skip when WS provides best_bid_ask
         if price_counter >= settings.collector_price_interval:
             price_counter = 0
-            try:
-                await _collect_prices()
-            except Exception as e:
-                logger.warning("Price collection failed: %s", e)
+            if not _ws_connected():
+                try:
+                    await _collect_prices()
+                except Exception as e:
+                    logger.warning("Price collection failed: %s", e)
 
         # Collect real trades from Data API
-        if live_trades_counter >= settings.collector_live_trades_interval:
+        # When WS connected, reduce frequency (WS covers most trades via last_trade_price)
+        live_trades_threshold = 30 if _ws_connected() else settings.collector_live_trades_interval
+        if live_trades_counter >= live_trades_threshold:
             live_trades_counter = 0
             try:
                 await _collect_live_trades()

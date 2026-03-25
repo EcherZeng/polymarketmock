@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useParams, Link, useNavigate } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { Badge } from "@/components/ui/badge"
@@ -14,6 +14,7 @@ import PriceChart from "@/components/PriceChart"
 import TradingPanel from "@/components/TradingPanel"
 import PositionTable from "@/components/PositionTable"
 import ActivityFeed from "@/components/ActivityFeed"
+import useMarketWebSocket from "@/hooks/useMarketWebSocket"
 import { resolveSlug, fetchEventStatus, fetchNextEvent, watchEvent } from "@/api/client"
 import type { Market, MarketEvent, EventStatusResponse, NextEventResponse } from "@/types"
 
@@ -160,6 +161,14 @@ export default function EventDetailPage() {
     [selectedMarket],
   )
 
+  // ── Derived values (must be before early returns for hooks below) ──
+  const tokens = selectedMarket ? parseTokenIds(selectedMarket.clobTokenIds) : []
+  const outcomes = selectedMarket ? parseOutcomes(selectedMarket.outcomes) : []
+
+  // ── WebSocket real-time data ──────────────────────────────
+  const wsAssetIds = useMemo(() => tokens.filter(Boolean), [tokens.join(",")])
+  const ws = useMarketWebSocket(wsAssetIds)
+
   if (isLoading) {
     return (
       <div className="flex flex-col gap-4">
@@ -190,9 +199,6 @@ export default function EventDetailPage() {
       </div>
     )
   }
-
-  const tokens = selectedMarket ? parseTokenIds(selectedMarket.clobTokenIds) : []
-  const outcomes = selectedMarket ? parseOutcomes(selectedMarket.outcomes) : []
 
   return (
     <div className="flex flex-col gap-4">
@@ -278,7 +284,7 @@ export default function EventDetailPage() {
         {/* Left column: markets list + selected market details */}
         <div className="flex flex-col gap-4 lg:col-span-8">
           {/* Market info card — prices, volume, liquidity, spread */}
-          {selectedMarket && <MarketInfo marketId={selectedMarket.id} tokenId={selectedTokenId || undefined} />}
+          {selectedMarket && <MarketInfo marketId={selectedMarket.id} tokenId={selectedTokenId || undefined} wsBestBidAsk={ws.bestBidAsk} wsConnected={ws.connected} />}
 
           {/* Sub-markets list */}
           {event.markets.length > 1 && (
@@ -319,8 +325,8 @@ export default function EventDetailPage() {
           {/* Orderbook + Price chart side by side on large screens */}
           {selectedTokenId && (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <OrderbookView tokenId={selectedTokenId} />
-              <PriceChart tokenId={selectedTokenId} />
+              <OrderbookView tokenId={selectedTokenId} wsOrderbook={ws.orderbook} wsConnected={ws.connected} />
+              <PriceChart tokenId={selectedTokenId} wsBestBidAsk={ws.bestBidAsk} wsConnected={ws.connected} />
             </div>
           )}
 
@@ -331,6 +337,8 @@ export default function EventDetailPage() {
               marketId={selectedMarket.id}
               conditionId={selectedMarket.conditionId}
               enabled={!isEnded}
+              wsTrades={ws.trades}
+              wsConnected={ws.connected}
             />
           )}
         </div>
@@ -343,6 +351,8 @@ export default function EventDetailPage() {
               outcomes={outcomes}
               tokenIds={tokens}
               onSwitchToken={handleSwitchToken}
+              wsBestBidAsk={ws.bestBidAsk}
+              wsConnected={ws.connected}
             />
           )}
           {selectedTokenId && isEnded && (

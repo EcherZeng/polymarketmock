@@ -3,7 +3,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import account, backtest, markets, trading
+from app.routers import account, backtest, markets, trading, ws
+from app.services.ws_manager import start_ws_manager, stop_ws_manager
 from app.storage.data_collector import start_collector, stop_collector
 from app.storage.redis_store import close_redis, init_redis
 
@@ -11,9 +12,11 @@ from app.storage.redis_store import close_redis, init_redis
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_redis()
+    ws_mgr = await start_ws_manager()
     collector_task = await start_collector()
     yield
     await stop_collector(collector_task)
+    await stop_ws_manager()
     await close_redis()
 
 
@@ -36,6 +39,7 @@ app.include_router(markets.router, prefix="/api", tags=["Markets"])
 app.include_router(trading.router, prefix="/api/trading", tags=["Trading"])
 app.include_router(account.router, prefix="/api/account", tags=["Account"])
 app.include_router(backtest.router, prefix="/api/backtest", tags=["Backtest"])
+app.include_router(ws.router, tags=["WebSocket"])
 
 
 @app.get("/api/health")

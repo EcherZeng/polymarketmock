@@ -201,6 +201,85 @@ export interface PolymarketTradesResponse {
   count: number
 }
 
+// ── WebSocket event types (Polymarket Market Channel) ───────────────────────
+
+export interface WsBookEvent {
+  event_type: "book"
+  asset_id: string
+  market: string
+  bids: PriceLevel[]
+  asks: PriceLevel[]
+  timestamp: string
+  hash: string
+}
+
+export interface WsPriceChangeItem {
+  asset_id: string
+  price: string
+  size: string
+  side: "BUY" | "SELL"
+  hash: string
+  best_bid?: string
+  best_ask?: string
+}
+
+export interface WsPriceChangeEvent {
+  event_type: "price_change"
+  market: string
+  price_changes: WsPriceChangeItem[]
+  timestamp: string
+}
+
+export interface WsLastTradeEvent {
+  event_type: "last_trade_price"
+  asset_id: string
+  market: string
+  price: string
+  size: string
+  side: "BUY" | "SELL"
+  timestamp: string
+  fee_rate_bps?: string
+  transaction_hash?: string
+}
+
+export interface WsBestBidAskEvent {
+  event_type: "best_bid_ask"
+  asset_id: string
+  market: string
+  best_bid: string
+  best_ask: string
+  spread: string
+  timestamp: string
+}
+
+export interface WsTickSizeChangeEvent {
+  event_type: "tick_size_change"
+  asset_id: string
+  market: string
+  old_tick_size: string
+  new_tick_size: string
+  timestamp: string
+}
+
+export interface WsMarketResolvedEvent {
+  event_type: "market_resolved"
+  id: string
+  market: string
+  assets_ids: string[]
+  winning_asset_id: string
+  winning_outcome: string
+  timestamp: string
+  tags?: string[]
+}
+
+export type WsMarketEvent =
+  | WsBookEvent
+  | WsPriceChangeEvent
+  | WsLastTradeEvent
+  | WsBestBidAskEvent
+  | WsTickSizeChangeEvent
+  | WsMarketResolvedEvent
+
 // ── Event status ────────────────────────────────────────────────────────────
 
 export interface EventStatusResponse {

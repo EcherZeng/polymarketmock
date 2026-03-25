@@ -14,13 +14,16 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
 import { estimateOrder, fetchMidpoint, placeOrder } from "@/api/client"
-import type { EstimateResult, OrderSide, OrderType } from "@/types"
+import type { EstimateResult, OrderSide, OrderType, WsBestBidAskEvent } from "@/types"
 
 interface TradingPanelProps {
   tokenId: string
   outcomes?: string[]
   tokenIds?: string[]
   onSwitchToken?: (tokenId: string) => void
+  /** WS best_bid_ask event (if provided, HTTP polling is reduced) */
+  wsBestBidAsk?: WsBestBidAskEvent | null
+  wsConnected?: boolean
 }
 
 export default function TradingPanel({
@@ -28,6 +31,8 @@ export default function TradingPanel({
   outcomes = [],
   tokenIds = [],
   onSwitchToken,
+  wsBestBidAsk,
+  wsConnected,
 }: TradingPanelProps) {
   const queryClient = useQueryClient()
   const [side, setSide] = useState<OrderSide>("BUY")
@@ -36,15 +41,19 @@ export default function TradingPanel({
   const [price, setPrice] = useState("")
   const [estimate, setEstimate] = useState<EstimateResult | null>(null)
 
-  // Real-time midpoint for probability display
+  // Real-time midpoint — prefer WS, fallback to HTTP polling
   const { data: midData } = useQuery({
     queryKey: ["midpoint", tokenId],
     queryFn: () => fetchMidpoint(tokenId),
-    enabled: !!tokenId,
-    refetchInterval: 3_000,
+    enabled: !!tokenId && !wsConnected,
+    refetchInterval: wsConnected ? false : 3_000,
   })
 
-  const midPrice = midData?.mid ?? 0
+  // Derive midPrice: WS best_bid_ask → HTTP midpoint → 0
+  const wsMid = wsBestBidAsk
+    ? (parseFloat(wsBestBidAsk.best_bid) + parseFloat(wsBestBidAsk.best_ask)) / 2
+    : null
+  const midPrice = wsMid ?? midData?.mid ?? 0
   const compPrice = midPrice > 0 ? 1 - midPrice : 0
 
   // Determine current outcome index

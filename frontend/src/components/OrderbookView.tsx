@@ -13,6 +13,13 @@ import type { PriceLevel } from "@/types"
 
 interface OrderbookViewProps {
   tokenId: string
+  /** WS-driven orderbook (if provided, HTTP polling is disabled) */
+  wsOrderbook?: {
+    bids: PriceLevel[]
+    asks: PriceLevel[]
+    lastTradePrice: string
+  } | null
+  wsConnected?: boolean
 }
 
 function LevelRow({
@@ -45,14 +52,22 @@ function LevelRow({
   )
 }
 
-export default function OrderbookView({ tokenId }: OrderbookViewProps) {
+export default function OrderbookView({ tokenId, wsOrderbook, wsConnected }: OrderbookViewProps) {
+  // HTTP polling fallback — disabled when WS provides data
   const { data: book, isLoading } = useQuery({
     queryKey: ["orderbook", tokenId],
     queryFn: () => fetchOrderbook(tokenId),
     refetchInterval: 5_000,
+    enabled: !wsConnected,
   })
 
-  if (isLoading) {
+  // Prefer WS data, fall back to HTTP
+  const bidsRaw = wsOrderbook?.bids ?? book?.bids ?? []
+  const asksRaw = wsOrderbook?.asks ?? book?.asks ?? []
+  const lastTradePrice = wsOrderbook?.lastTradePrice ?? book?.last_trade_price ?? ""
+  const hasData = bidsRaw.length > 0 || asksRaw.length > 0
+
+  if (isLoading && !wsConnected) {
     return (
       <Card>
         <CardHeader>
@@ -65,10 +80,10 @@ export default function OrderbookView({ tokenId }: OrderbookViewProps) {
     )
   }
 
-  if (!book) return null
+  if (!hasData) return null
 
-  const asks = [...(book.asks ?? [])].slice(0, 15).reverse()
-  const bids = (book.bids ?? []).slice(0, 15)
+  const asks = [...asksRaw].slice(0, 15).reverse()
+  const bids = bidsRaw.slice(0, 15)
 
   const allSizes = [
     ...asks.map((l) => parseFloat(l.size)),
@@ -97,8 +112,8 @@ export default function OrderbookView({ tokenId }: OrderbookViewProps) {
               <LevelRow key={`a-${i}`} level={level} maxSize={maxSize} side="ask" />
             ))}
             <div className="border-y bg-muted/50 px-2 py-1 text-center text-xs font-medium">
-              {book.last_trade_price
-                ? `Last: ${(parseFloat(book.last_trade_price) * 100).toFixed(1)}¢`
+              {lastTradePrice
+                ? `Last: ${(parseFloat(lastTradePrice) * 100).toFixed(1)}¢`
                 : "–"}
             </div>
             {bids.map((level, i) => (

@@ -9,26 +9,29 @@ import {
 } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { fetchMarket, fetchMidpoint } from "@/api/client"
-import type { Market } from "@/types"
+import type { Market, WsBestBidAskEvent } from "@/types"
 
 interface MarketInfoProps {
   marketId: string
   tokenId?: string
+  /** WS best_bid_ask event (if provided, HTTP polling is reduced) */
+  wsBestBidAsk?: WsBestBidAskEvent | null
+  wsConnected?: boolean
 }
 
-export default function MarketInfo({ marketId, tokenId }: MarketInfoProps) {
+export default function MarketInfo({ marketId, tokenId, wsBestBidAsk, wsConnected }: MarketInfoProps) {
   const { data: market, isLoading } = useQuery<Market>({
     queryKey: ["market", marketId],
     queryFn: () => fetchMarket(marketId),
     refetchInterval: 30_000,
   })
 
-  // Real-time midpoint from CLOB API (much faster than Gamma cache)
+  // Real-time midpoint from CLOB API — disabled when WS provides data
   const { data: midData } = useQuery({
     queryKey: ["midpoint", tokenId],
     queryFn: () => fetchMidpoint(tokenId!),
-    enabled: !!tokenId,
-    refetchInterval: 3_000,
+    enabled: !!tokenId && !wsConnected,
+    refetchInterval: wsConnected ? false : 3_000,
   })
 
   if (isLoading) {
@@ -56,7 +59,11 @@ export default function MarketInfo({ marketId, tokenId }: MarketInfoProps) {
     : (() => { try { return JSON.parse(market.outcomes as unknown as string) } catch { return [] } })()
 
   // Use real-time midpoint when available, falling back to Gamma static prices
-  const liveMid = midData?.mid
+  // Priority: WS best_bid_ask → HTTP midpoint → Gamma cache
+  const wsMid = wsBestBidAsk
+    ? (parseFloat(wsBestBidAsk.best_bid) + parseFloat(wsBestBidAsk.best_ask)) / 2
+    : null
+  const liveMid = wsMid ?? midData?.mid
   const yesPrice = liveMid != null
     ? (liveMid * 100).toFixed(1)
     : prices[0]
@@ -113,7 +120,9 @@ export default function MarketInfo({ marketId, tokenId }: MarketInfoProps) {
           <div>
             <div>Spread</div>
             <div className="font-medium text-foreground">
-              {((market.spread ?? 0) * 100).toFixed(1)}¢
+              {wsBestBidAsk
+                ? `${(parseFloat(wsBestBidAsk.spread) * 100).toFixed(1)}¢`
+                : `${((market.spread ?? 0) * 100).toFixed(1)}¢`}
             </div>
           </div>
         </div>

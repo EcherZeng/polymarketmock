@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     # Max live trades per market kept in Redis
     live_trades_max: int = 500
 
+    # WebSocket — Polymarket Market Channel
+    ws_url: str = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
+    ws_ping_interval: int = 10
+    ws_reconnect_max: int = 30
+
     model_config = {"env_prefix": "PM_"}
 
 

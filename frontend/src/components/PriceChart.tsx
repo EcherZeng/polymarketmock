@@ -9,21 +9,27 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { createChart, LineSeries, type IChartApi, type ISeriesApi, type LineData, type Time } from "lightweight-charts"
 import { fetchMidpoint } from "@/api/client"
+import type { WsBestBidAskEvent } from "@/types"
 
 interface PriceChartProps {
   tokenId: string
+  /** WS best_bid_ask event (if provided, HTTP polling is reduced) */
+  wsBestBidAsk?: WsBestBidAskEvent | null
+  wsConnected?: boolean
 }
 
-export default function PriceChart({ tokenId }: PriceChartProps) {
+export default function PriceChart({ tokenId, wsBestBidAsk, wsConnected }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<"Line"> | null>(null)
   const dataRef = useRef<LineData<Time>[]>([])
 
+  // HTTP polling fallback — disabled when WS is connected
   const { data: midData } = useQuery({
     queryKey: ["midpoint", tokenId],
     queryFn: () => fetchMidpoint(tokenId),
-    refetchInterval: 1_000,
+    refetchInterval: wsConnected ? false : 1_000,
+    enabled: !wsConnected,
   })
 
   useEffect(() => {
@@ -74,13 +80,28 @@ export default function PriceChart({ tokenId }: PriceChartProps) {
     }
   }, [tokenId])
 
+  // Push data from HTTP polling
   useEffect(() => {
-    if (!midData || !seriesRef.current) return
+    if (!midData || !seriesRef.current || wsConnected) return
     const now = Math.floor(Date.now() / 1000) as Time
     const point: LineData<Time> = { time: now, value: midData.mid }
     dataRef.current.push(point)
     seriesRef.current.setData(dataRef.current)
-  }, [midData])
+  }, [midData, wsConnected])
+
+  // Push data from WS best_bid_ask events
+  useEffect(() => {
+    if (!wsBestBidAsk || !seriesRef.current) return
+    const bestBid = parseFloat(wsBestBidAsk.best_bid)
+    const bestAsk = parseFloat(wsBestBidAsk.best_ask)
+    const mid = (bestBid + bestAsk) / 2
+    if (mid <= 0) return
+    const now = Math.floor(Date.now() / 1000) as Time
+    const point: LineData<Time> = { time: now, value: mid }
+    // Use update() for single-point append (more efficient than setData)
+    dataRef.current.push(point)
+    seriesRef.current.update(point)
+  }, [wsBestBidAsk])
 
   return (
     <Card>
