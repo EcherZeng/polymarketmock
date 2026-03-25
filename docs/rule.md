@@ -4,7 +4,7 @@ Polymarket mock trading platform. Proxies real market data (Gamma + CLOB API) fo
 
 ## STACK (locked — no substitutions)
 
-**Backend**: Python >=3.11, FastAPI >=0.115, uvicorn >=0.30, httpx(async) >=0.27, Pydantic v2 + pydantic-settings, Redis 7 (redis-py async + hiredis), DuckDB >=1.0 + PyArrow >=17.0, pandas >=2.0 + numpy >=1.26 (DuckDB fetchdf)
+**Backend**: Python >=3.11, FastAPI >=0.115, uvicorn >=0.30, httpx(async) >=0.27, Pydantic v2 + pydantic-settings, Redis 7 (redis-py async + hiredis), DuckDB >=1.0 + PyArrow >=17.0, pandas >=2.0 + numpy >=1.26 (DuckDB fetchdf), websockets >=12.0 (Polymarket Market Channel)
 **Frontend**: React + TypeScript + Vite 8, shadcn/ui (style:`radix-nova`, icons:`lucide`, Tailwind CSS v4), Lightweight Charts (TradingView), @tanstack/react-query, React Router, axios
 **Infra**: Docker Compose
 **BANNED**: styled-components, MUI, Ant Design, SQLAlchemy, Flask, Django, Next.js, Zustand, Redux
@@ -16,8 +16,8 @@ backend/app/
   main.py          — FastAPI entry (lifespan)
   config.py        — pydantic-settings, env prefix PM_
   models/          — Pydantic models only (no logic)
-  routers/         — thin route handlers (delegate to services)
-  services/        — business logic (matching, proxy, settlement, backtest)
+  routers/         — thin route handlers (delegate to services), ws.py (WebSocket endpoint)
+  services/        — business logic (matching, proxy, settlement, backtest, ws_manager)
   storage/         — Redis wrapper, DuckDB/Parquet, data collector
   utils/           — pure functions (NO I/O, NO async)
 frontend/src/
@@ -99,6 +99,20 @@ Services: `redis` :6379 (AOF), `backend` :8071 (depends redis, mount `./backend/
 Env: `PM_REDIS_URL=redis://redis:6379`, `PM_GAMMA_API_URL=https://gamma-api.polymarket.com`, `PM_CLOB_API_URL=https://clob.polymarket.com`, `PM_DATA_DIR=/app/data`.
 Local dev: Vite proxies `/api` → `http://localhost:8071`.
 
+## WEBSOCKET (Polymarket Market Channel)
+
+**Architecture**: Backend proxy mode — backend maintains single upstream WS to Polymarket (`wss://ws-subscriptions-clob.polymarket.com/ws/market`), processes events (updates Redis + writes Parquet), fans out to frontend clients via `/ws/market` endpoint.
+
+**Upstream events**: `book` (full orderbook snapshot), `price_change` (incremental delta), `last_trade_price`, `best_bid_ask`, `tick_size_change`, `new_market`, `market_resolved`. Polymarket may send batch JSON arrays — always handle both `dict` and `list[dict]`.
+
+**App-level heartbeat**: Send `"PING"` every `ws_ping_interval` seconds. Polymarket replies `"PONG"`. MUST disable library-level ping (`ping_interval=None`) in `websockets.connect()` — Polymarket does not respond to WS protocol pings.
+
+**Frontend protocol**: Client sends `{"type": "subscribe", "asset_ids": [...]}` / `{"type": "unsubscribe", ...}` / `"PING"`. Server pushes Polymarket-format events. React hook: `useMarketWebSocket(assetIds)` — single connection per market page, auto-reconnect with exponential backoff.
+
+**Fallback**: When WS connected, `data_collector` skips orderbook/price HTTP polling and reduces live-trade polling to 30s. When WS disconnects, full HTTP polling resumes automatically.
+
+**Config**: `PM_WS_URL`, `PM_WS_PING_INTERVAL` (10s), `PM_WS_RECONNECT_MAX` (30s).
+
 ## SECURITY
 
 Single-user, no auth/JWT/session. CORS allow-all (dev). No real funds. Validate all numeric input in router/Pydantic (`gt=0`, `ge=0`, `le=1`). Parameterized DuckDB queries only — no SQL string concatenation.
@@ -109,4 +123,8 @@ Single-user, no auth/JWT/session. CORS allow-all (dev). No real funds. Validate 
 
 **New shadcn component**: `cd frontend && npx shadcn@latest add <name>`. Never create/edit `components/ui/` manually.
 
-**Run project**: `docker-compose up -d` or locally: Redis (`docker run -d --name redis -p 6379:6379 redis:7-alpine redis-server --appendonly yes`) + backend (`cd backend && pip install -e . && uvicorn app.main:app --reload --port 8071`) + frontend (`cd frontend && npm install && npm run dev`).
+**Run project**: `docker-compose up -d` or locally:
+1. Venv: `python -m venv .venv && .venv\Scripts\Activate.ps1` (Windows) / `source .venv/bin/activate` (Linux/macOS)
+2. Redis: `docker compose -f docker-compose-redis-only.yml up -d`
+3. Backend: `cd backend && pip install -e . && uvicorn app.main:app --reload --port 8071`
+4. Frontend: `cd frontend && npm install && npm run dev`
