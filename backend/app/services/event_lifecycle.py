@@ -11,6 +11,7 @@ from app.services.polymarket_proxy import resolve_event_slug, get_event
 from app.storage import redis_store
 from app.storage.duckdb_store import (
     archive_event_data,
+    get_archive_data_range,
     list_available_markets,
     query_orderbooks,
     query_prices,
@@ -237,12 +238,27 @@ async def archive_event(slug: str, market_info: dict) -> dict:
     except Exception as e:
         logger.warning("Partial archive for %s: %s", slug, e)
 
+    # Derive event start/end from slug timestamp (e.g. btc-updown-5m-1774505700)
+    event_start = start_str
+    event_end = end_str
+    m = re.search(r"(\d+)m-(\d{10})$", slug)
+    if m:
+        interval_min = int(m.group(1))
+        epoch = int(m.group(2))
+        event_start = datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
+        event_end = datetime.fromtimestamp(epoch + interval_min * 60, tz=timezone.utc).isoformat()
+
+    # Get actual data time range from parquet files
+    data_range = get_archive_data_range(slug)
+
     meta = {
         "slug": slug,
         "title": market_info.get("question", slug),
         "market_id": market_id,
-        "start_time": start_str,
-        "end_time": end_str,
+        "start_time": event_start,
+        "end_time": event_end,
+        "data_start": data_range.get("data_start", ""),
+        "data_end": data_range.get("data_end", ""),
         "token_ids": token_ids,
         "prices_count": prices_count,
         "orderbooks_count": ob_count,
@@ -280,5 +296,35 @@ async def list_archived_events() -> list[dict]:
     for slug in slugs:
         meta = await redis_store.get_archive_meta(slug)
         if meta:
+            meta = await _ensure_archive_meta_fields(slug, meta)
             result.append(meta)
     return result
+
+
+async def _ensure_archive_meta_fields(slug: str, meta: dict) -> dict:
+    """Backfill data_start/data_end and fix start_time/end_time for legacy archives."""
+    changed = False
+
+    # Backfill data_start / data_end from parquet if missing
+    if not meta.get("data_start") or not meta.get("data_end"):
+        data_range = get_archive_data_range(slug)
+        meta["data_start"] = data_range.get("data_start", "")
+        meta["data_end"] = data_range.get("data_end", "")
+        changed = True
+
+    # Fix start_time / end_time from slug timestamp if they look wrong
+    m = re.search(r"(\d+)m-(\d{10})$", slug)
+    if m:
+        interval_min = int(m.group(1))
+        epoch = int(m.group(2))
+        correct_start = datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
+        correct_end = datetime.fromtimestamp(epoch + interval_min * 60, tz=timezone.utc).isoformat()
+        if meta.get("start_time") != correct_start or meta.get("end_time") != correct_end:
+            meta["start_time"] = correct_start
+            meta["end_time"] = correct_end
+            changed = True
+
+    if changed:
+        await redis_store.set_archive_meta(slug, json.dumps(meta))
+
+    return meta

@@ -323,7 +323,8 @@ def _build_time_filter(start_time: str | None, end_time: str | None) -> str:
 
 
 def _post_process_rows(rows: list[dict], has_side: bool = False) -> list[dict]:
-    """Decode token_id and side back to strings, convert timestamps to ISO."""
+    """Decode token_id and side back to strings, convert timestamps to ISO, convert ndarray to list."""
+    import numpy as np
     for r in rows:
         tid = r.get("token_id")
         if isinstance(tid, int):
@@ -337,6 +338,10 @@ def _post_process_rows(rows: list[dict], has_side: bool = False) -> list[dict]:
             r["timestamp"] = ts.isoformat()
         elif hasattr(ts, "isoformat"):
             r["timestamp"] = ts.isoformat()
+        # Convert numpy arrays to Python lists for JSON serialization
+        for key, val in r.items():
+            if isinstance(val, np.ndarray):
+                r[key] = val.tolist()
     return rows
 
 
@@ -543,6 +548,36 @@ def _query_parquet_file(
         return []
     finally:
         con.close()
+
+
+def get_archive_data_range(slug: str) -> dict:
+    """Return the actual min/max timestamps from archived parquet data."""
+    archive_dir = os.path.join(settings.data_dir, "archives", slug)
+    all_min: list[str] = []
+    all_max: list[str] = []
+    for name in ["prices", "orderbooks", "live_trades"]:
+        fp = os.path.join(archive_dir, f"{name}.parquet").replace("\\", "/")
+        if not os.path.exists(fp):
+            continue
+        con = duckdb.connect()
+        try:
+            row = con.execute(
+                f"SELECT MIN(timestamp) as mn, MAX(timestamp) as mx FROM read_parquet('{fp}')"
+            ).fetchdf().to_dict(orient="records")[0]
+            mn = row.get("mn")
+            mx = row.get("mx")
+            if mn is not None and hasattr(mn, "isoformat"):
+                all_min.append(mn.isoformat())
+            if mx is not None and hasattr(mx, "isoformat"):
+                all_max.append(mx.isoformat())
+        except Exception:
+            pass
+        finally:
+            con.close()
+    return {
+        "data_start": min(all_min) if all_min else "",
+        "data_end": max(all_max) if all_max else "",
+    }
 
 
 def list_archives() -> list[str]:

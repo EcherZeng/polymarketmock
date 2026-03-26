@@ -229,3 +229,4 @@ Traceback (most recent call last):
   File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\fastapi\encoders.py", line 336, in jsonable_encoder
     raise ValueError(errors) from e
 ValueError: [TypeError('cannot convert dictionary update sequence element #0 to a sequence'), TypeError('vars() argument must have __dict__ attribute')]
+

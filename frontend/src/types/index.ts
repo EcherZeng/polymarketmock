@@ -310,6 +310,8 @@ export interface ArchivedEvent {
   market_id: string
   start_time: string
   end_time: string
+  data_start: string
+  data_end: string
   token_ids: string[]
   prices_count: number
   orderbooks_count: number

@@ -331,7 +331,7 @@ export default function SessionHistoryPage() {
                       {fmtDuration(archive.start_time, archive.end_time)}
                     </TableCell>
                     <TableCell className="text-center text-xs text-muted-foreground font-mono">
-                      {fmtDuration(archive.start_time, archive.archived_at)}
+                      {fmtDuration(archive.data_start, archive.data_end)}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
