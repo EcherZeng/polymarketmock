@@ -130,25 +130,26 @@ export default function OrderbookView({ tokens, outcomes, wsOrderbooks, wsConnec
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm">Orderbook</CardTitle>
         </div>
-        <div className="flex justify-between text-[10px] text-muted-foreground px-2">
-          <span>Price</span>
-          <span>Size</span>
-        </div>
       </CardHeader>
       <CardContent className="p-0">
-        <ScrollArea className="max-h-[540px]">
-          <div className="flex flex-col divide-y">
-            {tokens.map((tid, i) => (
-              <TokenOrderbook
-                key={tid}
-                tokenId={tid}
-                label={outcomes[i] ?? `Token ${i + 1}`}
-                wsOrderbook={wsOrderbooks?.[tid]}
-                wsConnected={wsConnected}
-              />
-            ))}
-          </div>
-        </ScrollArea>
+        <div className={cn("grid gap-px bg-border", tokens.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
+          {tokens.map((tid, i) => (
+            <div key={tid} className="bg-background">
+              <div className="flex justify-between text-[10px] text-muted-foreground px-2 pb-0.5">
+                <span>Price</span>
+                <span>Size</span>
+              </div>
+              <ScrollArea className="max-h-[400px]">
+                <TokenOrderbook
+                  tokenId={tid}
+                  label={outcomes[i] ?? `Token ${i + 1}`}
+                  wsOrderbook={wsOrderbooks?.[tid]}
+                  wsConnected={wsConnected}
+                />
+              </ScrollArea>
+            </div>
+          ))}
+        </div>
       </CardContent>
     </Card>
   )

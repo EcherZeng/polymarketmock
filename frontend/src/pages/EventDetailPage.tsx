@@ -291,9 +291,9 @@ export default function EventDetailPage() {
             </div>
           )}
 
-          {/* Orderbook + Price chart side by side on large screens */}
+          {/* Orderbook (UP left, DOWN right) then Price chart below */}
           {tokens.length > 0 && (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="flex flex-col gap-4">
               <OrderbookView tokens={tokens} outcomes={outcomes} wsOrderbooks={ws.orderbooks} wsConnected={ws.connected} />
               <PriceChart tokens={tokens} outcomes={outcomes} wsBestBidAsks={ws.bestBidAsks} wsConnected={ws.connected} />
             </div>
