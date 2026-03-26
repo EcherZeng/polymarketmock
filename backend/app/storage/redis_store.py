@@ -351,6 +351,24 @@ async def delete_archive_meta(slug: str) -> bool:
     return bool(await get_redis().delete(f"{ARCHIVE_PREFIX}{slug}"))
 
 
+# ── Recording sessions (WS data completeness tracking) ──────────────────────
+
+RECORDING_SESSION_PREFIX = "recording:session:"
+
+
+async def set_recording_session(slug: str, session_json: str) -> None:
+    await get_redis().set(f"{RECORDING_SESSION_PREFIX}{slug}", session_json)
+
+
+async def get_recording_session(slug: str) -> dict | None:
+    val = await get_redis().get(f"{RECORDING_SESSION_PREFIX}{slug}")
+    return json.loads(val) if val else None
+
+
+async def delete_recording_session(slug: str) -> None:
+    await get_redis().delete(f"{RECORDING_SESSION_PREFIX}{slug}")
+
+
 # ── Replay sessions ─────────────────────────────────────────────────────────
 
 REPLAY_SESSION_PREFIX = "replay:session:"

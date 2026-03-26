@@ -9,7 +9,7 @@ import type {
   WsMarketEvent,
 } from "@/types"
 
-interface OrderbookState {
+export interface OrderbookState {
   bids: PriceLevel[]
   asks: PriceLevel[]
   timestamp: string
@@ -18,7 +18,13 @@ interface OrderbookState {
 }
 
 interface MarketWsState {
+  /** Per-token orderbooks (keyed by asset_id) */
+  orderbooks: Record<string, OrderbookState>
+  /** Per-token best bid/ask (keyed by asset_id) */
+  bestBidAsks: Record<string, WsBestBidAskEvent>
+  /** Legacy: first token's orderbook (backward compat) */
   orderbook: OrderbookState | null
+  /** Legacy: most recent best_bid_ask event (backward compat) */
   bestBidAsk: WsBestBidAskEvent | null
   lastTrade: WsLastTradeEvent | null
   trades: WsLastTradeEvent[]
@@ -52,6 +58,8 @@ export default function useMarketWebSocket(assetIds: string[]): MarketWsState {
   const eventEndedRef = useRef(false)
 
   const [state, setState] = useState<MarketWsState>({
+    orderbooks: {},
+    bestBidAsks: {},
     orderbook: null,
     bestBidAsk: null,
     lastTrade: null,
@@ -89,22 +97,28 @@ export default function useMarketWebSocket(assetIds: string[]): MarketWsState {
       for (const lv of event.asks) asks.set(lv.price, lv.size)
       obMapRef.current.set(assetId, { bids, asks })
 
-      setState((prev) => ({
-        ...prev,
-        orderbook: {
-          bids: sortedLevels(bids, true),
-          asks: sortedLevels(asks, false),
-          timestamp: event.timestamp,
-          hash: event.hash,
-          lastTradePrice: prev.orderbook?.lastTradePrice ?? "",
-        },
-      }))
+      const newOb: OrderbookState = {
+        bids: sortedLevels(bids, true),
+        asks: sortedLevels(asks, false),
+        timestamp: event.timestamp,
+        hash: event.hash,
+        lastTradePrice: "",
+      }
+      setState((prev) => {
+        newOb.lastTradePrice = prev.orderbooks[assetId]?.lastTradePrice ?? ""
+        return {
+          ...prev,
+          orderbooks: { ...prev.orderbooks, [assetId]: newOb },
+          orderbook: assetId === assetIdsRef.current[0] ? newOb : prev.orderbook,
+        }
+      })
     },
     [sortedLevels],
   )
 
   const applyPriceChange = useCallback(
     (changes: WsMarketEvent & { event_type: "price_change" }) => {
+      const affectedIds = new Set<string>()
       for (const pc of changes.price_changes) {
         const entry = obMapRef.current.get(pc.asset_id)
         if (!entry) continue
@@ -115,21 +129,29 @@ export default function useMarketWebSocket(assetIds: string[]): MarketWsState {
         } else {
           map.set(pc.price, pc.size)
         }
-
-        // Only update state if this asset is one we're tracking (first in list)
-        if (pc.asset_id === assetIdsRef.current[0]) {
-          setState((prev) => ({
-            ...prev,
-            orderbook: {
-              bids: sortedLevels(entry.bids, true),
-              asks: sortedLevels(entry.asks, false),
-              timestamp: changes.timestamp,
-              hash: prev.orderbook?.hash ?? "",
-              lastTradePrice: prev.orderbook?.lastTradePrice ?? "",
-            },
-          }))
-        }
+        affectedIds.add(pc.asset_id)
       }
+
+      if (affectedIds.size === 0) return
+
+      setState((prev) => {
+        const newObs = { ...prev.orderbooks }
+        let newOrderbook = prev.orderbook
+        for (const aid of affectedIds) {
+          const entry = obMapRef.current.get(aid)
+          if (!entry) continue
+          const ob: OrderbookState = {
+            bids: sortedLevels(entry.bids, true),
+            asks: sortedLevels(entry.asks, false),
+            timestamp: changes.timestamp,
+            hash: newObs[aid]?.hash ?? "",
+            lastTradePrice: newObs[aid]?.lastTradePrice ?? "",
+          }
+          newObs[aid] = ob
+          if (aid === assetIdsRef.current[0]) newOrderbook = ob
+        }
+        return { ...prev, orderbooks: newObs, orderbook: newOrderbook }
+      })
     },
     [sortedLevels],
   )
@@ -197,19 +219,32 @@ export default function useMarketWebSocket(assetIds: string[]): MarketWsState {
         case "last_trade_price": {
           const trade = data as WsLastTradeEvent
           tradesRef.current = [trade, ...tradesRef.current].slice(0, MAX_TRADES)
+          setState((prev) => {
+            const newObs = { ...prev.orderbooks }
+            if (newObs[trade.asset_id]) {
+              newObs[trade.asset_id] = { ...newObs[trade.asset_id], lastTradePrice: trade.price }
+            }
+            return {
+              ...prev,
+              lastTrade: trade,
+              trades: tradesRef.current,
+              orderbooks: newObs,
+              orderbook: prev.orderbook
+                ? { ...prev.orderbook, lastTradePrice: trade.price }
+                : prev.orderbook,
+            }
+          })
+          break
+        }
+        case "best_bid_ask": {
+          const bba = data as WsBestBidAskEvent
           setState((prev) => ({
             ...prev,
-            lastTrade: trade,
-            trades: tradesRef.current,
-            orderbook: prev.orderbook
-              ? { ...prev.orderbook, lastTradePrice: trade.price }
-              : prev.orderbook,
+            bestBidAsks: { ...prev.bestBidAsks, [bba.asset_id]: bba },
+            bestBidAsk: bba,
           }))
           break
         }
-        case "best_bid_ask":
-          setState((prev) => ({ ...prev, bestBidAsk: data as WsBestBidAskEvent }))
-          break
         case "tick_size_change":
           setState((prev) => ({
             ...prev,

@@ -286,6 +286,18 @@ async def archive_event(slug: str, market_info: dict) -> dict:
         except Exception as e:
             logger.warning("Failed to close WS clients for %s: %s", slug, e)
 
+    # Mark recording session as complete
+    if ws_mgr:
+        try:
+            await ws_mgr.complete_recording(slug, data_counts={
+                "prices": prices_count,
+                "orderbooks": ob_count,
+                "trades": trades_count,
+                "live_trades": live_trades_count,
+            })
+        except Exception as e:
+            logger.warning("Failed to complete recording session for %s: %s", slug, e)
+
     return meta
 
 

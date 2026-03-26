@@ -43,7 +43,6 @@ export default function EventDetailPage() {
   const navigate = useNavigate()
   const [selectedMarket, setSelectedMarket] = useState<Market | null>(null)
   const [selectedTokenId, setSelectedTokenId] = useState("")
-  const [selectedOutcomeIdx, setSelectedOutcomeIdx] = useState(0)
 
   const { data: event, isLoading, error } = useQuery<MarketEvent>({
     queryKey: ["event", slug],
@@ -118,7 +117,6 @@ export default function EventDetailPage() {
       const tokens = parseTokenIds(m.clobTokenIds)
       if (tokens[0]) {
         setSelectedTokenId(tokens[0])
-        setSelectedOutcomeIdx(0)
       }
     }
   }, [event?.id])
@@ -127,7 +125,6 @@ export default function EventDetailPage() {
   useEffect(() => {
     setSelectedMarket(null)
     setSelectedTokenId("")
-    setSelectedOutcomeIdx(0)
   }, [slug])
 
   function handleSelectMarket(m: Market) {
@@ -135,16 +132,6 @@ export default function EventDetailPage() {
     const tokens = parseTokenIds(m.clobTokenIds)
     if (tokens[0]) {
       setSelectedTokenId(tokens[0])
-      setSelectedOutcomeIdx(0)
-    }
-  }
-
-  function handleSelectOutcome(idx: number) {
-    if (!selectedMarket) return
-    const tokens = parseTokenIds(selectedMarket.clobTokenIds)
-    if (tokens[idx]) {
-      setSelectedTokenId(tokens[idx])
-      setSelectedOutcomeIdx(idx)
     }
   }
 
@@ -155,7 +142,6 @@ export default function EventDetailPage() {
       const idx = tokens.indexOf(tokenId)
       if (idx >= 0) {
         setSelectedTokenId(tokenId)
-        setSelectedOutcomeIdx(idx)
       }
     },
     [selectedMarket],
@@ -305,28 +291,11 @@ export default function EventDetailPage() {
             </div>
           )}
 
-          {/* Outcome token selector */}
-          {selectedMarket && tokens.length > 1 && (
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">Outcome:</span>
-              {outcomes.map((name, i) => (
-                <Button
-                  key={tokens[i] ?? i}
-                  variant={selectedOutcomeIdx === i ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => handleSelectOutcome(i)}
-                >
-                  {name}
-                </Button>
-              ))}
-            </div>
-          )}
-
           {/* Orderbook + Price chart side by side on large screens */}
-          {selectedTokenId && (
+          {tokens.length > 0 && (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <OrderbookView tokenId={selectedTokenId} wsOrderbook={ws.orderbook} wsConnected={ws.connected} />
-              <PriceChart tokenId={selectedTokenId} wsBestBidAsk={ws.bestBidAsk} wsConnected={ws.connected} />
+              <OrderbookView tokens={tokens} outcomes={outcomes} wsOrderbooks={ws.orderbooks} wsConnected={ws.connected} />
+              <PriceChart tokens={tokens} outcomes={outcomes} wsBestBidAsks={ws.bestBidAsks} wsConnected={ws.connected} />
             </div>
           )}
 

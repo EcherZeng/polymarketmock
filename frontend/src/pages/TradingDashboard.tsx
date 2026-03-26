@@ -199,8 +199,8 @@ export default function TradingDashboard() {
           {/* Left column — Market info + Orderbook + Price chart */}
           <div className="flex flex-col gap-4 lg:col-span-4">
             <MarketInfo marketId={activeMarketId} />
-            <OrderbookView tokenId={activeTokenId} />
-            <PriceChart tokenId={activeTokenId} />
+            <OrderbookView tokens={[activeTokenId]} outcomes={["Token"]} />
+            <PriceChart tokens={[activeTokenId]} outcomes={["Token"]} />
           </div>
 
           {/* Middle column — Trading panel */}

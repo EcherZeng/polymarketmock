@@ -1,12 +1,21 @@
 """Polymarket WebSocket manager — connects to Market Channel, processes events,
-updates Redis caches, persists to Parquet, and broadcasts to frontend clients."""
+updates Redis caches, persists to Parquet, and broadcasts to frontend clients.
+
+Upstream WS connection is **lazy**: only established when at least one frontend
+client is subscribed.  When the last client disconnects the upstream connection
+is gracefully closed and the run-loop waits for new subscriptions.
+
+Recording sessions are tracked in ``backend/data/sessions.jsonl`` so that
+downstream consumers can distinguish complete vs. incomplete data."""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+import os
 import time
+import uuid
 from datetime import datetime, timezone
 
 import websockets
@@ -45,6 +54,9 @@ class PolymarketWSManager:
         self._ping_task: asyncio.Task | None = None
         self._stop = asyncio.Event()
 
+        # Lazy-connect signal: set when _subscribed is non-empty
+        self._has_subscriptions = asyncio.Event()
+
         # Subscribed asset_ids on the upstream connection
         self._subscribed: set[str] = set()
 
@@ -58,6 +70,10 @@ class PolymarketWSManager:
         # Parquet write throttling (last write timestamps)
         self._last_ob_write: dict[str, float] = {}
         self._last_price_write: dict[str, float] = {}
+
+        # Recording sessions: slug → session dict
+        self._sessions: dict[str, dict] = {}
+        self._sessions_file = os.path.join(settings.data_dir, "sessions.jsonl")
 
     # ── Lifecycle ─────────────────────────────────────────────
 
@@ -85,13 +101,40 @@ class PolymarketWSManager:
     async def _run_loop(self) -> None:
         backoff = 1
         while not self._stop.is_set():
+            # Lazy: wait until at least one frontend client subscribes
+            try:
+                await asyncio.wait_for(
+                    self._has_subscriptions.wait(),
+                    timeout=1.0,
+                )
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                return
+
+            if not self._subscribed:
+                # Spurious wake or all clients left before we got here
+                self._has_subscriptions.clear()
+                continue
+
             try:
                 await self._connect_and_listen()
             except asyncio.CancelledError:
                 return
             except Exception as e:
-                logger.warning("WS upstream error: %s — reconnecting in %ss", e, backoff)
+                # Only log + backoff if we still have subscribers
+                if self._subscribed:
+                    logger.warning("WS upstream error: %s — reconnecting in %ss", e, backoff)
+                else:
+                    logger.info("WS upstream closed (no subscribers)")
             self.connected = False
+
+            if not self._subscribed:
+                # No subscribers left — go back to waiting
+                self._has_subscriptions.clear()
+                backoff = 1
+                continue
+
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, settings.ws_reconnect_max)
 
@@ -142,6 +185,7 @@ class PolymarketWSManager:
         if not new:
             return
         self._subscribed.update(new)
+        self._has_subscriptions.set()  # wake _run_loop if sleeping
         if self._ws and self.connected:
             await self._send_subscribe(new)
 
@@ -152,6 +196,11 @@ class PolymarketWSManager:
         self._subscribed -= set(removing)
         if self._ws and self.connected:
             await self._send_unsubscribe(removing)
+
+        # If no more subscriptions, gracefully close the upstream connection
+        if not self._subscribed:
+            self._has_subscriptions.clear()
+            await self._close_upstream()
 
     async def _send_subscribe(self, asset_ids: list[str]) -> None:
         if not self._ws:
@@ -174,6 +223,20 @@ class PolymarketWSManager:
         }
         await self._ws.send(json.dumps(msg))
         logger.info("WS unsubscribed from %d assets", len(asset_ids))
+
+    async def _close_upstream(self) -> None:
+        """Gracefully close the upstream WS connection (sends close frame)."""
+        if self._ping_task:
+            self._ping_task.cancel()
+            self._ping_task = None
+        if self._ws:
+            try:
+                await self._ws.close()
+            except Exception:
+                pass
+            self._ws = None
+        self.connected = False
+        logger.info("WS upstream closed — no active subscribers")
 
     # ── Message dispatch ──────────────────────────────────────
 
@@ -401,31 +464,45 @@ class PolymarketWSManager:
                 self._clients[aid].add(ws)
         # Ensure upstream is subscribed
         await self.subscribe(asset_ids)
+        # Start recording session for these assets
+        await self._start_recording(asset_ids)
         # Push cached data so client has initial state immediately
         await self._push_cached_state(ws, asset_ids)
 
     async def unregister_client(self, ws: WebSocket) -> None:
+        orphaned: list[str] = []
         async with self._client_lock:
             for aid in list(self._clients):
                 self._clients[aid].discard(ws)
                 if not self._clients[aid]:
                     del self._clients[aid]
+                    orphaned.append(aid)
+        # Cascade: unsubscribe upstream for assets with no remaining clients
+        if orphaned:
+            await self.unsubscribe(orphaned)
+            await self._stop_recording(orphaned)
 
     async def update_client_subscription(
         self, ws: WebSocket, subscribe_ids: list[str], unsubscribe_ids: list[str],
     ) -> None:
+        orphaned: list[str] = []
         async with self._client_lock:
             for aid in unsubscribe_ids:
                 if aid in self._clients:
                     self._clients[aid].discard(ws)
                     if not self._clients[aid]:
                         del self._clients[aid]
+                        orphaned.append(aid)
             for aid in subscribe_ids:
                 if aid not in self._clients:
                     self._clients[aid] = set()
                 self._clients[aid].add(ws)
         if subscribe_ids:
             await self.subscribe(subscribe_ids)
+            await self._start_recording(subscribe_ids)
+        if orphaned:
+            await self.unsubscribe(orphaned)
+            await self._stop_recording(orphaned)
 
     async def _push_cached_state(self, ws: WebSocket, asset_ids: list[str]) -> None:
         """Send cached orderbook + best_bid_ask from Redis to a newly subscribed client."""
@@ -507,12 +584,90 @@ class PolymarketWSManager:
                         if not self._clients[aid]:
                             del self._clients[aid]
 
+    # ── Recording session management ──────────────────────────
+
+    async def _start_recording(self, asset_ids: list[str]) -> None:
+        """Begin or resume a recording session for asset_ids."""
+        for aid in asset_ids:
+            slug = await self._resolve_slug(aid)
+            if not slug or slug in self._sessions:
+                continue
+            session = {
+                "session_id": uuid.uuid4().hex[:12],
+                "slug": slug,
+                "market_id": await self._resolve_market_id(aid),
+                "token_ids": [aid],
+                "start_time": datetime.now(timezone.utc).isoformat(),
+                "end_time": None,
+                "status": "recording",
+            }
+            self._sessions[slug] = session
+            await redis_store.set_recording_session(slug, json.dumps(session))
+            self._append_session_log(session)
+            logger.info("Recording session started: %s", slug)
+
+    async def _stop_recording(self, asset_ids: list[str]) -> None:
+        """Mark sessions as incomplete when all frontend clients leave."""
+        for aid in asset_ids:
+            slug = await self._resolve_slug(aid)
+            if not slug or slug not in self._sessions:
+                continue
+            # Check that no asset of this session still has clients
+            session = self._sessions[slug]
+            still_active = False
+            async with self._client_lock:
+                for tid in session.get("token_ids", []):
+                    if tid in self._clients and self._clients[tid]:
+                        still_active = True
+                        break
+            if still_active:
+                continue
+            session["status"] = "incomplete"
+            session["end_time"] = datetime.now(timezone.utc).isoformat()
+            await redis_store.set_recording_session(slug, json.dumps(session))
+            self._append_session_log(session)
+            del self._sessions[slug]
+            logger.info("Recording session incomplete: %s", slug)
+
+    async def complete_recording(self, slug: str, data_counts: dict | None = None) -> None:
+        """Mark a recording session as complete (called by event_lifecycle on archive)."""
+        session = self._sessions.pop(slug, None)
+        if not session:
+            raw = await redis_store.get_recording_session(slug)
+            if raw:
+                session = raw
+        if not session:
+            return
+        session["status"] = "complete"
+        session["end_time"] = datetime.now(timezone.utc).isoformat()
+        if data_counts:
+            session["data_counts"] = data_counts
+        await redis_store.set_recording_session(slug, json.dumps(session))
+        self._append_session_log(session)
+        logger.info("Recording session complete: %s", slug)
+
+    def _append_session_log(self, session: dict) -> None:
+        """Append a session record to the sessions.jsonl index file."""
+        try:
+            os.makedirs(os.path.dirname(self._sessions_file), exist_ok=True)
+            with open(self._sessions_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(session, ensure_ascii=False) + "\n")
+        except Exception as e:
+            logger.warning("Failed to write session log: %s", e)
+
     # ── Helpers ───────────────────────────────────────────────
 
     async def _resolve_market_id(self, token_id: str) -> str:
         """Get market_id for a token_id from watched:markets hash."""
         watched = await redis_store.get_watched_markets()
         return watched.get(token_id, token_id)
+
+    async def _resolve_slug(self, token_id: str) -> str | None:
+        """Get slug for a token_id from token:market_info."""
+        info = await redis_store.get_token_market_info(token_id)
+        if info:
+            return info.get("slug")
+        return None
 
 
 # ── Module-level start/stop ──────────────────────────────────────────────────
@@ -522,15 +677,8 @@ async def start_ws_manager() -> PolymarketWSManager:
     global _manager
     _manager = PolymarketWSManager()
     await _manager.start()
-
-    # Auto-subscribe to all currently watched tokens
-    try:
-        watched = await redis_store.get_watched_markets()
-        if watched:
-            await _manager.subscribe(list(watched.keys()))
-    except Exception as e:
-        logger.warning("Failed to auto-subscribe watched tokens: %s", e)
-
+    # No auto-subscribe: upstream connection is fully frontend-driven.
+    # watched:markets is still used by data_collector and archive logic.
     return _manager
 
 
