@@ -59,6 +59,8 @@ export default function useMarketWebSocket(assetIds: string[]): MarketWsState {
   })
 
   const tradesRef = useRef<WsLastTradeEvent[]>([])
+  const dataCheckRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const gotDataRef = useRef(false)
 
   // ── Orderbook helpers ──────────────────────────────────────
 
@@ -144,6 +146,18 @@ export default function useMarketWebSocket(assetIds: string[]): MarketWsState {
       // Subscribe
       ws.send(JSON.stringify({ type: "subscribe", asset_ids: assetIdsRef.current }))
 
+      // Start data-arrival checker
+      gotDataRef.current = false
+      if (dataCheckRef.current) clearInterval(dataCheckRef.current)
+      dataCheckRef.current = setInterval(() => {
+        if (gotDataRef.current) {
+          // already logged on first data, just cleanup
+          if (dataCheckRef.current) { clearInterval(dataCheckRef.current); dataCheckRef.current = null }
+        } else {
+          console.log("[WS] 没有数据")
+        }
+      }, 1_000)
+
       // Start ping
       pingRef.current = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) ws.send("PING")
@@ -160,6 +174,13 @@ export default function useMarketWebSocket(assetIds: string[]): MarketWsState {
         data = JSON.parse(text)
       } catch {
         return
+      }
+
+      // Log first data arrival then stop checking
+      if (!gotDataRef.current) {
+        gotDataRef.current = true
+        console.log("[WS] 已有数据", data.event_type)
+        if (dataCheckRef.current) { clearInterval(dataCheckRef.current); dataCheckRef.current = null }
       }
 
       switch (data.event_type) {
@@ -219,6 +240,10 @@ export default function useMarketWebSocket(assetIds: string[]): MarketWsState {
     if (pingRef.current) {
       clearInterval(pingRef.current)
       pingRef.current = null
+    }
+    if (dataCheckRef.current) {
+      clearInterval(dataCheckRef.current)
+      dataCheckRef.current = null
     }
   }, [])
 

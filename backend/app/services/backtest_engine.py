@@ -8,9 +8,9 @@ import uuid
 from app.models.backtest import BacktestRequest, BacktestResult, BacktestTradeResult
 from app.storage.duckdb_store import (
     list_available_markets,
+    query_archive_live_trades,
     query_archive_orderbooks,
     query_archive_prices,
-    query_archive_trades,
     query_orderbooks,
     query_prices,
 )
@@ -145,7 +145,7 @@ async def get_replay_timeline(slug: str) -> dict:
     """Return the list of available timestamps for an archived event."""
     prices = query_archive_prices(slug)
     orderbooks = query_archive_orderbooks(slug)
-    trades = query_archive_trades(slug)
+    live_trades = query_archive_live_trades(slug)
 
     all_ts: list[str] = []
     seen: set[str] = set()
@@ -155,6 +155,11 @@ async def get_replay_timeline(slug: str) -> dict:
             all_ts.append(ts)
             seen.add(ts)
     for row in orderbooks:
+        ts = row.get("timestamp", "")
+        if ts and ts not in seen:
+            all_ts.append(ts)
+            seen.add(ts)
+    for row in live_trades:
         ts = row.get("timestamp", "")
         if ts and ts not in seen:
             all_ts.append(ts)
@@ -169,13 +174,28 @@ async def get_replay_timeline(slug: str) -> dict:
         "max": round(max(mid_prices), 6) if mid_prices else 0,
     }
 
+    # Data summary — describe what data is available and its time range
+    def _time_range(rows: list[dict]) -> dict:
+        ts_list = [r.get("timestamp", "") for r in rows if r.get("timestamp")]
+        if not ts_list:
+            return {"count": 0, "start": "", "end": ""}
+        ts_list.sort()
+        return {"count": len(ts_list), "start": ts_list[0], "end": ts_list[-1]}
+
+    data_summary = {
+        "prices": _time_range(prices),
+        "orderbooks": _time_range(orderbooks),
+        "live_trades": _time_range(live_trades),
+    }
+
     return {
         "slug": slug,
         "start_time": all_ts[0] if all_ts else "",
         "end_time": all_ts[-1] if all_ts else "",
         "total_snapshots": len(all_ts),
-        "total_trades": len(trades),
+        "total_trades": len(live_trades),
         "price_range": price_range,
+        "data_summary": data_summary,
         "timestamps": all_ts,
     }
 
@@ -184,7 +204,7 @@ async def get_replay_snapshot(slug: str, timestamp: str) -> dict:
     """Return the full state at a given timestamp from archived data."""
     prices = query_archive_prices(slug)
     orderbooks = query_archive_orderbooks(slug)
-    trades = query_archive_trades(slug)
+    live_trades = query_archive_live_trades(slug)
 
     # Find nearest price
     price_row = _find_nearest_price(prices, timestamp) or {}
@@ -192,13 +212,12 @@ async def get_replay_snapshot(slug: str, timestamp: str) -> dict:
         [(ob["timestamp"], ob) for ob in orderbooks], timestamp
     ) or {}
 
-    # Find trades within ±2s of this timestamp
+    # Find live trades up to this timestamp
     snapshot_trades = []
-    for t in trades:
+    for t in live_trades:
         tts = t.get("timestamp", "")
         if not tts:
             continue
-        # ISO string comparison works for same-format timestamps
         if tts <= timestamp:
             snapshot_trades.append({
                 "timestamp": tts,
@@ -206,6 +225,7 @@ async def get_replay_snapshot(slug: str, timestamp: str) -> dict:
                 "side": t.get("side", "UNKNOWN"),
                 "price": t.get("price", 0),
                 "size": t.get("size", 0),
+                "transaction_hash": t.get("transaction_hash", ""),
             })
 
     return {

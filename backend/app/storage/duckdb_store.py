@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import threading
 import time
 from datetime import datetime, timezone
@@ -508,6 +509,22 @@ def query_archive_trades(
 ) -> list[dict]:
     fp = os.path.join(settings.data_dir, "archives", slug, "trades.parquet")
     return _query_parquet_file(fp, start_time, end_time, has_side=True) if os.path.exists(fp) else []
+
+
+def query_archive_live_trades(
+    slug: str, start_time: str | None = None, end_time: str | None = None,
+) -> list[dict]:
+    fp = os.path.join(settings.data_dir, "archives", slug, "live_trades.parquet")
+    return _query_parquet_file(fp, start_time, end_time, has_side=True) if os.path.exists(fp) else []
+
+
+def delete_archive(slug: str) -> bool:
+    """Delete the archive directory for a given slug. Returns True if removed."""
+    archive_dir = os.path.join(settings.data_dir, "archives", slug)
+    if os.path.isdir(archive_dir):
+        shutil.rmtree(archive_dir)
+        return True
+    return False
 
 
 def _query_parquet_file(

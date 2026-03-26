@@ -26,12 +26,13 @@ export default function MarketInfo({ marketId, tokenId, wsBestBidAsk, wsConnecte
     refetchInterval: 30_000,
   })
 
-  // Real-time midpoint from CLOB API — disabled when WS provides data
+  // Real-time midpoint from CLOB API — disabled only when WS has delivered data
+  const hasWsBBA = !!(wsConnected && wsBestBidAsk)
   const { data: midData } = useQuery({
     queryKey: ["midpoint", tokenId],
     queryFn: () => fetchMidpoint(tokenId!),
-    enabled: !!tokenId && !wsConnected,
-    refetchInterval: wsConnected ? false : 3_000,
+    enabled: !!tokenId && !hasWsBBA,
+    refetchInterval: hasWsBBA ? false : 3_000,
   })
 
   if (isLoading) {

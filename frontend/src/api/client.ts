@@ -224,6 +224,11 @@ export async function fetchArchive(slug: string): Promise<ArchivedEvent> {
   return data
 }
 
+export async function deleteArchive(slug: string): Promise<{ deleted: string }> {
+  const { data } = await api.delete(`/archives/${slug}`)
+  return data
+}
+
 // ── Watch / Recording ────────────────────────────────────────────────────────
 
 export async function watchEvent(

@@ -67,7 +67,7 @@ function LevelRow({
     <div className="relative flex items-center justify-between px-2 py-0.5 text-xs font-mono">
       <div
         className={cn(
-          "absolute inset-y-0 opacity-15",
+          "absolute inset-y-0 opacity-25",
           side === "bid" ? "right-0 bg-chart-2" : "left-0 bg-chart-1",
         )}
         style={{ width: `${pct}%` }}
@@ -327,6 +327,27 @@ export default function ReplayPage() {
         </Badge>
       </div>
 
+      {/* ── Data availability info ──────────────────────────── */}
+      {timeline.data_summary && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-muted-foreground">数据:</span>
+          <Badge variant={timeline.data_summary.prices.count > 0 ? "default" : "secondary"} className="text-xs font-mono">
+            价格 {timeline.data_summary.prices.count}
+          </Badge>
+          <Badge variant={timeline.data_summary.orderbooks.count > 0 ? "default" : "secondary"} className="text-xs font-mono">
+            盘口 {timeline.data_summary.orderbooks.count}
+          </Badge>
+          <Badge variant={timeline.data_summary.live_trades.count > 0 ? "default" : "secondary"} className="text-xs font-mono">
+            成交 {timeline.data_summary.live_trades.count}
+          </Badge>
+          {timeline.data_summary.prices.start && (
+            <span className="text-muted-foreground font-mono">
+              · 数据自 {fmtTs(timeline.data_summary.prices.start)} 开始
+            </span>
+          )}
+        </div>
+      )}
+
       {/* ── Replay Controls ─────────────────────────────────── */}
       <ReplayControls
         timeline={timeline}
@@ -483,30 +504,11 @@ export default function ReplayPage() {
             </CardContent>
           </Card>
 
-          {/* 4) Trades activity — with outcome (UP/DOWN) */}
+          {/* 4) Trades activity — real on-chain trades */}
           <Card>
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <CardTitle className="text-sm">推断成交</CardTitle>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border text-[10px] text-muted-foreground">?</span>
-                      </TooltipTrigger>
-                      <TooltipContent side="right" className="max-w-md text-left">
-                        <p className="font-medium">推断成交 (Inferred Trades)</p>
-                        <p className="mt-1">通过对比相邻两次 Orderbook 快照（间隔 ~1秒）的差异推断出的真实成交。</p>
-                        <p className="mt-1 font-medium">计算规则：</p>
-                        <p>• Ask 侧挂单量减少 → 有人买入 (BUY)</p>
-                        <p>• Bid 侧挂单量减少 → 有人卖出 (SELL)</p>
-                        <p className="mt-1"><b>均价</b> = Σ(消耗量 × 该档价格) ÷ Σ消耗量</p>
-                        <p><b>数量</b> = 被消耗的总份额（跨多个价位累计）</p>
-                        <p className="mt-1 text-muted">注意：数量可能远大于当前 Orderbook 单档挂单量，因为成交发生在上一秒快照中存在而当前已被消耗的挂单上。</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </div>
+                <CardTitle className="text-sm">成交记录</CardTitle>
                 <Badge variant="outline" className="text-xs font-mono">
                   {trades.length}
                 </Badge>
@@ -516,8 +518,9 @@ export default function ReplayPage() {
                 <span className="w-14 shrink-0">时间</span>
                 <span className="w-12 shrink-0 text-center">标的</span>
                 <span className="w-12 shrink-0 text-center">方向</span>
-                <span className="flex-1 text-right">均价</span>
+                <span className="flex-1 text-right">价格</span>
                 <span className="w-12 shrink-0 text-right">数量</span>
+                <span className="w-20 shrink-0 text-right">TxHash</span>
               </div>
             </CardHeader>
             <CardContent className="p-0">
@@ -557,6 +560,9 @@ export default function ReplayPage() {
                         </span>
                         <span className="font-mono text-right text-muted-foreground w-12 shrink-0">
                           {t.size.toFixed(0)}
+                        </span>
+                        <span className="font-mono text-right text-muted-foreground w-20 shrink-0 truncate" title={t.transaction_hash}>
+                          {t.transaction_hash ? t.transaction_hash.slice(0, 8) + "…" : "—"}
                         </span>
                       </div>
                     ))}

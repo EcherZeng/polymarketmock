@@ -24,12 +24,13 @@ export default function PriceChart({ tokenId, wsBestBidAsk, wsConnected }: Price
   const seriesRef = useRef<ISeriesApi<"Line"> | null>(null)
   const dataRef = useRef<LineData<Time>[]>([])
 
-  // HTTP polling fallback — disabled when WS is connected
+  // HTTP polling fallback — disabled only when WS has delivered best_bid_ask data
+  const hasWsBBA = !!(wsConnected && wsBestBidAsk)
   const { data: midData } = useQuery({
     queryKey: ["midpoint", tokenId],
     queryFn: () => fetchMidpoint(tokenId),
-    refetchInterval: wsConnected ? false : 1_000,
-    enabled: !wsConnected,
+    refetchInterval: hasWsBBA ? false : 1_000,
+    enabled: !hasWsBBA,
   })
 
   useEffect(() => {
@@ -109,7 +110,7 @@ export default function PriceChart({ tokenId, wsBestBidAsk, wsConnected }: Price
         <CardTitle className="text-sm">Price</CardTitle>
       </CardHeader>
       <CardContent className="p-2">
-        {!midData && <Skeleton className="h-48 w-full" />}
+        {!midData && !wsBestBidAsk && <Skeleton className="h-48 w-full" />}
         <div ref={containerRef} />
       </CardContent>
     </Card>

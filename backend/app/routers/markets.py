@@ -297,3 +297,12 @@ async def get_archive(slug: str):
     if not meta:
         raise HTTPException(status_code=404, detail=f"Archive not found: {slug}")
     return meta
+
+
+@router.delete("/archives/{slug:path}")
+async def delete_archive(slug: str):
+    """删除归档场次 (Parquet + Redis 元数据)。"""
+    from app.storage.duckdb_store import delete_archive as delete_archive_files
+    delete_archive_files(slug)
+    await redis_store.delete_archive_meta(slug)
+    return {"deleted": slug}

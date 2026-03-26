@@ -42,11 +42,12 @@ export default function TradingPanel({
   const [estimate, setEstimate] = useState<EstimateResult | null>(null)
 
   // Real-time midpoint — prefer WS, fallback to HTTP polling
+  const hasWsBBA = !!(wsConnected && wsBestBidAsk)
   const { data: midData } = useQuery({
     queryKey: ["midpoint", tokenId],
     queryFn: () => fetchMidpoint(tokenId),
-    enabled: !!tokenId && !wsConnected,
-    refetchInterval: wsConnected ? false : 3_000,
+    enabled: !!tokenId && !hasWsBBA,
+    refetchInterval: hasWsBBA ? false : 3_000,
   })
 
   // Derive midPrice: WS best_bid_ask → HTTP midpoint → 0

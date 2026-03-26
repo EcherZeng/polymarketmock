@@ -39,7 +39,7 @@ function LevelRow({
     <div className="relative flex items-center justify-between px-2 py-0.5 text-xs font-mono">
       <div
         className={cn(
-          "absolute inset-y-0 opacity-15",
+          "absolute inset-y-0 opacity-25",
           side === "bid" ? "right-0 bg-chart-2" : "left-0 bg-chart-1",
         )}
         style={{ width: `${pct}%` }}
@@ -53,12 +53,13 @@ function LevelRow({
 }
 
 export default function OrderbookView({ tokenId, wsOrderbook, wsConnected }: OrderbookViewProps) {
-  // HTTP polling fallback — disabled when WS provides data
+  // HTTP polling fallback — disabled only when WS has actually delivered data
+  const hasWsBook = !!(wsConnected && wsOrderbook)
   const { data: book, isLoading } = useQuery({
     queryKey: ["orderbook", tokenId],
     queryFn: () => fetchOrderbook(tokenId),
-    refetchInterval: 5_000,
-    enabled: !wsConnected,
+    refetchInterval: hasWsBook ? false : 5_000,
+    enabled: !hasWsBook,
   })
 
   // Prefer WS data, fall back to HTTP
@@ -67,7 +68,7 @@ export default function OrderbookView({ tokenId, wsOrderbook, wsConnected }: Ord
   const lastTradePrice = wsOrderbook?.lastTradePrice ?? book?.last_trade_price ?? ""
   const hasData = bidsRaw.length > 0 || asksRaw.length > 0
 
-  if (isLoading && !wsConnected) {
+  if (isLoading && !hasWsBook) {
     return (
       <Card>
         <CardHeader>

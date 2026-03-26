@@ -1,13 +1,63 @@
-Something went wrong
-Rendered more hooks than during the previous render.
-Error: Rendered more hooks than during the previous render.
-    at updateWorkInProgressHook (http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=a02a04fc:4327:12)
-    at updateMemo (http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=a02a04fc:4944:15)
-    at Object.useMemo (http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=a02a04fc:13276:13)
-    at exports.useMemo (http://localhost:5173/node_modules/.vite/deps/react.js?v=a02a04fc:736:31)
-    at EventDetailPage (http://localhost:5173/src/pages/EventDetailPage.tsx:243:21)
-    at Object.react_stack_bottom_frame (http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=a02a04fc:12868:12)
-    at renderWithHooks (http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=a02a04fc:4213:19)
-    at updateFunctionComponent (http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=a02a04fc:5569:16)
-    at beginWork (http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=a02a04fc:6140:20)
-    at runWithFiberInDEV (http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=a02a04fc:851:66)
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 416, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        self.scope, self.receive, self.send
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\fastapi\applications.py", line 1159, in __call__
+    await super().__call__(scope, receive, send)
+  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\starlette\applications.py", line 90, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\starlette\middleware\errors.py", line 186, in __call__
+    raise exc
+  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\starlette\middleware\cors.py", line 88, in __call__
+    await self.app(scope, receive, send)
+  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\starlette\routing.py", line 660, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\starlette\routing.py", line 680, in app
+    await route.handle(scope, receive, send)
+  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\starlette\routing.py", line 276, in handle
+    await self.app(scope, receive, send)
+  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\fastapi\routing.py", line 134, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\fastapi\routing.py", line 120, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\fastapi\routing.py", line 695, in app
+    content = await serialize_response(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<11 lines>...
+    )
+    ^
+  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\fastapi\routing.py", line 317, in serialize_response
+    return jsonable_encoder(response_content)
+  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\fastapi\encoders.py", line 289, in jsonable_encoder
+    encoded_value = jsonable_encoder(
+        value,
+    ...<4 lines>...
+        sqlalchemy_safe=sqlalchemy_safe,
+    )
+  File "c:\Users\v-yujieceng\Documents\Ls\poly\polymarketmock\.venv\Lib\site-packages\fastapi\encoders.py", line 336, in jsonable_encoder
+    raise ValueError(errors) from e
+ValueError: [TypeError('cannot convert dictionary update sequence element #0 to a sequence'), TypeError('vars() argument must have __dict__ attribute')]

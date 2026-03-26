@@ -401,6 +401,8 @@ class PolymarketWSManager:
                 self._clients[aid].add(ws)
         # Ensure upstream is subscribed
         await self.subscribe(asset_ids)
+        # Push cached data so client has initial state immediately
+        await self._push_cached_state(ws, asset_ids)
 
     async def unregister_client(self, ws: WebSocket) -> None:
         async with self._client_lock:
@@ -424,6 +426,36 @@ class PolymarketWSManager:
                 self._clients[aid].add(ws)
         if subscribe_ids:
             await self.subscribe(subscribe_ids)
+
+    async def _push_cached_state(self, ws: WebSocket, asset_ids: list[str]) -> None:
+        """Send cached orderbook + best_bid_ask from Redis to a newly subscribed client."""
+        for aid in asset_ids:
+            try:
+                cached_book = await redis_store.cache_get(f"clob:book:{aid}")
+                if cached_book:
+                    book = json.loads(cached_book)
+                    book["event_type"] = "book"
+                    if "asset_id" not in book:
+                        book["asset_id"] = aid
+                    await ws.send_text(json.dumps(book))
+
+                    # Derive best_bid_ask from the cached book
+                    bids = book.get("bids", [])
+                    asks = book.get("asks", [])
+                    if bids and asks:
+                        best_bid = max(bids, key=lambda lv: float(lv.get("price", 0)))
+                        best_ask = min(asks, key=lambda lv: float(lv.get("price", 999)))
+                        bba = {
+                            "event_type": "best_bid_ask",
+                            "asset_id": aid,
+                            "market": book.get("market", ""),
+                            "best_bid": best_bid["price"],
+                            "best_ask": best_ask["price"],
+                            "timestamp": book.get("timestamp", ""),
+                        }
+                        await ws.send_text(json.dumps(bba))
+            except Exception as e:
+                logger.warning("Failed to push cached state for %s: %s", aid, e)
 
     async def _broadcast(self, asset_id: str, message: str) -> None:
         """Send message to all frontend clients subscribed to asset_id."""

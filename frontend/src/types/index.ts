@@ -307,10 +307,17 @@ export interface ArchivedEvent {
   prices_count: number
   orderbooks_count: number
   trades_count: number
+  live_trades_count: number
   archived_at: string
 }
 
 // ── Replay ──────────────────────────────────────────────────────────────────
+
+export interface ReplayDataRange {
+  count: number
+  start: string
+  end: string
+}
 
 export interface ReplayTimeline {
   slug: string
@@ -319,6 +326,11 @@ export interface ReplayTimeline {
   total_snapshots: number
   total_trades: number
   price_range: { min: number; max: number }
+  data_summary?: {
+    prices: ReplayDataRange
+    orderbooks: ReplayDataRange
+    live_trades: ReplayDataRange
+  }
   timestamps: string[]
 }
 
@@ -328,6 +340,7 @@ export interface ReplaySnapshotTrade {
   side: string
   price: number
   size: number
+  transaction_hash?: string
 }
 
 export interface ReplaySnapshot {

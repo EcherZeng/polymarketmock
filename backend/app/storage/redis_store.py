@@ -346,6 +346,11 @@ async def list_archive_slugs() -> list[str]:
     return slugs
 
 
+async def delete_archive_meta(slug: str) -> bool:
+    """Delete archive metadata from Redis. Returns True if the key existed."""
+    return bool(await get_redis().delete(f"{ARCHIVE_PREFIX}{slug}"))
+
+
 # ── Replay sessions ─────────────────────────────────────────────────────────
 
 REPLAY_SESSION_PREFIX = "replay:session:"
