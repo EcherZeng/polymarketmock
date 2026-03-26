@@ -29,6 +29,10 @@ interface ActivityFeedProps {
   /** WS-driven trade events (real-time stream) */
   wsTrades?: WsLastTradeEvent[]
   wsConnected?: boolean
+  /** Outcome labels (e.g. ["Up", "Down"]) for mapping WS trades */
+  outcomes?: string[]
+  /** Token IDs corresponding to outcomes */
+  tokenIds?: string[]
 }
 
 function fmtTime(iso: string): string {
@@ -59,7 +63,7 @@ function shortenPseudonym(pseudonym: string, name: string): string {
   return "匿名"
 }
 
-export default function ActivityFeed({ tokenId, marketId, conditionId, enabled = true, wsTrades = [], wsConnected }: ActivityFeedProps) {
+export default function ActivityFeed({ tokenId, marketId, conditionId, enabled = true, wsTrades = [], wsConnected, outcomes = [], tokenIds = [] }: ActivityFeedProps) {
   const [tab, setTab] = useState("market")
   const prevTradesRef = useRef<Set<string>>(new Set())
   const [newTxHashes, setNewTxHashes] = useState<Set<string>>(new Set())
@@ -92,24 +96,31 @@ export default function ActivityFeed({ tokenId, marketId, conditionId, enabled =
     if (!wsConnected || wsTrades.length === 0) return httpTrades
 
     // Convert WS trades to PolymarketTrade shape for unified rendering
-    const wsConverted: PolymarketTrade[] = wsTrades.map((t) => ({
-      proxyWallet: "",
-      side: t.side,
-      asset: t.asset_id,
-      conditionId: t.market,
-      size: parseFloat(t.size),
-      price: parseFloat(t.price),
-      timestamp: parseFloat(t.timestamp) / 1000,
-      title: "",
-      slug: "",
-      icon: "",
-      eventSlug: "",
-      outcome: t.side === "BUY" ? "Yes" : "No",
-      outcomeIndex: t.side === "BUY" ? 0 : 1,
-      name: "",
-      pseudonym: "WS",
-      transactionHash: t.transaction_hash ?? `ws-${t.timestamp}-${t.price}`,
-    }))
+    const wsConverted: PolymarketTrade[] = wsTrades.map((t) => {
+      // Map asset_id to outcome (not by side — side is buy/sell direction, not the outcome)
+      const outcomeIdx = tokenIds.indexOf(t.asset_id)
+      const outcomeName = outcomeIdx >= 0 && outcomeIdx < outcomes.length
+        ? outcomes[outcomeIdx]
+        : (t.side === "BUY" ? "Yes" : "No")
+      return {
+        proxyWallet: "",
+        side: t.side,
+        asset: t.asset_id,
+        conditionId: t.market,
+        size: parseFloat(t.size),
+        price: parseFloat(t.price),
+        timestamp: parseFloat(t.timestamp) / 1000,
+        title: "",
+        slug: "",
+        icon: "",
+        eventSlug: "",
+        outcome: outcomeName,
+        outcomeIndex: outcomeIdx >= 0 ? outcomeIdx : 0,
+        name: "",
+        pseudonym: "WS",
+        transactionHash: t.transaction_hash ?? `ws-${t.timestamp}-${t.price}`,
+      }
+    })
 
     // Merge: WS first, then HTTP, deduped by transactionHash
     const seen = new Set<string>()

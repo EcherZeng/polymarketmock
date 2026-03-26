@@ -270,7 +270,7 @@ export default function EventDetailPage() {
         {/* Left column: markets list + selected market details */}
         <div className="flex flex-col gap-4 lg:col-span-8">
           {/* Market info card — prices, volume, liquidity, spread */}
-          {selectedMarket && <MarketInfo marketId={selectedMarket.id} tokenId={selectedTokenId || undefined} wsBestBidAsk={ws.bestBidAsk} wsConnected={ws.connected} />}
+          {selectedMarket && <MarketInfo marketId={selectedMarket.id} tokenId={tokens[0] || undefined} wsBestBidAsk={ws.bestBidAsks[tokens[0]] ?? null} wsConnected={ws.connected} />}
 
           {/* Sub-markets list */}
           {event.markets.length > 1 && (
@@ -308,6 +308,8 @@ export default function EventDetailPage() {
               enabled={!isEnded}
               wsTrades={ws.trades}
               wsConnected={ws.connected}
+              outcomes={outcomes}
+              tokenIds={tokens}
             />
           )}
         </div>
@@ -320,7 +322,7 @@ export default function EventDetailPage() {
               outcomes={outcomes}
               tokenIds={tokens}
               onSwitchToken={handleSwitchToken}
-              wsBestBidAsk={ws.bestBidAsk}
+              wsBestBidAsk={ws.bestBidAsks[selectedTokenId] ?? null}
               wsConnected={ws.connected}
             />
           )}

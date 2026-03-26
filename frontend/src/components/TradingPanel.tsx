@@ -59,6 +59,10 @@ export default function TradingPanel({
 
   // Determine current outcome index
   const currentIdx = tokenIds.indexOf(tokenId)
+
+  // Map prices to correct outcome positions (midPrice is for the selected token)
+  const price0 = currentIdx === 1 ? compPrice : midPrice
+  const price1 = currentIdx === 1 ? midPrice : compPrice
   const currentOutcome = currentIdx >= 0 && currentIdx < outcomes.length ? outcomes[currentIdx] : "Yes"
   const compIdx = currentIdx === 0 ? 1 : 0
   const compOutcome = compIdx < outcomes.length ? outcomes[compIdx] : "No"
@@ -121,7 +125,7 @@ export default function TradingPanel({
               >
                 <div className="text-xs text-muted-foreground">{outcomes[0]}</div>
                 <div className="text-lg font-bold tabular-nums">
-                  {(midPrice * 100).toFixed(1)}¢
+                  {(price0 * 100).toFixed(1)}¢
                 </div>
               </div>
               <div
@@ -133,7 +137,7 @@ export default function TradingPanel({
               >
                 <div className="text-xs text-muted-foreground">{outcomes[1]}</div>
                 <div className="text-lg font-bold tabular-nums">
-                  {(compPrice * 100).toFixed(1)}¢
+                  {(price1 * 100).toFixed(1)}¢
                 </div>
               </div>
             </div>
