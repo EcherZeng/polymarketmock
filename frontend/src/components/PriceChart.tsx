@@ -19,15 +19,21 @@ interface PriceChartProps {
   /** Per-token WS best_bid_ask (keyed by token id) */
   wsBestBidAsks?: Record<string, WsBestBidAskEvent>
   wsConnected?: boolean
+  /** Per-token mid price from replay snapshot (replay mode — skips HTTP/WS) */
+  replayMid?: Record<string, number>
+  /** ISO timestamp from replay snapshot (used as x-axis time) */
+  replayTimestamp?: string
 }
 
 const SERIES_COLORS = ["#22c55e", "#ef4444"]  // green for Up, red for Down
 
-export default function PriceChart({ tokens, outcomes, wsBestBidAsks, wsConnected }: PriceChartProps) {
+export default function PriceChart({ tokens, outcomes, wsBestBidAsks, wsConnected, replayMid, replayTimestamp }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesMapRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map())
   const dataMapRef = useRef<Map<string, LineData<Time>[]>>(new Map())
+
+  const isReplay = !!replayMid
 
   // Stable key for chart recreation
   const tokenKey = useMemo(() => tokens.join(","), [tokens.join(",")])
@@ -41,7 +47,7 @@ export default function PriceChart({ tokens, outcomes, wsBestBidAsks, wsConnecte
     queryKey: ["midpoint", token0],
     queryFn: () => fetchMidpoint(token0),
     refetchInterval: hasWsBBA0 ? false : 1_000,
-    enabled: !!token0 && !hasWsBBA0,
+    enabled: !!token0 && !hasWsBBA0 && !isReplay,
   })
 
   const hasWsBBA1 = !!(wsConnected && wsBestBidAsks?.[token1])
@@ -49,7 +55,7 @@ export default function PriceChart({ tokens, outcomes, wsBestBidAsks, wsConnecte
     queryKey: ["midpoint", token1],
     queryFn: () => fetchMidpoint(token1),
     refetchInterval: hasWsBBA1 ? false : 1_000,
-    enabled: !!token1 && !hasWsBBA1,
+    enabled: !!token1 && !hasWsBBA1 && !isReplay,
   })
 
   // Create chart + series
@@ -128,12 +134,41 @@ export default function PriceChart({ tokens, outcomes, wsBestBidAsks, wsConnecte
     }
   }, [wsBestBidAsks]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  function pushPoint(tokenId: string, value: number) {
+  const lastReplayTsRef = useRef<number>(0)
+
+  // Push replay data
+  useEffect(() => {
+    if (!replayMid || !replayTimestamp) return
+    const ts = Math.floor(new Date(replayTimestamp).getTime() / 1000) as Time
+    const tsNum = ts as number
+
+    // Seek backward detected — clear chart data and rebuild
+    if (tsNum < lastReplayTsRef.current) {
+      for (const tid of tokens) {
+        const data = dataMapRef.current.get(tid)
+        const series = seriesMapRef.current.get(tid)
+        if (data && series) {
+          // Keep only data points before the new timestamp
+          const trimmed = data.filter((d) => (d.time as number) <= tsNum)
+          dataMapRef.current.set(tid, trimmed)
+          series.setData(trimmed)
+        }
+      }
+    }
+    lastReplayTsRef.current = tsNum
+
+    for (const tid of tokens) {
+      const mid = replayMid[tid]
+      if (mid && mid > 0) pushPoint(tid, mid, ts)
+    }
+  }, [replayMid, replayTimestamp]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function pushPoint(tokenId: string, value: number, time?: Time) {
     const series = seriesMapRef.current.get(tokenId)
     const data = dataMapRef.current.get(tokenId)
     if (!series || !data) return
 
-    const now = Math.floor(Date.now() / 1000) as Time
+    const now = (time ?? Math.floor(Date.now() / 1000)) as Time
     const last = data[data.length - 1]
 
     if (last && last.time >= now) {
@@ -147,7 +182,7 @@ export default function PriceChart({ tokens, outcomes, wsBestBidAsks, wsConnecte
     }
   }
 
-  const hasAnyData = !!(mid0 || mid1 || (wsBestBidAsks && Object.keys(wsBestBidAsks).length > 0))
+  const hasAnyData = !!(mid0 || mid1 || isReplay || (wsBestBidAsks && Object.keys(wsBestBidAsks).length > 0))
 
   return (
     <Card>

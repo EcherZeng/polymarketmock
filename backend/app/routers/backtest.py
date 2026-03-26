@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
+from starlette.responses import StreamingResponse
 
 from app.models.backtest import BacktestRequest, BacktestResult
 from app.services.backtest_engine import (
     create_replay_session,
     execute_replay_trade,
+    generate_replay_stream,
     get_backtest_markets,
     get_replay_snapshot,
     get_replay_timeline,
@@ -60,6 +64,31 @@ async def replay_snapshot(
 ):
     """获取指定时间点的完整快照（orderbook + price）。"""
     return await get_replay_snapshot(slug, t)
+
+
+@router.get("/replay/{slug:path}/stream")
+async def replay_stream(
+    slug: str,
+    start_index: int = Query(0, ge=0),
+    speed: float = Query(1.0, gt=0, le=20),
+):
+    """SSE 流式推送回放快照，按真实时间戳间隔 / speed 倍率控速。"""
+
+    async def event_generator():
+        async for snapshot in generate_replay_stream(slug, start_index, speed):
+            data = json.dumps(snapshot, ensure_ascii=False)
+            yield f"data: {data}\n\n"
+        yield "event: end\ndata: {}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 class CreateReplaySessionReq(BaseModel):

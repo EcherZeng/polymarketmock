@@ -12,6 +12,13 @@ import { fetchOrderbook } from "@/api/client"
 import type { PriceLevel } from "@/types"
 import type { OrderbookState } from "@/hooks/useMarketWebSocket"
 
+/** Static orderbook data for replay mode */
+export interface StaticOrderbookData {
+  bids: PriceLevel[]
+  asks: PriceLevel[]
+  lastTradePrice?: string
+}
+
 interface OrderbookViewProps {
   /** All token IDs for this market (e.g. [upTokenId, downTokenId]) */
   tokens: string[]
@@ -20,6 +27,8 @@ interface OrderbookViewProps {
   /** Per-token WS orderbook state (keyed by token id) */
   wsOrderbooks?: Record<string, OrderbookState>
   wsConnected?: boolean
+  /** Per-token static orderbook data (replay mode — skips HTTP/WS) */
+  staticBooks?: Record<string, StaticOrderbookData>
 }
 
 function LevelRow({
@@ -57,26 +66,29 @@ function TokenOrderbook({
   label,
   wsOrderbook,
   wsConnected,
+  staticData,
 }: {
   tokenId: string
   label: string
   wsOrderbook?: OrderbookState | null
   wsConnected?: boolean
+  staticData?: StaticOrderbookData | null
 }) {
+  const hasStatic = !!staticData
   const hasWsBook = !!(wsConnected && wsOrderbook)
   const { data: book, isLoading } = useQuery({
     queryKey: ["orderbook", tokenId],
     queryFn: () => fetchOrderbook(tokenId),
     refetchInterval: hasWsBook ? false : 5_000,
-    enabled: !!tokenId && !hasWsBook,
+    enabled: !!tokenId && !hasWsBook && !hasStatic,
   })
 
-  const bidsRaw = wsOrderbook?.bids ?? book?.bids ?? []
-  const asksRaw = wsOrderbook?.asks ?? book?.asks ?? []
-  const lastTradePrice = wsOrderbook?.lastTradePrice ?? book?.last_trade_price ?? ""
+  const bidsRaw = staticData?.bids ?? wsOrderbook?.bids ?? book?.bids ?? []
+  const asksRaw = staticData?.asks ?? wsOrderbook?.asks ?? book?.asks ?? []
+  const lastTradePrice = staticData?.lastTradePrice ?? wsOrderbook?.lastTradePrice ?? book?.last_trade_price ?? ""
   const hasData = bidsRaw.length > 0 || asksRaw.length > 0
 
-  if (isLoading && !hasWsBook) {
+  if (isLoading && !hasWsBook && !hasStatic) {
     return <Skeleton className="h-36 w-full" />
   }
   if (!hasData) {
@@ -121,7 +133,7 @@ function TokenOrderbook({
   )
 }
 
-export default function OrderbookView({ tokens, outcomes, wsOrderbooks, wsConnected }: OrderbookViewProps) {
+export default function OrderbookView({ tokens, outcomes, wsOrderbooks, wsConnected, staticBooks }: OrderbookViewProps) {
   if (tokens.length === 0) return null
 
   return (
@@ -145,6 +157,7 @@ export default function OrderbookView({ tokens, outcomes, wsOrderbooks, wsConnec
                   label={outcomes[i] ?? `Token ${i + 1}`}
                   wsOrderbook={wsOrderbooks?.[tid]}
                   wsConnected={wsConnected}
+                  staticData={staticBooks?.[tid]}
                 />
               </ScrollArea>
             </div>

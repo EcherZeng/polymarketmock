@@ -340,6 +340,7 @@ export interface ReplayTimeline {
     orderbooks: ReplayDataRange
     live_trades: ReplayDataRange
   }
+  token_ids: string[]
   timestamps: string[]
 }
 
@@ -352,8 +353,7 @@ export interface ReplaySnapshotTrade {
   transaction_hash?: string
 }
 
-export interface ReplaySnapshot {
-  timestamp: string
+export interface ReplayTokenData {
   mid_price: number
   best_bid: number
   best_ask: number
@@ -362,6 +362,12 @@ export interface ReplaySnapshot {
   bid_sizes: string[]
   ask_prices: string[]
   ask_sizes: string[]
+}
+
+export interface ReplaySnapshot {
+  timestamp: string
+  token_ids: string[]
+  tokens: Record<string, ReplayTokenData>
   trades: ReplaySnapshotTrade[]
 }
 
@@ -383,4 +389,15 @@ export interface ReplayTradeResult {
   total_cost: number
   slippage_pct: number
   balance_after: number
+}
+
+// ── SSE stream snapshot event ───────────────────────────────────────────────
+
+export interface StreamSnapshotEvent {
+  index: number
+  timestamp: string
+  token_ids: string[]
+  tokens: Record<string, ReplayTokenData>
+  new_trades: ReplaySnapshotTrade[]
+  total_trades: number
 }
