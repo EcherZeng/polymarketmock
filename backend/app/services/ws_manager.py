@@ -457,6 +457,38 @@ class PolymarketWSManager:
             except Exception as e:
                 logger.warning("Failed to push cached state for %s: %s", aid, e)
 
+    async def close_clients_for_assets(self, asset_ids: list[str], reason: str = "event_ended") -> None:
+        """Send an event_ended message and close all frontend clients subscribed to given asset_ids."""
+        # Collect unique clients across all asset_ids
+        to_close: set[WebSocket] = set()
+        async with self._client_lock:
+            for aid in asset_ids:
+                to_close.update(self._clients.get(aid, set()))
+
+        if not to_close:
+            return
+
+        # Notify and close each client
+        msg = json.dumps({"event_type": "event_ended", "reason": reason, "asset_ids": asset_ids})
+        for ws in to_close:
+            try:
+                await ws.send_text(msg)
+            except Exception:
+                pass
+            try:
+                await ws.close(code=1000, reason=reason)
+            except Exception:
+                pass
+
+        # Remove clients from tracking
+        async with self._client_lock:
+            for aid in asset_ids:
+                self._clients.pop(aid, None)
+
+        # Unsubscribe upstream if no other clients need these assets
+        await self.unsubscribe(asset_ids)
+        logger.info("Closed %d clients for ended assets: %s", len(to_close), asset_ids)
+
     async def _broadcast(self, asset_id: str, message: str) -> None:
         """Send message to all frontend clients subscribed to asset_id."""
         async with self._client_lock:

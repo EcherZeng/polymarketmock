@@ -16,6 +16,14 @@ from app.storage.duckdb_store import (
     query_prices,
 )
 
+# Lazy import to avoid circular dependency at module level
+def _get_ws_manager():
+    from app.services.ws_manager import get_ws_manager
+    try:
+        return get_ws_manager()
+    except AssertionError:
+        return None
+
 logger = logging.getLogger(__name__)
 
 
@@ -250,6 +258,17 @@ async def archive_event(slug: str, market_info: dict) -> dict:
             await redis_store.remove_watched_market(str(tid))
         except Exception:
             pass
+
+    # Close WS connections for ended event tokens
+    ws_mgr = _get_ws_manager()
+    if ws_mgr and token_ids:
+        try:
+            await ws_mgr.close_clients_for_assets(
+                [str(tid) for tid in token_ids],
+                reason="event_ended",
+            )
+        except Exception as e:
+            logger.warning("Failed to close WS clients for %s: %s", slug, e)
 
     return meta
 

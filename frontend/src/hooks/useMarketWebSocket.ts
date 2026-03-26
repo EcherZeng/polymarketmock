@@ -25,6 +25,7 @@ interface MarketWsState {
   tickSize: string | null
   marketResolved: WsMarketResolvedEvent | null
   connected: boolean
+  eventEnded: boolean
 }
 
 const MAX_TRADES = 100
@@ -48,6 +49,8 @@ export default function useMarketWebSocket(assetIds: string[]): MarketWsState {
   // Orderbook maintained via book + price_change events
   const obMapRef = useRef<Map<string, { bids: Map<string, string>; asks: Map<string, string> }> >(new Map())
 
+  const eventEndedRef = useRef(false)
+
   const [state, setState] = useState<MarketWsState>({
     orderbook: null,
     bestBidAsk: null,
@@ -56,6 +59,7 @@ export default function useMarketWebSocket(assetIds: string[]): MarketWsState {
     tickSize: null,
     marketResolved: null,
     connected: false,
+    eventEnded: false,
   })
 
   const tradesRef = useRef<WsLastTradeEvent[]>([])
@@ -218,6 +222,15 @@ export default function useMarketWebSocket(assetIds: string[]): MarketWsState {
             marketResolved: data as WsMarketResolvedEvent,
           }))
           break
+        case "event_ended":
+          eventEndedRef.current = true
+          setState((prev) => ({
+            ...prev,
+            eventEnded: true,
+            connected: false,
+          }))
+          console.log("[WS] 场次已结束，连接将关闭")
+          break
       }
     }
 
@@ -225,6 +238,8 @@ export default function useMarketWebSocket(assetIds: string[]): MarketWsState {
       cleanup()
       if (!mountedRef.current) return
       setState((prev) => ({ ...prev, connected: false }))
+      // Don't reconnect if event has ended
+      if (eventEndedRef.current) return
       // Reconnect with backoff
       const delay = backoffRef.current
       backoffRef.current = Math.min(delay * 2, RECONNECT_MAX)

@@ -272,6 +272,12 @@ export interface WsMarketResolvedEvent {
   tags?: string[]
 }
 
+export interface WsEventEndedEvent {
+  event_type: "event_ended"
+  reason: string
+  asset_ids: string[]
+}
+
 export type WsMarketEvent =
   | WsBookEvent
   | WsPriceChangeEvent
@@ -279,6 +285,7 @@ export type WsMarketEvent =
   | WsBestBidAskEvent
   | WsTickSizeChangeEvent
   | WsMarketResolvedEvent
+  | WsEventEndedEvent
 
 // ── Event status ────────────────────────────────────────────────────────────
 
