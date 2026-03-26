@@ -36,7 +36,12 @@ async def check_event_status(slug: str) -> dict:
     cached = await redis_store.get_event_status(slug)
     if cached:
         try:
-            return json.loads(cached)
+            result = json.loads(cached)
+            # Always add fresh archive_ready for ended events
+            if result.get("status") == "ended":
+                existing = await redis_store.get_archive_meta(slug)
+                result["archive_ready"] = existing is not None
+            return result
         except (json.JSONDecodeError, TypeError):
             pass
 
@@ -48,7 +53,43 @@ async def check_event_status(slug: str) -> dict:
     result = _compute_status(slug, event, now_utc)
 
     await redis_store.set_event_status(slug, json.dumps(result))
+
+    # When event transitions to ended, trigger archival immediately
+    if result.get("status") == "ended":
+        await _trigger_archive_if_needed(slug)
+
+    # Include archive_ready flag for ended events
+    if result.get("status") == "ended":
+        existing = await redis_store.get_archive_meta(slug)
+        result["archive_ready"] = existing is not None
+
     return result
+
+
+async def _trigger_archive_if_needed(slug: str) -> None:
+    """Immediately trigger archival for a just-ended event (skip 30s cycle wait)."""
+    existing = await redis_store.get_archive_meta(slug)
+    if existing:
+        return  # Already archived
+
+    watched = await redis_store.get_watched_markets()
+    if not watched:
+        return
+
+    for token_id, market_id in list(watched.items()):
+        market_info = await redis_store.get_token_market_info(token_id)
+        if not market_info:
+            continue
+        info_slug = market_info.get("slug", market_id)
+        if info_slug != slug:
+            continue
+
+        logger.info("Immediate archival for ended event: %s", slug)
+        try:
+            await archive_event(slug, market_info)
+        except Exception as e:
+            logger.warning("Immediate archive failed for %s: %s", slug, e)
+        return  # Only need to archive once per slug
 
 
 def _compute_status(slug: str, event: dict, now_utc: datetime) -> dict:
@@ -206,6 +247,13 @@ async def auto_archive_if_ended() -> None:
 
 async def archive_event(slug: str, market_info: dict) -> dict:
     """Archive all collected data for an event."""
+    # Flush in-memory Parquet buffer so all data is on disk before archiving
+    from app.storage.duckdb_store import get_buffer
+    try:
+        get_buffer().flush_all()
+    except Exception as e:
+        logger.warning("Buffer flush before archive failed: %s", e)
+
     start_str = market_info.get("startDate", "") or market_info.get("start_date", "")
     end_str = market_info.get("endDate", "") or market_info.get("end_date", "")
     market_id = market_info.get("id", slug)
@@ -251,6 +299,14 @@ async def archive_event(slug: str, market_info: dict) -> dict:
     # Get actual data time range from parquet files
     data_range = get_archive_data_range(slug)
 
+    # Preserve outcomes from market_info (e.g. ["Up", "Down"])
+    outcomes = market_info.get("outcomes", [])
+    if isinstance(outcomes, str):
+        try:
+            outcomes = json.loads(outcomes)
+        except (json.JSONDecodeError, TypeError):
+            outcomes = []
+
     meta = {
         "slug": slug,
         "title": market_info.get("question", slug),
@@ -260,6 +316,7 @@ async def archive_event(slug: str, market_info: dict) -> dict:
         "data_start": data_range.get("data_start", ""),
         "data_end": data_range.get("data_end", ""),
         "token_ids": token_ids,
+        "outcomes": outcomes,
         "prices_count": prices_count,
         "orderbooks_count": ob_count,
         "trades_count": trades_count,

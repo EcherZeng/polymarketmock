@@ -61,18 +61,22 @@ export default function ReplayPage() {
   const currentIndexRef = useRef(currentIndex)
   currentIndexRef.current = currentIndex
 
-  // Load archive meta
+  // Load archive meta (retry every 3s if not ready — archival may still be in progress)
   const { data: archive } = useQuery<ArchivedEvent>({
     queryKey: ["archive", slug],
     queryFn: () => fetchArchive(slug!),
     enabled: !!slug,
+    retry: 10,
+    retryDelay: 3_000,
   })
 
-  // Load timeline
+  // Load timeline (retry similarly)
   const { data: timeline, isLoading: timelineLoading } = useQuery<ReplayTimeline>({
     queryKey: ["replayTimeline", slug],
     queryFn: () => fetchReplayTimeline(slug!),
     enabled: !!slug,
+    retry: 10,
+    retryDelay: 3_000,
   })
 
   // ── SSE stream (active during playback) ──────────────────
@@ -178,17 +182,25 @@ export default function ReplayPage() {
   // Token IDs: prefer from snapshot (per-token data), fallback to archive/timeline
   const tokenIds = snapshot?.token_ids ?? timeline?.token_ids ?? archive?.token_ids ?? []
   const replayTokens = tokenIds.length >= 2 ? [tokenIds[0], tokenIds[1]] : tokenIds.length === 1 ? [tokenIds[0]] : []
-  const replayOutcomes = replayTokens.map((_, i) => (i === 0 ? "UP" : "DOWN"))
+  // Use real outcome labels from archive meta, fallback to UP/DOWN
+  const archiveOutcomes = archive?.outcomes ?? []
+  const replayOutcomes = replayTokens.map((_, i) =>
+    i < archiveOutcomes.length ? archiveOutcomes[i] : (i === 0 ? "Up" : "Down")
+  )
 
   // Per-token data from snapshot
   const tokensData = snapshot?.tokens ?? {}
 
-  // First token's mid for the price indicator row
-  const firstToken = tokensData[replayTokens[0] ?? ""] ?? {}
-  const mid = firstToken.mid_price ?? 0
-  const bestBid = firstToken.best_bid ?? 0
-  const bestAsk = firstToken.best_ask ?? 0
-  const spread = firstToken.spread ?? 0
+  // Per-token mid prices for outcome probability display
+  const token0Data = tokensData[replayTokens[0] ?? ""] ?? {}
+  const token1Data = tokensData[replayTokens[1] ?? ""] ?? {}
+  const mid0 = token0Data.mid_price ?? 0
+  const mid1 = token1Data.mid_price ?? 0
+  // First token's data for the price indicator row
+  const mid = mid0
+  const bestBid = token0Data.best_bid ?? 0
+  const bestAsk = token0Data.best_ask ?? 0
+  const spread = token0Data.spread ?? 0
 
   // Build staticBooks for OrderbookView (per-token)
   const staticBooks = useMemo<Record<string, StaticOrderbookData>>(() => {
@@ -229,15 +241,14 @@ export default function ReplayPage() {
     [trades],
   )
 
-  // Map token_id to outcome label (UP/DOWN or Yes/No)
+  // Map token_id to outcome label using real outcome names
   const outcomeLabel = useCallback(
     (tokenId: string) => {
       const idx = tokenIds.indexOf(tokenId)
-      if (idx === 0) return "UP"
-      if (idx === 1) return "DOWN"
+      if (idx >= 0 && idx < replayOutcomes.length) return replayOutcomes[idx]
       return tokenId.slice(0, 6) + "…"
     },
-    [tokenIds],
+    [tokenIds, replayOutcomes],
   )
   const outcomeBadgeClass = useCallback(
     (tokenId: string) => {
@@ -324,12 +335,29 @@ export default function ReplayPage() {
         {/* ─── Left column (8/12) ─────────────────────────────── */}
         <div className="flex flex-col gap-4 lg:col-span-8">
 
-          {/* 1) Price indicators — single compact card */}
+          {/* 1) Outcome probabilities + price indicators */}
           <Card>
             <CardContent className="p-4">
+              {/* Outcome probability overview */}
+              {replayOutcomes.length >= 2 && (mid0 > 0 || mid1 > 0) && (
+                <div className="mb-3 grid grid-cols-2 gap-2 text-center">
+                  <div className="rounded-md px-2 py-1.5 bg-emerald-500/10">
+                    <div className="text-xs text-muted-foreground">{replayOutcomes[0]}</div>
+                    <div className="text-lg font-bold tabular-nums">
+                      {mid0 ? `${(mid0 * 100).toFixed(1)}¢` : "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-md px-2 py-1.5 bg-rose-500/10">
+                    <div className="text-xs text-muted-foreground">{replayOutcomes[1]}</div>
+                    <div className="text-lg font-bold tabular-nums">
+                      {mid1 ? `${(mid1 * 100).toFixed(1)}¢` : "—"}
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-4 gap-4 text-center">
                 <div>
-                  <div className="text-xs text-muted-foreground">Mid</div>
+                  <div className="text-xs text-muted-foreground">{replayOutcomes[0] ?? "Token 1"} Mid</div>
                   <div className="text-xl font-bold font-mono tabular-nums">
                     {mid ? `${(mid * 100).toFixed(1)}¢` : "—"}
                   </div>
@@ -471,6 +499,27 @@ export default function ReplayPage() {
               </CardHeader>
               <CardContent>
                 <div className="flex flex-col gap-3">
+                  {/* Outcome probability overview */}
+                  {replayOutcomes.length >= 2 && (mid0 > 0 || mid1 > 0) && (
+                    <>
+                      <div className="grid grid-cols-2 gap-2 text-center">
+                        <div className="rounded-md px-2 py-1.5 bg-emerald-500/10 ring-1 ring-emerald-500/30">
+                          <div className="text-xs text-muted-foreground">{replayOutcomes[0]}</div>
+                          <div className="text-lg font-bold tabular-nums">
+                            {mid0 ? `${(mid0 * 100).toFixed(1)}¢` : "—"}
+                          </div>
+                        </div>
+                        <div className="rounded-md px-2 py-1.5 bg-rose-500/10 ring-1 ring-rose-500/30">
+                          <div className="text-xs text-muted-foreground">{replayOutcomes[1]}</div>
+                          <div className="text-lg font-bold tabular-nums">
+                            {mid1 ? `${(mid1 * 100).toFixed(1)}¢` : "—"}
+                          </div>
+                        </div>
+                      </div>
+                      <Separator />
+                    </>
+                  )}
+
                   {/* Balance */}
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">余额</span>
@@ -536,9 +585,15 @@ export default function ReplayPage() {
                       <div className="text-xs font-medium">持仓</div>
                       {Object.entries(session.positions).map(([tid, pos]) => (
                         <div key={tid} className="flex justify-between text-xs">
-                          <span className="truncate text-muted-foreground">
-                            {tid.slice(0, 8)}…
-                          </span>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-[10px] px-1 py-0",
+                              outcomeBadgeClass(tid),
+                            )}
+                          >
+                            {outcomeLabel(tid)}
+                          </Badge>
                           <span className="font-mono">
                             {pos.shares.toFixed(2)} @ {(pos.avg_cost * 100).toFixed(1)}¢
                           </span>

@@ -294,6 +294,7 @@ export interface EventStatusResponse {
   status: "upcoming" | "live" | "ended" | "settled" | "unknown"
   ended_at: string | null
   seconds_remaining: number | null
+  archive_ready?: boolean
 }
 
 export interface NextEventResponse {
@@ -313,6 +314,7 @@ export interface ArchivedEvent {
   data_start: string
   data_end: string
   token_ids: string[]
+  outcomes?: string[]
   prices_count: number
   orderbooks_count: number
   trades_count: number

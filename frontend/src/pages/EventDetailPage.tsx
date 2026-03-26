@@ -201,9 +201,15 @@ export default function EventDetailPage() {
               )}
             </span>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" asChild>
-                <Link to={`/replay/${slug}`}>回放此场次</Link>
-              </Button>
+              {eventStatus?.archive_ready ? (
+                <Button variant="outline" size="sm" asChild>
+                  <Link to={`/replay/${slug}`}>回放此场次</Link>
+                </Button>
+              ) : (
+                <Button variant="outline" size="sm" disabled className="opacity-60">
+                  归档中…
+                </Button>
+              )}
               {nextEvent?.slug && (
                 <Button
                   size="sm"
