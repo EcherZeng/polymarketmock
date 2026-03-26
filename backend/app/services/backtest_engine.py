@@ -41,10 +41,10 @@ async def run_backtest(req: BacktestRequest) -> BacktestResult:
         if not nearest_ob:
             continue
 
-        bids_raw = json.loads(nearest_ob.get("bid_prices", "[]"))
-        bid_sizes = json.loads(nearest_ob.get("bid_sizes", "[]"))
-        asks_raw = json.loads(nearest_ob.get("ask_prices", "[]"))
-        ask_sizes = json.loads(nearest_ob.get("ask_sizes", "[]"))
+        bids_raw = nearest_ob.get("bid_prices", [])
+        bid_sizes = nearest_ob.get("bid_sizes", [])
+        asks_raw = nearest_ob.get("ask_prices", [])
+        ask_sizes = nearest_ob.get("ask_sizes", [])
 
         if instruction.side == "BUY":
             levels = [{"price": str(p), "size": str(s)} for p, s in zip(asks_raw, ask_sizes)]
@@ -214,10 +214,10 @@ async def get_replay_snapshot(slug: str, timestamp: str) -> dict:
         "best_bid": price_row.get("best_bid", 0),
         "best_ask": price_row.get("best_ask", 0),
         "spread": price_row.get("spread", 0),
-        "bid_prices": json.loads(ob_row.get("bid_prices", "[]")) if isinstance(ob_row.get("bid_prices"), str) else ob_row.get("bid_prices", []),
-        "bid_sizes": json.loads(ob_row.get("bid_sizes", "[]")) if isinstance(ob_row.get("bid_sizes"), str) else ob_row.get("bid_sizes", []),
-        "ask_prices": json.loads(ob_row.get("ask_prices", "[]")) if isinstance(ob_row.get("ask_prices"), str) else ob_row.get("ask_prices", []),
-        "ask_sizes": json.loads(ob_row.get("ask_sizes", "[]")) if isinstance(ob_row.get("ask_sizes"), str) else ob_row.get("ask_sizes", []),
+        "bid_prices": ob_row.get("bid_prices", []),
+        "bid_sizes": ob_row.get("bid_sizes", []),
+        "ask_prices": ob_row.get("ask_prices", []),
+        "ask_sizes": ob_row.get("ask_sizes", []),
         "trades": snapshot_trades,
     }
 

@@ -261,10 +261,10 @@ class PolymarketWSManager:
                 write_orderbook_snapshot(
                     market_id=market_id,
                     token_id=asset_id,
-                    bid_prices=json.dumps([b["price"] for b in bids]),
-                    bid_sizes=json.dumps([b["size"] for b in bids]),
-                    ask_prices=json.dumps([a["price"] for a in asks]),
-                    ask_sizes=json.dumps([a["size"] for a in asks]),
+                    bid_prices=[float(b["price"]) for b in bids],
+                    bid_sizes=[float(b["size"]) for b in bids],
+                    ask_prices=[float(a["price"]) for a in asks],
+                    ask_sizes=[float(a["size"]) for a in asks],
                 )
             except Exception as e:
                 logger.warning("WS book parquet write failed: %s", e)
@@ -344,13 +344,9 @@ class PolymarketWSManager:
             write_live_trade(
                 market_id=market_id,
                 token_id=asset_id,
-                condition_id=data.get("market", ""),
                 side=data.get("side", ""),
                 price=float(data.get("price", "0")),
                 size=float(data.get("size", "0")),
-                outcome="",
-                pseudonym="",
-                name="",
                 transaction_hash=data.get("transaction_hash", ""),
                 timestamp=trade["timestamp"],
             )

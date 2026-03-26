@@ -79,10 +79,10 @@ async def _collect_and_detect(token_id: str, market_id: str) -> None:
         write_orderbook_snapshot(
             market_id=market_id or token_id,
             token_id=token_id,
-            bid_prices=json.dumps([b["price"] for b in bids]),
-            bid_sizes=json.dumps([b["size"] for b in bids]),
-            ask_prices=json.dumps([a["price"] for a in asks]),
-            ask_sizes=json.dumps([a["size"] for a in asks]),
+            bid_prices=[float(b["price"]) for b in bids],
+            bid_sizes=[float(b["size"]) for b in bids],
+            ask_prices=[float(a["price"]) for a in asks],
+            ask_sizes=[float(a["size"]) for a in asks],
         )
     except Exception as e:
         logger.warning("Failed to write orderbook snapshot for %s: %s", token_id, e)
@@ -189,13 +189,10 @@ async def _collect_live_trades() -> None:
                 write_live_trade(
                     market_id=market_id,
                     token_id=t.get("asset", ""),
-                    condition_id=t.get("conditionId", ""),
                     side=t.get("side", ""),
                     price=float(t.get("price", 0)),
                     size=float(t.get("size", 0)),
                     outcome=t.get("outcome", ""),
-                    pseudonym=t.get("pseudonym", ""),
-                    name=t.get("name", ""),
                     transaction_hash=tx_hash,
                     timestamp=ts_iso,
                 )

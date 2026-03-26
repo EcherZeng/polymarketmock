@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     ws_ping_interval: int = 10
     ws_reconnect_max: int = 30
 
+    # Parquet buffer — batched writes
+    parquet_flush_interval: int = 30   # seconds between auto-flushes
+    parquet_flush_threshold: int = 100  # rows before forced flush
+
     model_config = {"env_prefix": "PM_"}
 
 
