@@ -268,7 +268,6 @@ async def archive_event(slug: str, market_info: dict) -> dict:
     # Copy data to archive directory
     prices_count = 0
     ob_count = 0
-    trades_count = 0
     live_trades_count = 0
     ob_deltas_count = 0
     try:
@@ -277,9 +276,6 @@ async def archive_event(slug: str, market_info: dict) -> dict:
         )
         ob_count = archive_event_data(
             slug, market_id, "orderbooks", start_str, end_str,
-        )
-        trades_count = archive_event_data(
-            slug, market_id, "trades", start_str, end_str,
         )
         live_trades_count = archive_event_data(
             slug, market_id, "live_trades", start_str, end_str,
@@ -323,7 +319,6 @@ async def archive_event(slug: str, market_info: dict) -> dict:
         "outcomes": outcomes,
         "prices_count": prices_count,
         "orderbooks_count": ob_count,
-        "trades_count": trades_count,
         "live_trades_count": live_trades_count,
         "ob_deltas_count": ob_deltas_count,
         "archived_at": datetime.now(timezone.utc).isoformat(),
@@ -354,7 +349,6 @@ async def archive_event(slug: str, market_info: dict) -> dict:
             await ws_mgr.complete_recording(slug, data_counts={
                 "prices": prices_count,
                 "orderbooks": ob_count,
-                "trades": trades_count,
                 "live_trades": live_trades_count,
                 "ob_deltas": ob_deltas_count,
             })

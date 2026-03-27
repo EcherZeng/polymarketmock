@@ -93,15 +93,6 @@ ORDERBOOK_SCHEMA = pa.schema([
     ("ask_sizes", pa.list_(pa.float32())),
 ])
 
-TRADE_SCHEMA = pa.schema([
-    ("timestamp", pa.timestamp("us", tz="UTC")),
-    ("token_id", pa.int32()),
-    ("side", pa.int8()),
-    ("price", pa.float32()),
-    ("size", pa.float32()),
-    ("inferred", pa.bool_()),
-])
-
 LIVE_TRADE_SCHEMA = pa.schema([
     ("timestamp", pa.timestamp("us", tz="UTC")),
     ("transaction_hash", pa.string()),
@@ -109,7 +100,6 @@ LIVE_TRADE_SCHEMA = pa.schema([
     ("side", pa.int8()),
     ("price", pa.float32()),
     ("size", pa.float32()),
-    ("outcome", pa.string()),
 ])
 
 OB_DELTA_SCHEMA = pa.schema([
@@ -123,7 +113,6 @@ OB_DELTA_SCHEMA = pa.schema([
 _SCHEMAS: dict[str, pa.Schema] = {
     "prices": PRICE_SCHEMA,
     "orderbooks": ORDERBOOK_SCHEMA,
-    "trades": TRADE_SCHEMA,
     "live_trades": LIVE_TRADE_SCHEMA,
     "ob_deltas": OB_DELTA_SCHEMA,
 }
@@ -281,32 +270,12 @@ def write_orderbook_snapshot(
     })
 
 
-def write_trade_snapshot(
-    market_id: str,
-    token_id: str,
-    side: str,
-    price: float,
-    size: float,
-    timestamp: str | None = None,
-    inferred: bool = True,
-) -> None:
-    get_buffer().append("trades", market_id, {
-        "timestamp": _parse_ts(timestamp),
-        "token_id": encode_token(token_id),
-        "side": _encode_side(side),
-        "price": price,
-        "size": size,
-        "inferred": inferred,
-    })
-
-
 def write_live_trade(
     market_id: str,
     token_id: str,
     side: str,
     price: float,
     size: float,
-    outcome: str = "",
     transaction_hash: str = "",
     timestamp: str | None = None,
 ) -> None:
@@ -317,7 +286,6 @@ def write_live_trade(
         "side": _encode_side(side),
         "price": price,
         "size": size,
-        "outcome": outcome,
     })
 
 
@@ -405,25 +373,6 @@ def query_orderbooks(
     con = duckdb.connect()
     try:
         return _post_process_rows(con.execute(sql).fetchdf().to_dict(orient="records"))
-    except Exception:
-        return []
-    finally:
-        con.close()
-
-
-def query_trades(
-    market_id: str,
-    start_time: str | None = None,
-    end_time: str | None = None,
-) -> list[dict]:
-    dir_path = os.path.join(settings.data_dir, "trades", market_id)
-    if not os.path.isdir(dir_path):
-        return []
-    glob = os.path.join(dir_path, "*.parquet").replace("\\", "/")
-    sql = f"SELECT * FROM read_parquet('{glob}')" + _build_time_filter(start_time, end_time) + " ORDER BY timestamp"
-    con = duckdb.connect()
-    try:
-        return _post_process_rows(con.execute(sql).fetchdf().to_dict(orient="records"), has_side=True)
     except Exception:
         return []
     finally:
@@ -535,13 +484,6 @@ def query_archive_orderbooks(
 ) -> list[dict]:
     fp = os.path.join(settings.data_dir, "archives", slug, "orderbooks.parquet")
     return _query_parquet_file(fp, start_time, end_time) if os.path.exists(fp) else []
-
-
-def query_archive_trades(
-    slug: str, start_time: str | None = None, end_time: str | None = None,
-) -> list[dict]:
-    fp = os.path.join(settings.data_dir, "archives", slug, "trades.parquet")
-    return _query_parquet_file(fp, start_time, end_time, has_side=True) if os.path.exists(fp) else []
 
 
 def query_archive_live_trades(
