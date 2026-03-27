@@ -32,6 +32,16 @@ from app.storage.duckdb_store import (
 
 logger = logging.getLogger(__name__)
 
+
+def _ws_ts_to_iso(ts_ms: str) -> str | None:
+    """Convert Polymarket WS unix-millisecond timestamp to ISO 8601."""
+    try:
+        return datetime.fromtimestamp(
+            float(ts_ms) / 1000, tz=timezone.utc,
+        ).isoformat()
+    except (ValueError, TypeError, OverflowError):
+        return None
+
 # ── Singleton ────────────────────────────────────────────────────────────────
 
 _manager: PolymarketWSManager | None = None
@@ -301,6 +311,7 @@ class PolymarketWSManager:
         asset_id = data.get("asset_id", "")
         bids = data.get("bids", [])
         asks = data.get("asks", [])
+        ts_iso = _ws_ts_to_iso(data.get("timestamp", ""))
 
         # Update Redis orderbook cache (same key as CLOB proxy)
         cache_data = json.dumps({
@@ -315,7 +326,7 @@ class PolymarketWSManager:
             f"clob:book:{asset_id}", cache_data, settings.cache_ttl_orderbook,
         )
 
-        # Throttled Parquet write (max once per 15s per token)
+        # Throttled Parquet write (max once per 2s per token)
         now = time.monotonic()
         last = self._last_ob_write.get(asset_id, 0)
         if now - last >= settings.collector_orderbook_interval:
@@ -329,6 +340,7 @@ class PolymarketWSManager:
                     bid_sizes=[float(b["size"]) for b in bids],
                     ask_prices=[float(a["price"]) for a in asks],
                     ask_sizes=[float(a["size"]) for a in asks],
+                    timestamp=ts_iso,
                 )
             except Exception as e:
                 logger.warning("WS book parquet write failed: %s", e)
@@ -336,7 +348,7 @@ class PolymarketWSManager:
     async def _handle_price_change(self, data: dict) -> None:
         """Incremental orderbook update — update Redis cache with new levels
         and persist each delta to Parquet for replay fidelity."""
-        ts_str = data.get("timestamp", "")
+        ts_iso = _ws_ts_to_iso(data.get("timestamp", ""))
         for pc in data.get("price_changes", []):
             asset_id = pc.get("asset_id", "")
             if not asset_id:
@@ -355,7 +367,7 @@ class PolymarketWSManager:
                     side=side,
                     price=float(price),
                     size=float(size),
-                    timestamp=ts_str if ts_str else None,
+                    timestamp=ts_iso,
                 )
             except Exception as e:
                 logger.warning("WS ob_delta parquet write failed: %s", e)
@@ -439,12 +451,13 @@ class PolymarketWSManager:
         best_bid = float(data.get("best_bid", "0"))
         best_ask = float(data.get("best_ask", "0"))
         mid = (best_bid + best_ask) / 2 if (best_bid and best_ask) else best_bid or best_ask
+        ts_iso = _ws_ts_to_iso(data.get("timestamp", ""))
 
         await redis_store.cache_set(
             f"clob:mid:{asset_id}", str(mid), settings.cache_ttl_midpoint,
         )
 
-        # Throttled Parquet write (max once per 60s per token)
+        # Throttled Parquet write (max once per 5s per token)
         now = time.monotonic()
         last = self._last_price_write.get(asset_id, 0)
         if now - last >= settings.collector_price_interval:
@@ -459,6 +472,7 @@ class PolymarketWSManager:
                     best_bid=best_bid,
                     best_ask=best_ask,
                     spread=spread,
+                    timestamp=ts_iso,
                 )
             except Exception as e:
                 logger.warning("WS BBA parquet write failed: %s", e)

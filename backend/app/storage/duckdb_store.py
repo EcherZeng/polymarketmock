@@ -250,9 +250,10 @@ def write_price_snapshot(
     best_bid: float,
     best_ask: float,
     spread: float,
+    timestamp: str | None = None,
 ) -> None:
     get_buffer().append("prices", market_id, {
-        "timestamp": datetime.now(timezone.utc),
+        "timestamp": _parse_ts(timestamp),
         "token_id": encode_token(token_id),
         "mid_price": mid_price,
         "best_bid": best_bid,
@@ -268,9 +269,10 @@ def write_orderbook_snapshot(
     bid_sizes: list[float],
     ask_prices: list[float],
     ask_sizes: list[float],
+    timestamp: str | None = None,
 ) -> None:
     get_buffer().append("orderbooks", market_id, {
-        "timestamp": datetime.now(timezone.utc),
+        "timestamp": _parse_ts(timestamp),
         "token_id": encode_token(token_id),
         "bid_prices": [float(p) for p in bid_prices],
         "bid_sizes": [float(s) for s in bid_sizes],
