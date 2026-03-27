@@ -270,6 +270,7 @@ async def archive_event(slug: str, market_info: dict) -> dict:
     ob_count = 0
     trades_count = 0
     live_trades_count = 0
+    ob_deltas_count = 0
     try:
         prices_count = archive_event_data(
             slug, market_id, "prices", start_str, end_str,
@@ -282,6 +283,9 @@ async def archive_event(slug: str, market_info: dict) -> dict:
         )
         live_trades_count = archive_event_data(
             slug, market_id, "live_trades", start_str, end_str,
+        )
+        ob_deltas_count = archive_event_data(
+            slug, market_id, "ob_deltas", start_str, end_str,
         )
     except Exception as e:
         logger.warning("Partial archive for %s: %s", slug, e)
@@ -321,6 +325,7 @@ async def archive_event(slug: str, market_info: dict) -> dict:
         "orderbooks_count": ob_count,
         "trades_count": trades_count,
         "live_trades_count": live_trades_count,
+        "ob_deltas_count": ob_deltas_count,
         "archived_at": datetime.now(timezone.utc).isoformat(),
     }
     await redis_store.set_archive_meta(slug, json.dumps(meta))
@@ -351,6 +356,7 @@ async def archive_event(slug: str, market_info: dict) -> dict:
                 "orderbooks": ob_count,
                 "trades": trades_count,
                 "live_trades": live_trades_count,
+                "ob_deltas": ob_deltas_count,
             })
         except Exception as e:
             logger.warning("Failed to complete recording session for %s: %s", slug, e)

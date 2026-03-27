@@ -12,6 +12,7 @@ from app.models.backtest import BacktestRequest, BacktestResult, BacktestTradeRe
 from app.storage.duckdb_store import (
     list_available_markets,
     query_archive_live_trades,
+    query_archive_ob_deltas,
     query_archive_orderbooks,
     query_archive_prices,
     query_orderbooks,
@@ -149,6 +150,7 @@ async def get_replay_timeline(slug: str) -> dict:
     prices = query_archive_prices(slug)
     orderbooks = query_archive_orderbooks(slug)
     live_trades = query_archive_live_trades(slug)
+    ob_deltas = query_archive_ob_deltas(slug)
 
     all_ts: list[str] = []
     seen: set[str] = set()
@@ -170,6 +172,14 @@ async def get_replay_timeline(slug: str) -> dict:
         if tid:
             token_id_set.add(tid)
     for row in live_trades:
+        ts = row.get("timestamp", "")
+        if ts and ts not in seen:
+            all_ts.append(ts)
+            seen.add(ts)
+        tid = row.get("token_id", "")
+        if tid:
+            token_id_set.add(tid)
+    for row in ob_deltas:
         ts = row.get("timestamp", "")
         if ts and ts not in seen:
             all_ts.append(ts)
@@ -199,6 +209,7 @@ async def get_replay_timeline(slug: str) -> dict:
         "prices": _time_range(prices),
         "orderbooks": _time_range(orderbooks),
         "live_trades": _time_range(live_trades),
+        "ob_deltas": _time_range(ob_deltas),
     }
 
     return {
@@ -255,32 +266,138 @@ def _collect_token_ids(prices: list[dict], orderbooks: list[dict]) -> list[str]:
     return sorted(ids)
 
 
+# ── Working-orderbook helpers ────────────────────────────────────────────────
+
+
+def _init_working_ob(snapshot: dict) -> dict:
+    """Initialise a working orderbook from a full book snapshot.
+
+    Returns ``{"bids": {price_str: size_float}, "asks": {...}}``.
+    """
+    bids: dict[str, float] = {}
+    asks: dict[str, float] = {}
+    for p, s in zip(snapshot.get("bid_prices", []), snapshot.get("bid_sizes", [])):
+        bids[str(p)] = float(s)
+    for p, s in zip(snapshot.get("ask_prices", []), snapshot.get("ask_sizes", [])):
+        asks[str(p)] = float(s)
+    return {"bids": bids, "asks": asks}
+
+
+def _apply_delta_to_ob(working_ob: dict, delta: dict) -> None:
+    """Apply a single orderbook delta (from ``price_change``) in-place."""
+    side = delta.get("side", "")
+    key = "bids" if side == "BUY" else "asks"
+    levels: dict[str, float] = working_ob.setdefault(key, {})
+    price = str(delta.get("price", "0"))
+    size = float(delta.get("size", 0))
+    if size == 0:
+        levels.pop(price, None)
+    else:
+        levels[price] = size
+
+
+def _derive_price_from_ob(working_ob: dict) -> dict:
+    """Derive mid_price / best_bid / best_ask / spread from a working orderbook."""
+    bids = working_ob.get("bids", {})
+    asks = working_ob.get("asks", {})
+    best_bid = max((float(p) for p in bids), default=0.0)
+    best_ask = min((float(p) for p in asks), default=0.0)
+    mid = (best_bid + best_ask) / 2 if (best_bid and best_ask) else best_bid or best_ask
+    spread = (best_ask - best_bid) if (best_bid and best_ask) else 0.0
+    return {
+        "mid_price": round(mid, 6),
+        "best_bid": round(best_bid, 6),
+        "best_ask": round(best_ask, 6),
+        "spread": round(spread, 6),
+    }
+
+
+def _ob_to_levels(working_ob: dict) -> dict:
+    """Convert working orderbook to sorted price/size arrays for the SSE payload."""
+    bids = working_ob.get("bids", {})
+    asks = working_ob.get("asks", {})
+    sorted_bids = sorted(bids.items(), key=lambda x: float(x[0]), reverse=True)
+    sorted_asks = sorted(asks.items(), key=lambda x: float(x[0]))
+    return {
+        "bid_prices": [float(p) for p, _ in sorted_bids],
+        "bid_sizes": [float(s) for _, s in sorted_bids],
+        "ask_prices": [float(p) for p, _ in sorted_asks],
+        "ask_sizes": [float(s) for _, s in sorted_asks],
+    }
+
+
+def _rebuild_ob_at(
+    orderbooks: list[dict],
+    ob_deltas: list[dict],
+    target_ts: str,
+    token_id: str,
+) -> dict:
+    """Rebuild a working orderbook at *target_ts* for one token.
+
+    1. Start from the nearest ``book`` snapshot ≤ target_ts.
+    2. Apply all ``ob_deltas`` between the snapshot ts and target_ts.
+    """
+    # Find nearest full snapshot
+    best_ts = ""
+    best_ob: dict | None = None
+    for ob in orderbooks:
+        if ob.get("token_id") != token_id:
+            continue
+        ts = ob.get("timestamp", "")
+        if ts <= target_ts and ts > best_ts:
+            best_ts = ts
+            best_ob = ob
+    working = _init_working_ob(best_ob) if best_ob else {"bids": {}, "asks": {}}
+
+    # Apply deltas between snapshot and target
+    for d in ob_deltas:
+        if d.get("token_id") != token_id:
+            continue
+        dts = d.get("timestamp", "")
+        if best_ts and dts <= best_ts:
+            continue
+        if dts > target_ts:
+            break
+        _apply_delta_to_ob(working, d)
+
+    return working
+
+
 async def get_replay_snapshot(slug: str, timestamp: str) -> dict:
     """Return the full state at a given timestamp from archived data.
 
-    Returns per-token price + orderbook in `tokens` dict.
+    Returns per-token price + orderbook in ``tokens`` dict.
+    Uses ob_deltas (if available) to reconstruct the precise orderbook state.
     """
     prices = query_archive_prices(slug)
     orderbooks = query_archive_orderbooks(slug)
     live_trades = query_archive_live_trades(slug)
+    ob_deltas = query_archive_ob_deltas(slug)
 
-    ob_indexed = [(ob["timestamp"], ob) for ob in orderbooks]
     token_ids = _collect_token_ids(prices, orderbooks)
 
     tokens_data: dict[str, dict] = {}
     for tid in token_ids:
-        p = _find_nearest_price_for_token(prices, timestamp, tid) or {}
-        ob = _find_nearest_orderbook_for_token(ob_indexed, timestamp, tid) or {}
-        tokens_data[tid] = {
-            "mid_price": p.get("mid_price", 0),
-            "best_bid": p.get("best_bid", 0),
-            "best_ask": p.get("best_ask", 0),
-            "spread": p.get("spread", 0),
-            "bid_prices": ob.get("bid_prices", []),
-            "bid_sizes": ob.get("bid_sizes", []),
-            "ask_prices": ob.get("ask_prices", []),
-            "ask_sizes": ob.get("ask_sizes", []),
-        }
+        if ob_deltas:
+            working = _rebuild_ob_at(orderbooks, ob_deltas, timestamp, tid)
+            levels = _ob_to_levels(working)
+            derived = _derive_price_from_ob(working)
+            tokens_data[tid] = {**derived, **levels}
+        else:
+            # Fallback for old archives without ob_deltas
+            ob_indexed = [(ob["timestamp"], ob) for ob in orderbooks]
+            p = _find_nearest_price_for_token(prices, timestamp, tid) or {}
+            ob = _find_nearest_orderbook_for_token(ob_indexed, timestamp, tid) or {}
+            tokens_data[tid] = {
+                "mid_price": p.get("mid_price", 0),
+                "best_bid": p.get("best_bid", 0),
+                "best_ask": p.get("best_ask", 0),
+                "spread": p.get("spread", 0),
+                "bid_prices": ob.get("bid_prices", []),
+                "bid_sizes": ob.get("bid_sizes", []),
+                "ask_prices": ob.get("ask_prices", []),
+                "ask_sizes": ob.get("ask_sizes", []),
+            }
 
     # Find live trades up to this timestamp
     snapshot_trades = []
@@ -425,15 +542,20 @@ async def generate_replay_stream(
 
     Data is loaded once; snapshots are paced by real timestamp deltas / speed.
     Trades are sent incrementally (only new trades per event).
+    When ob_deltas are available, maintains a working orderbook per token that
+    is updated incrementally — producing smooth, realistic price/OB changes.
     """
     prices = query_archive_prices(slug)
     orderbooks = query_archive_orderbooks(slug)
     live_trades = query_archive_live_trades(slug)
+    ob_deltas = query_archive_ob_deltas(slug)
+
+    has_deltas = bool(ob_deltas)
 
     # Collect token IDs
     token_ids = _collect_token_ids(prices, orderbooks)
 
-    # Build sorted unique timestamps
+    # Build sorted unique timestamps from ALL data sources
     all_ts_set: set[str] = set()
     for row in prices:
         ts = row.get("timestamp", "")
@@ -447,6 +569,10 @@ async def generate_replay_stream(
         ts = row.get("timestamp", "")
         if ts:
             all_ts_set.add(ts)
+    for row in ob_deltas:
+        ts = row.get("timestamp", "")
+        if ts:
+            all_ts_set.add(ts)
     sorted_ts = sorted(all_ts_set)
 
     if not sorted_ts or start_index >= len(sorted_ts):
@@ -455,9 +581,6 @@ async def generate_replay_stream(
     # Pre-sort trades for pointer-based traversal
     sorted_trades = sorted(live_trades, key=lambda t: t.get("timestamp", ""))
 
-    # Orderbook index list
-    ob_indexed = [(ob["timestamp"], ob) for ob in orderbooks]
-
     # Advance trade pointer past start_index boundary
     trade_ptr = 0
     if start_index > 0:
@@ -465,59 +588,154 @@ async def generate_replay_stream(
         while trade_ptr < len(sorted_trades) and sorted_trades[trade_ptr].get("timestamp", "") <= boundary_ts:
             trade_ptr += 1
 
-    prev_iso: str | None = None
+    if has_deltas:
+        # ── Delta-driven path ────────────────────────────────────
+        # Index orderbooks by (timestamp, token_id) for quick snapshot reset
+        ob_snap_map: dict[str, dict[str, dict]] = {}
+        for ob in orderbooks:
+            ts = ob.get("timestamp", "")
+            tid = ob.get("token_id", "")
+            ob_snap_map.setdefault(ts, {})[tid] = ob
 
-    for i in range(start_index, len(sorted_ts)):
-        ts = sorted_ts[i]
+        # Pre-sort deltas for pointer-based traversal
+        sorted_deltas = sorted(ob_deltas, key=lambda d: d.get("timestamp", ""))
+        delta_ptr = 0
 
-        # Pace by real timestamp delta / speed
-        if prev_iso is not None:
-            delta = _iso_diff_seconds(prev_iso, ts)
-            delay = delta / speed
-            delay = max(0.02, min(delay, 2.0))  # 20ms min, 2s max
-            await asyncio.sleep(delay)
+        # Initialise per-token working orderbooks up to start_index boundary
+        working_obs: dict[str, dict] = {tid: {"bids": {}, "asks": {}} for tid in token_ids}
+        if start_index > 0:
+            boundary_ts = sorted_ts[start_index - 1]
+            # Apply all snapshots + deltas up to boundary
+            for ob in orderbooks:
+                if ob.get("timestamp", "") <= boundary_ts:
+                    tid = ob.get("token_id", "")
+                    if tid in working_obs:
+                        working_obs[tid] = _init_working_ob(ob)
+            while delta_ptr < len(sorted_deltas) and sorted_deltas[delta_ptr].get("timestamp", "") <= boundary_ts:
+                d = sorted_deltas[delta_ptr]
+                tid = d.get("token_id", "")
+                if tid in working_obs:
+                    _apply_delta_to_ob(working_obs[tid], d)
+                delta_ptr += 1
 
-        # Per-token nearest price & orderbook
-        tokens_data: dict[str, dict] = {}
-        for tid in token_ids:
-            p = _find_nearest_price_for_token(prices, ts, tid) or {}
-            ob = _find_nearest_orderbook_for_token(ob_indexed, ts, tid) or {}
-            tokens_data[tid] = {
-                "mid_price": p.get("mid_price", 0),
-                "best_bid": p.get("best_bid", 0),
-                "best_ask": p.get("best_ask", 0),
-                "spread": p.get("spread", 0),
-                "bid_prices": ob.get("bid_prices", []),
-                "bid_sizes": ob.get("bid_sizes", []),
-                "ask_prices": ob.get("ask_prices", []),
-                "ask_sizes": ob.get("ask_sizes", []),
+        prev_iso: str | None = None
+
+        for i in range(start_index, len(sorted_ts)):
+            ts = sorted_ts[i]
+
+            # Pace by real timestamp delta / speed
+            if prev_iso is not None:
+                delta_s = _iso_diff_seconds(prev_iso, ts)
+                delay = delta_s / speed
+                delay = max(0.02, min(delay, 2.0))
+                await asyncio.sleep(delay)
+
+            # Apply any full book snapshots at this timestamp (reset)
+            snap_at_ts = ob_snap_map.get(ts, {})
+            for tid, ob in snap_at_ts.items():
+                if tid in working_obs:
+                    working_obs[tid] = _init_working_ob(ob)
+
+            # Apply deltas up to this timestamp
+            while delta_ptr < len(sorted_deltas):
+                d_ts = sorted_deltas[delta_ptr].get("timestamp", "")
+                if d_ts and d_ts <= ts:
+                    d = sorted_deltas[delta_ptr]
+                    tid = d.get("token_id", "")
+                    if tid in working_obs:
+                        _apply_delta_to_ob(working_obs[tid], d)
+                    delta_ptr += 1
+                else:
+                    break
+
+            # Build per-token data from working orderbooks
+            tokens_data: dict[str, dict] = {}
+            for tid in token_ids:
+                levels = _ob_to_levels(working_obs.get(tid, {"bids": {}, "asks": {}}))
+                derived = _derive_price_from_ob(working_obs.get(tid, {"bids": {}, "asks": {}}))
+                tokens_data[tid] = {**derived, **levels}
+
+            # Incremental trades
+            new_trades: list[dict] = []
+            while trade_ptr < len(sorted_trades):
+                t_ts = sorted_trades[trade_ptr].get("timestamp", "")
+                if t_ts and t_ts <= ts:
+                    t = sorted_trades[trade_ptr]
+                    new_trades.append({
+                        "timestamp": t_ts,
+                        "token_id": t.get("token_id", ""),
+                        "side": t.get("side", "UNKNOWN"),
+                        "price": t.get("price", 0),
+                        "size": t.get("size", 0),
+                        "transaction_hash": t.get("transaction_hash", ""),
+                    })
+                    trade_ptr += 1
+                else:
+                    break
+
+            yield {
+                "index": i,
+                "timestamp": ts,
+                "token_ids": token_ids,
+                "tokens": tokens_data,
+                "new_trades": new_trades,
+                "total_trades": trade_ptr,
             }
 
-        # Incremental trades
-        new_trades: list[dict] = []
-        while trade_ptr < len(sorted_trades):
-            t_ts = sorted_trades[trade_ptr].get("timestamp", "")
-            if t_ts and t_ts <= ts:
-                t = sorted_trades[trade_ptr]
-                new_trades.append({
-                    "timestamp": t_ts,
-                    "token_id": t.get("token_id", ""),
-                    "side": t.get("side", "UNKNOWN"),
-                    "price": t.get("price", 0),
-                    "size": t.get("size", 0),
-                    "transaction_hash": t.get("transaction_hash", ""),
-                })
-                trade_ptr += 1
-            else:
-                break
+            prev_iso = ts
+    else:
+        # ── Fallback: nearest-snapshot path (old archives) ────
+        ob_indexed = [(ob["timestamp"], ob) for ob in orderbooks]
+        prev_iso = None
 
-        yield {
-            "index": i,
-            "timestamp": ts,
-            "token_ids": token_ids,
-            "tokens": tokens_data,
-            "new_trades": new_trades,
-            "total_trades": trade_ptr,
-        }
+        for i in range(start_index, len(sorted_ts)):
+            ts = sorted_ts[i]
 
-        prev_iso = ts
+            if prev_iso is not None:
+                delta_s = _iso_diff_seconds(prev_iso, ts)
+                delay = delta_s / speed
+                delay = max(0.02, min(delay, 2.0))
+                await asyncio.sleep(delay)
+
+            tokens_data = {}
+            for tid in token_ids:
+                p = _find_nearest_price_for_token(prices, ts, tid) or {}
+                ob = _find_nearest_orderbook_for_token(ob_indexed, ts, tid) or {}
+                tokens_data[tid] = {
+                    "mid_price": p.get("mid_price", 0),
+                    "best_bid": p.get("best_bid", 0),
+                    "best_ask": p.get("best_ask", 0),
+                    "spread": p.get("spread", 0),
+                    "bid_prices": ob.get("bid_prices", []),
+                    "bid_sizes": ob.get("bid_sizes", []),
+                    "ask_prices": ob.get("ask_prices", []),
+                    "ask_sizes": ob.get("ask_sizes", []),
+                }
+
+            new_trades: list[dict] = []
+            while trade_ptr < len(sorted_trades):
+                t_ts = sorted_trades[trade_ptr].get("timestamp", "")
+                if t_ts and t_ts <= ts:
+                    t = sorted_trades[trade_ptr]
+                    new_trades.append({
+                        "timestamp": t_ts,
+                        "token_id": t.get("token_id", ""),
+                        "side": t.get("side", "UNKNOWN"),
+                        "price": t.get("price", 0),
+                        "size": t.get("size", 0),
+                        "transaction_hash": t.get("transaction_hash", ""),
+                    })
+                    trade_ptr += 1
+                else:
+                    break
+
+            yield {
+                "index": i,
+                "timestamp": ts,
+                "token_ids": token_ids,
+                "tokens": tokens_data,
+                "new_trades": new_trades,
+                "total_trades": trade_ptr,
+            }
+
+            prev_iso = ts

@@ -25,6 +25,7 @@ from app.config import settings
 from app.storage import redis_store
 from app.storage.duckdb_store import (
     write_live_trade,
+    write_ob_delta,
     write_orderbook_snapshot,
     write_price_snapshot,
 )
@@ -333,11 +334,31 @@ class PolymarketWSManager:
                 logger.warning("WS book parquet write failed: %s", e)
 
     async def _handle_price_change(self, data: dict) -> None:
-        """Incremental orderbook update — update Redis cache with new levels."""
+        """Incremental orderbook update — update Redis cache with new levels
+        and persist each delta to Parquet for replay fidelity."""
+        ts_str = data.get("timestamp", "")
         for pc in data.get("price_changes", []):
             asset_id = pc.get("asset_id", "")
             if not asset_id:
                 continue
+
+            side = pc.get("side", "")
+            price = pc.get("price", "0")
+            size = pc.get("size", "0")
+
+            # Persist delta to Parquet (no throttling — every event)
+            market_id = await self._resolve_market_id(asset_id)
+            try:
+                write_ob_delta(
+                    market_id=market_id,
+                    token_id=asset_id,
+                    side=side,
+                    price=float(price),
+                    size=float(size),
+                    timestamp=ts_str if ts_str else None,
+                )
+            except Exception as e:
+                logger.warning("WS ob_delta parquet write failed: %s", e)
 
             # Read current cached book, apply delta
             cached = await redis_store.cache_get(f"clob:book:{asset_id}")
@@ -347,10 +368,6 @@ class PolymarketWSManager:
                 book = json.loads(cached)
             except json.JSONDecodeError:
                 continue
-
-            side = pc.get("side", "")
-            price = pc.get("price", "0")
-            size = pc.get("size", "0")
 
             key = "bids" if side == "BUY" else "asks"
             levels: list[dict] = book.get(key, [])

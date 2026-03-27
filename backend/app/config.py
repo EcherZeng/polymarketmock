@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     cache_ttl_data_trades: int = 3
 
     # Data collector intervals (seconds)
-    collector_orderbook_interval: int = 15
-    collector_price_interval: int = 60
+    collector_orderbook_interval: int = 2
+    collector_price_interval: int = 5
 
     # Limit order check interval (seconds)
     limit_order_check_interval: int = 5

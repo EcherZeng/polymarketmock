@@ -112,11 +112,20 @@ LIVE_TRADE_SCHEMA = pa.schema([
     ("outcome", pa.string()),
 ])
 
+OB_DELTA_SCHEMA = pa.schema([
+    ("timestamp", pa.timestamp("us", tz="UTC")),
+    ("token_id", pa.int32()),
+    ("side", pa.int8()),
+    ("price", pa.float32()),
+    ("size", pa.float32()),
+])
+
 _SCHEMAS: dict[str, pa.Schema] = {
     "prices": PRICE_SCHEMA,
     "orderbooks": ORDERBOOK_SCHEMA,
     "trades": TRADE_SCHEMA,
     "live_trades": LIVE_TRADE_SCHEMA,
+    "ob_deltas": OB_DELTA_SCHEMA,
 }
 
 
@@ -307,6 +316,23 @@ def write_live_trade(
         "price": price,
         "size": size,
         "outcome": outcome,
+    })
+
+
+def write_ob_delta(
+    market_id: str,
+    token_id: str,
+    side: str,
+    price: float,
+    size: float,
+    timestamp: str | None = None,
+) -> None:
+    get_buffer().append("ob_deltas", market_id, {
+        "timestamp": _parse_ts(timestamp),
+        "token_id": encode_token(token_id),
+        "side": _encode_side(side),
+        "price": price,
+        "size": size,
     })
 
 
@@ -523,6 +549,32 @@ def query_archive_live_trades(
     return _query_parquet_file(fp, start_time, end_time, has_side=True) if os.path.exists(fp) else []
 
 
+def query_ob_deltas(
+    market_id: str,
+    start_time: str | None = None,
+    end_time: str | None = None,
+) -> list[dict]:
+    dir_path = os.path.join(settings.data_dir, "ob_deltas", market_id)
+    if not os.path.isdir(dir_path):
+        return []
+    glob = os.path.join(dir_path, "*.parquet").replace("\\", "/")
+    sql = f"SELECT * FROM read_parquet('{glob}')" + _build_time_filter(start_time, end_time) + " ORDER BY timestamp"
+    con = duckdb.connect()
+    try:
+        return _post_process_rows(con.execute(sql).fetchdf().to_dict(orient="records"), has_side=True)
+    except Exception:
+        return []
+    finally:
+        con.close()
+
+
+def query_archive_ob_deltas(
+    slug: str, start_time: str | None = None, end_time: str | None = None,
+) -> list[dict]:
+    fp = os.path.join(settings.data_dir, "archives", slug, "ob_deltas.parquet")
+    return _query_parquet_file(fp, start_time, end_time, has_side=True) if os.path.exists(fp) else []
+
+
 def delete_archive(slug: str) -> bool:
     """Delete the archive directory for a given slug. Returns True if removed."""
     archive_dir = os.path.join(settings.data_dir, "archives", slug)
@@ -555,7 +607,7 @@ def get_archive_data_range(slug: str) -> dict:
     archive_dir = os.path.join(settings.data_dir, "archives", slug)
     all_min: list[str] = []
     all_max: list[str] = []
-    for name in ["prices", "orderbooks", "live_trades"]:
+    for name in ["prices", "orderbooks", "live_trades", "ob_deltas"]:
         fp = os.path.join(archive_dir, f"{name}.parquet").replace("\\", "/")
         if not os.path.exists(fp):
             continue
