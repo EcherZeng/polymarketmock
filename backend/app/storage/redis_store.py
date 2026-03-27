@@ -381,3 +381,52 @@ async def set_replay_session(session_id: str, session_json: str, ttl: int = 3600
 async def get_replay_session(session_id: str) -> dict | None:
     val = await get_redis().get(f"{REPLAY_SESSION_PREFIX}{session_id}")
     return json.loads(val) if val else None
+
+
+# ── Recording lock (per-tab ownership) ──────────────────────────────────────
+
+RECORDING_LOCK_PREFIX = "recording:lock:"
+RECORDING_LOCK_TTL = 15  # seconds — must be refreshed via heartbeat
+
+
+async def acquire_recording_lock(slug: str, client_id: str) -> bool:
+    """Try to claim recording ownership. Returns True if acquired (or already owned)."""
+    key = f"{RECORDING_LOCK_PREFIX}{slug}"
+    r = get_redis()
+    # SET NX — only set if key doesn't exist
+    acquired = await r.set(key, client_id, nx=True, ex=RECORDING_LOCK_TTL)
+    if acquired:
+        return True
+    # Already exists — check if we already own it
+    owner = await r.get(key)
+    if owner == client_id:
+        await r.expire(key, RECORDING_LOCK_TTL)
+        return True
+    return False
+
+
+async def refresh_recording_lock(slug: str, client_id: str) -> bool:
+    """Refresh lock TTL if caller is the owner. Returns True if still owned."""
+    key = f"{RECORDING_LOCK_PREFIX}{slug}"
+    r = get_redis()
+    owner = await r.get(key)
+    if owner == client_id:
+        await r.expire(key, RECORDING_LOCK_TTL)
+        return True
+    return False
+
+
+async def release_recording_lock(slug: str, client_id: str) -> bool:
+    """Release lock if caller is the owner. Returns True if released."""
+    key = f"{RECORDING_LOCK_PREFIX}{slug}"
+    r = get_redis()
+    owner = await r.get(key)
+    if owner == client_id:
+        await r.delete(key)
+        return True
+    return False
+
+
+async def get_recording_lock_owner(slug: str) -> str | None:
+    """Return the client_id that currently holds the recording lock, or None."""
+    return await get_redis().get(f"{RECORDING_LOCK_PREFIX}{slug}")

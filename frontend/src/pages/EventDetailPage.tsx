@@ -15,7 +15,7 @@ import TradingPanel from "@/components/TradingPanel"
 import PositionTable from "@/components/PositionTable"
 import ActivityFeed from "@/components/ActivityFeed"
 import useMarketWebSocket from "@/hooks/useMarketWebSocket"
-import { resolveSlug, fetchEventStatus, fetchNextEvent, watchEvent } from "@/api/client"
+import { resolveSlug, fetchEventStatus, fetchNextEvent, watchEvent, recordingHeartbeat } from "@/api/client"
 import type { Market, MarketEvent, EventStatusResponse, NextEventResponse } from "@/types"
 
 function parseTokenIds(raw: unknown): string[] {
@@ -63,16 +63,52 @@ export default function EventDetailPage() {
 
   // ── Auto-record: watch event when LIVE ─────────────
   const [isRecording, setIsRecording] = useState(false)
+  const [isOwner, setIsOwner] = useState(false)
   const watchedRef = useRef(false)
+
+  // Stable per-tab client ID (survives page refreshes within same tab)
+  const clientId = useMemo(() => {
+    let id = sessionStorage.getItem("pm_client_id")
+    if (!id) {
+      id = crypto.randomUUID()
+      sessionStorage.setItem("pm_client_id", id)
+    }
+    return id
+  }, [])
 
   useEffect(() => {
     if (!slug || !event || isEnded || watchedRef.current) return
     if (eventStatus?.status !== "live") return
     watchedRef.current = true
-    watchEvent(slug)
-      .then(() => setIsRecording(true))
+    watchEvent(slug, clientId)
+      .then((res) => {
+        setIsRecording(true)
+        setIsOwner(res.is_owner)
+      })
       .catch(() => { /* non-critical */ })
   }, [slug, event?.id, eventStatus?.status])
+
+  // Heartbeat: keep recording lock alive if this tab is the owner
+  useEffect(() => {
+    if (!slug || !isOwner || isEnded) return
+    const id = window.setInterval(() => {
+      recordingHeartbeat(slug, clientId)
+        .then((res) => { if (!res.is_owner) setIsOwner(false) })
+        .catch(() => {})
+    }, 10_000)
+    return () => window.clearInterval(id)
+  }, [slug, isOwner, isEnded])
+
+  // Non-owner tabs: detect when lock expires and try to claim
+  useEffect(() => {
+    if (!slug || isOwner || !isRecording || isEnded) return
+    if (eventStatus?.recording_active === false) {
+      // Lock expired — try to claim
+      watchEvent(slug, clientId)
+        .then((res) => setIsOwner(res.is_owner))
+        .catch(() => {})
+    }
+  }, [eventStatus?.recording_active])
 
   // ── Client-side countdown (synced from server every 5s) ────
   const [countdown, setCountdown] = useState<number | null>(null)
@@ -234,10 +270,16 @@ export default function EventDetailPage() {
         <div className="flex items-start justify-between gap-2">
           <h1 className="text-xl font-semibold leading-tight">{event.title}</h1>
           <div className="flex shrink-0 gap-1">
-            {isRecording && (
+            {isRecording && isOwner && (
               <Badge variant="destructive" className="animate-pulse gap-1">
                 <span className="inline-block h-2 w-2 rounded-full bg-white" />
                 录制中
+              </Badge>
+            )}
+            {isRecording && !isOwner && eventStatus?.recording_active && (
+              <Badge variant="secondary" className="gap-1">
+                <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
+                其他窗口录制中
               </Badge>
             )}
             {isEnded ? (

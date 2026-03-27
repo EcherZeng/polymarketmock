@@ -295,6 +295,7 @@ export interface EventStatusResponse {
   ended_at: string | null
   seconds_remaining: number | null
   archive_ready?: boolean
+  recording_active?: boolean
 }
 
 export interface NextEventResponse {

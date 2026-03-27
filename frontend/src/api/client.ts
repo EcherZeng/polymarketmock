@@ -233,8 +233,22 @@ export async function deleteArchive(slug: string): Promise<{ deleted: string }> 
 
 export async function watchEvent(
   slug: string,
-): Promise<{ watched_tokens: string[]; recording_started: boolean }> {
-  const { data } = await api.post(`/watch/event/${slug}`)
+  clientId?: string,
+): Promise<{ watched_tokens: string[]; recording_started: boolean; is_owner: boolean }> {
+  const { data } = await api.post(`/watch/event/${slug}`, null, {
+    params: clientId ? { client_id: clientId } : undefined,
+  })
+  return data
+}
+
+export async function recordingHeartbeat(
+  slug: string,
+  clientId: string,
+): Promise<{ is_owner: boolean }> {
+  const { data } = await api.post("/recording/heartbeat", {
+    slug,
+    client_id: clientId,
+  })
   return data
 }
 

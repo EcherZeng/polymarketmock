@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 from app.config import settings
 from app.services import polymarket_proxy as proxy
@@ -232,10 +233,11 @@ async def list_watched():
 
 
 @router.post("/watch/event/{slug:path}")
-async def watch_event(slug: str):
+async def watch_event(slug: str, client_id: str | None = Query(None)):
     """进入事件后自动录制 — 注册所有 token 到数据采集器。
 
     幂等操作：重复调用不产生副作用。
+    传入 client_id 时尝试获取录制所有权锁（同一事件仅一个标签页显示"录制中"）。
     """
     event = await proxy.resolve_event_slug(slug)
     if not event:
@@ -271,7 +273,16 @@ async def watch_event(slug: str):
             }
             await redis_store.set_token_market_info(tid, _json.dumps(info))
 
-    return {"watched_tokens": watched_tokens, "recording_started": True}
+    # Try to acquire recording lock for this tab
+    is_owner = False
+    if client_id:
+        is_owner = await redis_store.acquire_recording_lock(slug, client_id)
+
+    return {
+        "watched_tokens": watched_tokens,
+        "recording_started": True,
+        "is_owner": is_owner,
+    }
 
 
 @router.delete("/watch/{token_id}")
@@ -279,6 +290,21 @@ async def unwatch_token(token_id: str):
     """取消监视某个 token。"""
     await redis_store.remove_watched_market(token_id)
     return {"removed": token_id}
+
+
+class HeartbeatRequest(BaseModel):
+    slug: str
+    client_id: str
+
+
+@router.post("/recording/heartbeat")
+async def recording_heartbeat(req: HeartbeatRequest):
+    """刷新录制锁 TTL，保持当前标签页的录制所有权。"""
+    is_owner = await redis_store.refresh_recording_lock(req.slug, req.client_id)
+    if not is_owner:
+        # Lock expired or stolen — try to re-acquire
+        is_owner = await redis_store.acquire_recording_lock(req.slug, req.client_id)
+    return {"is_owner": is_owner}
 
 
 # ── Archives ──────────────────────────────────────────────────────────────────

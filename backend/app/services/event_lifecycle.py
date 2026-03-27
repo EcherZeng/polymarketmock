@@ -41,6 +41,9 @@ async def check_event_status(slug: str) -> dict:
             if result.get("status") == "ended":
                 existing = await redis_store.get_archive_meta(slug)
                 result["archive_ready"] = existing is not None
+            # Add live recording lock info (not cached — changes per-tab)
+            owner = await redis_store.get_recording_lock_owner(slug)
+            result["recording_active"] = owner is not None
             return result
         except (json.JSONDecodeError, TypeError):
             pass
@@ -62,6 +65,10 @@ async def check_event_status(slug: str) -> dict:
     if result.get("status") == "ended":
         existing = await redis_store.get_archive_meta(slug)
         result["archive_ready"] = existing is not None
+
+    # Add live recording lock info
+    owner = await redis_store.get_recording_lock_owner(slug)
+    result["recording_active"] = owner is not None
 
     return result
 
