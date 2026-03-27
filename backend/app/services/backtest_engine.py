@@ -6,7 +6,7 @@ import asyncio
 import json
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from app.models.backtest import BacktestRequest, BacktestResult, BacktestTradeResult
 from app.storage.duckdb_store import (
@@ -145,6 +145,51 @@ def get_backtest_markets() -> list[dict]:
 # ── Replay engine ────────────────────────────────────────────────────────────
 
 
+def _build_time_grid(all_ts: list[str]) -> list[str]:
+    """Build a 1-second interval time grid from min to max of *all_ts*.
+
+    Returns ISO-formatted timestamps at every whole second between the
+    earliest and latest timestamps (inclusive).
+    """
+    if not all_ts:
+        return []
+    sorted_ts = sorted(all_ts)
+    dt_start = datetime.fromisoformat(sorted_ts[0])
+    dt_end = datetime.fromisoformat(sorted_ts[-1])
+    # Truncate start to whole second
+    dt_cur = dt_start.replace(microsecond=0)
+    grid: list[str] = []
+    while dt_cur <= dt_end:
+        grid.append(dt_cur.isoformat())
+        dt_cur += timedelta(seconds=1)
+    # Ensure at least one entry
+    if not grid:
+        grid.append(dt_start.isoformat())
+    return grid
+
+
+def _collect_all_data_ts(
+    prices: list[dict],
+    orderbooks: list[dict],
+    live_trades: list[dict],
+    ob_deltas: list[dict],
+) -> tuple[list[str], set[str]]:
+    """Collect unique timestamps and token IDs from all data sources."""
+    all_ts: list[str] = []
+    seen: set[str] = set()
+    token_id_set: set[str] = set()
+    for row in (*prices, *orderbooks, *live_trades, *ob_deltas):
+        ts = row.get("timestamp", "")
+        if ts and ts not in seen:
+            all_ts.append(ts)
+            seen.add(ts)
+        tid = row.get("token_id", "")
+        if tid:
+            token_id_set.add(tid)
+    all_ts.sort()
+    return all_ts, token_id_set
+
+
 async def get_replay_timeline(slug: str) -> dict:
     """Return the list of available timestamps for an archived event."""
     prices = query_archive_prices(slug)
@@ -152,43 +197,10 @@ async def get_replay_timeline(slug: str) -> dict:
     live_trades = query_archive_live_trades(slug)
     ob_deltas = query_archive_ob_deltas(slug)
 
-    all_ts: list[str] = []
-    seen: set[str] = set()
-    token_id_set: set[str] = set()
-    for row in prices:
-        ts = row.get("timestamp", "")
-        if ts and ts not in seen:
-            all_ts.append(ts)
-            seen.add(ts)
-        tid = row.get("token_id", "")
-        if tid:
-            token_id_set.add(tid)
-    for row in orderbooks:
-        ts = row.get("timestamp", "")
-        if ts and ts not in seen:
-            all_ts.append(ts)
-            seen.add(ts)
-        tid = row.get("token_id", "")
-        if tid:
-            token_id_set.add(tid)
-    for row in live_trades:
-        ts = row.get("timestamp", "")
-        if ts and ts not in seen:
-            all_ts.append(ts)
-            seen.add(ts)
-        tid = row.get("token_id", "")
-        if tid:
-            token_id_set.add(tid)
-    for row in ob_deltas:
-        ts = row.get("timestamp", "")
-        if ts and ts not in seen:
-            all_ts.append(ts)
-            seen.add(ts)
-        tid = row.get("token_id", "")
-        if tid:
-            token_id_set.add(tid)
+    all_ts, token_id_set = _collect_all_data_ts(prices, orderbooks, live_trades, ob_deltas)
 
-    all_ts.sort()
+    # Build 1-second time grid for smooth replay
+    time_grid = _build_time_grid(all_ts)
 
     # Price range stats
     mid_prices = [r["mid_price"] for r in prices if r.get("mid_price")]
@@ -214,14 +226,14 @@ async def get_replay_timeline(slug: str) -> dict:
 
     return {
         "slug": slug,
-        "start_time": all_ts[0] if all_ts else "",
-        "end_time": all_ts[-1] if all_ts else "",
-        "total_snapshots": len(all_ts),
+        "start_time": time_grid[0] if time_grid else "",
+        "end_time": time_grid[-1] if time_grid else "",
+        "total_snapshots": len(time_grid),
         "total_trades": len(live_trades),
         "price_range": price_range,
         "data_summary": data_summary,
         "token_ids": sorted(token_id_set),
-        "timestamps": all_ts,
+        "timestamps": time_grid,
     }
 
 
@@ -540,10 +552,10 @@ async def generate_replay_stream(
 ) -> AsyncGenerator[dict, None]:
     """Yield replay snapshots for SSE streaming.
 
-    Data is loaded once; snapshots are paced by real timestamp deltas / speed.
-    Trades are sent incrementally (only new trades per event).
-    When ob_deltas are available, maintains a working orderbook per token that
-    is updated incrementally — producing smooth, realistic price/OB changes.
+    Snapshots are emitted on a 1-second time grid (matching the timeline),
+    paced at ``1.0 / speed`` real seconds per tick.  Each tick applies all
+    orderbook snapshots, ob_deltas, and trades whose timestamps fall within
+    the current grid second, then derives per-token price/OB data.
     """
     prices = query_archive_prices(slug)
     orderbooks = query_archive_orderbooks(slug)
@@ -555,27 +567,11 @@ async def generate_replay_stream(
     # Collect token IDs
     token_ids = _collect_token_ids(prices, orderbooks)
 
-    # Build sorted unique timestamps from ALL data sources
-    all_ts_set: set[str] = set()
-    for row in prices:
-        ts = row.get("timestamp", "")
-        if ts:
-            all_ts_set.add(ts)
-    for row in orderbooks:
-        ts = row.get("timestamp", "")
-        if ts:
-            all_ts_set.add(ts)
-    for row in live_trades:
-        ts = row.get("timestamp", "")
-        if ts:
-            all_ts_set.add(ts)
-    for row in ob_deltas:
-        ts = row.get("timestamp", "")
-        if ts:
-            all_ts_set.add(ts)
-    sorted_ts = sorted(all_ts_set)
+    # Build the same 1-second time grid used by get_replay_timeline
+    all_data_ts, _ = _collect_all_data_ts(prices, orderbooks, live_trades, ob_deltas)
+    time_grid = _build_time_grid(all_data_ts)
 
-    if not sorted_ts or start_index >= len(sorted_ts):
+    if not time_grid or start_index >= len(time_grid):
         return
 
     # Pre-sort trades for pointer-based traversal
@@ -584,13 +580,12 @@ async def generate_replay_stream(
     # Advance trade pointer past start_index boundary
     trade_ptr = 0
     if start_index > 0:
-        boundary_ts = sorted_ts[start_index - 1]
+        boundary_ts = time_grid[start_index - 1]
         while trade_ptr < len(sorted_trades) and sorted_trades[trade_ptr].get("timestamp", "") <= boundary_ts:
             trade_ptr += 1
 
     if has_deltas:
         # ── Delta-driven path ────────────────────────────────────
-        # Index orderbooks by (timestamp, token_id) for quick snapshot reset
         ob_snap_map: dict[str, dict[str, dict]] = {}
         for ob in orderbooks:
             ts = ob.get("timestamp", "")
@@ -601,11 +596,14 @@ async def generate_replay_stream(
         sorted_deltas = sorted(ob_deltas, key=lambda d: d.get("timestamp", ""))
         delta_ptr = 0
 
+        # Collect sorted unique orderbook snapshot timestamps for range lookup
+        ob_snap_ts_sorted = sorted(ob_snap_map.keys())
+        ob_snap_ptr = 0
+
         # Initialise per-token working orderbooks up to start_index boundary
         working_obs: dict[str, dict] = {tid: {"bids": {}, "asks": {}} for tid in token_ids}
         if start_index > 0:
-            boundary_ts = sorted_ts[start_index - 1]
-            # Apply all snapshots + deltas up to boundary
+            boundary_ts = time_grid[start_index - 1]
             for ob in orderbooks:
                 if ob.get("timestamp", "") <= boundary_ts:
                     tid = ob.get("token_id", "")
@@ -617,24 +615,24 @@ async def generate_replay_stream(
                 if tid in working_obs:
                     _apply_delta_to_ob(working_obs[tid], d)
                 delta_ptr += 1
+            # Advance ob_snap_ptr past boundary
+            while ob_snap_ptr < len(ob_snap_ts_sorted) and ob_snap_ts_sorted[ob_snap_ptr] <= boundary_ts:
+                ob_snap_ptr += 1
 
-        prev_iso: str | None = None
+        for i in range(start_index, len(time_grid)):
+            ts = time_grid[i]
 
-        for i in range(start_index, len(sorted_ts)):
-            ts = sorted_ts[i]
+            # Pace: 1 real second / speed per grid tick
+            if i > start_index:
+                await asyncio.sleep(1.0 / speed)
 
-            # Pace by real timestamp delta / speed
-            if prev_iso is not None:
-                delta_s = _iso_diff_seconds(prev_iso, ts)
-                delay = delta_s / speed
-                delay = max(0.02, min(delay, 2.0))
-                await asyncio.sleep(delay)
-
-            # Apply any full book snapshots at this timestamp (reset)
-            snap_at_ts = ob_snap_map.get(ts, {})
-            for tid, ob in snap_at_ts.items():
-                if tid in working_obs:
-                    working_obs[tid] = _init_working_ob(ob)
+            # Apply any full book snapshots with timestamp <= ts
+            while ob_snap_ptr < len(ob_snap_ts_sorted) and ob_snap_ts_sorted[ob_snap_ptr] <= ts:
+                snap_ts = ob_snap_ts_sorted[ob_snap_ptr]
+                for tid, ob in ob_snap_map[snap_ts].items():
+                    if tid in working_obs:
+                        working_obs[tid] = _init_working_ob(ob)
+                ob_snap_ptr += 1
 
             # Apply deltas up to this timestamp
             while delta_ptr < len(sorted_deltas):
@@ -681,21 +679,15 @@ async def generate_replay_stream(
                 "new_trades": new_trades,
                 "total_trades": trade_ptr,
             }
-
-            prev_iso = ts
     else:
         # ── Fallback: nearest-snapshot path (old archives) ────
         ob_indexed = [(ob["timestamp"], ob) for ob in orderbooks]
-        prev_iso = None
 
-        for i in range(start_index, len(sorted_ts)):
-            ts = sorted_ts[i]
+        for i in range(start_index, len(time_grid)):
+            ts = time_grid[i]
 
-            if prev_iso is not None:
-                delta_s = _iso_diff_seconds(prev_iso, ts)
-                delay = delta_s / speed
-                delay = max(0.02, min(delay, 2.0))
-                await asyncio.sleep(delay)
+            if i > start_index:
+                await asyncio.sleep(1.0 / speed)
 
             tokens_data = {}
             for tid in token_ids:
@@ -737,5 +729,3 @@ async def generate_replay_stream(
                 "new_trades": new_trades,
                 "total_trades": trade_ptr,
             }
-
-            prev_iso = ts
