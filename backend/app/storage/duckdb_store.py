@@ -122,14 +122,23 @@ _SCHEMAS: dict[str, pa.Schema] = {
 
 
 class ParquetBuffer:
-    """Accumulates rows in memory and flushes to Parquet periodically."""
+    """Accumulates rows in memory and flushes to Parquet as independent chunk files.
 
-    def __init__(self, flush_interval: int = 30, flush_threshold: int = 100) -> None:
+    Each flush writes a new small Parquet file (chunk) instead of reading,
+    merging, and re-writing a single growing file.  This avoids:
+    - O(N) read-merge-write amplification that blocks the event loop
+    - Data loss when write fails (buffer is only cleared on success)
+    DuckDB ``read_parquet(glob)`` reads all chunks transparently.
+    Chunks are merged into a single file during archival.
+    """
+
+    def __init__(self, flush_interval: int = 60, flush_threshold: int = 2000) -> None:
         self._buffers: dict[str, list[dict]] = {}
         self._last_flush: dict[str, float] = {}
         self._lock = threading.Lock()
         self.flush_interval = flush_interval
         self.flush_threshold = flush_threshold
+        self._chunk_seq: int = 0
 
     def _key(self, data_type: str, market_id: str) -> str:
         return f"{data_type}/{market_id}"
@@ -152,25 +161,33 @@ class ParquetBuffer:
             if not should:
                 return
             to_write = list(rows)
-            rows.clear()
             self._last_flush[key] = now
-        self._write(data_type, market_id, to_write)
+        # Write OUTSIDE lock; only clear buffer after success
+        if self._write(data_type, market_id, to_write):
+            with self._lock:
+                buf = self._buffers.get(key)
+                if buf is not None:
+                    del buf[:len(to_write)]
 
     def flush_all(self) -> None:
         with self._lock:
             snapshot = {k: list(v) for k, v in self._buffers.items() if v}
-            self._buffers.clear()
         for key, rows in snapshot.items():
             parts = key.split("/", 1)
             if len(parts) == 2:
-                self._write(parts[0], parts[1], rows)
+                if self._write(parts[0], parts[1], rows):
+                    with self._lock:
+                        buf = self._buffers.get(key)
+                        if buf is not None:
+                            del buf[:len(rows)]
 
-    def _write(self, data_type: str, market_id: str, rows: list[dict]) -> None:
+    def _write(self, data_type: str, market_id: str, rows: list[dict]) -> bool:
+        """Write rows as a new chunk file. Returns True on success."""
         if not rows:
-            return
+            return True
         schema = _SCHEMAS.get(data_type)
         if not schema:
-            return
+            return False
 
         by_date: dict[str, list[dict]] = {}
         for r in rows:
@@ -181,20 +198,22 @@ class ParquetBuffer:
         dir_path = os.path.join(settings.data_dir, data_type, market_id)
         _ensure_dir(dir_path)
 
+        all_ok = True
         for date_str, day_rows in by_date.items():
-            file_path = os.path.join(dir_path, f"{date_str}.parquet")
+            self._chunk_seq += 1
+            chunk_name = f"{date_str}_{int(time.time() * 1000)}_{self._chunk_seq:06d}.parquet"
+            file_path = os.path.join(dir_path, chunk_name)
             try:
                 columns: dict[str, list] = {field.name: [] for field in schema}
                 for r in day_rows:
                     for field in schema:
                         columns[field.name].append(r.get(field.name))
                 table = pa.table(columns, schema=schema)
-                if os.path.exists(file_path):
-                    existing = pq.read_table(file_path, schema=schema)
-                    table = pa.concat_tables([existing, table])
                 pq.write_table(table, file_path, compression="zstd")
             except Exception as e:
-                logger.warning("Parquet flush failed %s/%s/%s: %s", data_type, market_id, date_str, e)
+                logger.warning("Parquet chunk write failed %s/%s/%s: %s", data_type, market_id, chunk_name, e)
+                all_ok = False
+        return all_ok
 
 
 _buffer: ParquetBuffer | None = None

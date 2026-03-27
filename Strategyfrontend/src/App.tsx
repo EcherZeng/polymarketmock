@@ -1,0 +1,49 @@
+import { Routes, Route, Link, useLocation } from "react-router-dom"
+import { cn } from "@/lib/utils"
+import StrategyPage from "@/pages/StrategyPage"
+import ResultsListPage from "@/pages/ResultsListPage"
+import ResultDetailPage from "@/pages/ResultDetailPage"
+
+const navItems = [
+  { to: "/", label: "策略回测" },
+  { to: "/results", label: "回测结果" },
+]
+
+export default function App() {
+  const location = useLocation()
+
+  return (
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
+      <header className="border-b">
+        <div className="mx-auto flex h-14 max-w-7xl items-center gap-6 px-4">
+          <Link to="/" className="text-lg font-semibold tracking-tight">
+            Strategy Engine
+          </Link>
+          <nav className="flex gap-4">
+            {navItems.map((item) => (
+              <Link
+                key={item.to}
+                to={item.to}
+                className={cn(
+                  "text-sm transition-colors hover:text-foreground",
+                  location.pathname === item.to
+                    ? "text-foreground font-medium"
+                    : "text-muted-foreground",
+                )}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </nav>
+        </div>
+      </header>
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-4">
+        <Routes>
+          <Route path="/" element={<StrategyPage />} />
+          <Route path="/results" element={<ResultsListPage />} />
+          <Route path="/results/:sessionId" element={<ResultDetailPage />} />
+        </Routes>
+      </main>
+    </div>
+  )
+}
