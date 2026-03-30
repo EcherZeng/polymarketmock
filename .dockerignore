@@ -1,0 +1,39 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.eggs
+.venv
+venv
+.mypy_cache
+.pytest_cache
+.ruff_cache
+
+# Node
+node_modules
+.npm
+*.tsbuildinfo
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+
+# Docs & misc
+docs/
+*.md
+!README.md
+LICENSE
+.agents/
+skills-lock.json

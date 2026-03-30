@@ -6,15 +6,13 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-COPY pyproject.toml .
+COPY requirements.txt .
 
-# Install build tools, then install Python deps into a virtual-env so we can
-# copy only the site-packages to the runtime image.
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 RUN pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir .
+ && pip install --no-cache-dir -r requirements.txt
 
 # ── Stage 2: runtime ────────────────────────────────────────────────────────
 FROM python:3.11-slim
@@ -25,14 +23,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH"
 
-# Copy only the virtual-env from builder (keeps image small)
 COPY --from=builder /opt/venv /opt/venv
 
-COPY app/ app/
+COPY config.py .
+COPY main.py .
+COPY core/ core/
+COPY api/ api/
+COPY strategies/ strategies/
 
-# Data directory will be bind-mounted at runtime
-RUN mkdir -p /app/data/sessions /app/data/logs
+RUN mkdir -p /app/results
 
-EXPOSE 8071
+EXPOSE 8072
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8071"]
+CMD ["uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "8072"]
