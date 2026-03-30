@@ -404,3 +404,17 @@ export interface StreamSnapshotEvent {
   new_trades: ReplaySnapshotTrade[]
   total_trades: number
 }
+
+// ── Auto-record ─────────────────────────────────────────────────────────────────
+
+export interface AutoRecordState {
+  slug: string | null
+  status: "searching" | "waiting" | "recording" | "archiving" | "completed"
+  started_at: string | null
+  seconds_remaining: number | null
+}
+
+export interface AutoRecordConfig {
+  durations: string[]
+  states: Record<string, AutoRecordState>
+}

@@ -243,35 +243,8 @@ async def watch_event(slug: str, client_id: str | None = Query(None)):
     if not event:
         raise HTTPException(status_code=404, detail=f"Event not found: {slug}")
 
-    import json as _json
-
-    markets = event.get("markets", [])
-    watched_tokens: list[str] = []
-
-    for m in markets:
-        token_ids_raw = m.get("clobTokenIds", [])
-        if isinstance(token_ids_raw, str):
-            try:
-                token_ids_raw = _json.loads(token_ids_raw)
-            except (ValueError, TypeError):
-                token_ids_raw = [token_ids_raw]
-        market_id = m.get("id", "")
-        for tid in token_ids_raw:
-            if not tid:
-                continue
-            await redis_store.add_watched_market(tid, market_id)
-            watched_tokens.append(tid)
-            # Persist full market info so archive_event can use it later
-            info = {
-                "id": market_id,
-                "question": m.get("question", ""),
-                "slug": slug,
-                "startDate": m.get("startDate", "") or m.get("eventStartTime", ""),
-                "endDate": m.get("endDate", "") or event.get("endDate", ""),
-                "clobTokenIds": token_ids_raw,
-                "outcomes": m.get("outcomes", []),
-            }
-            await redis_store.set_token_market_info(tid, _json.dumps(info))
+    from app.services.event_lifecycle import watch_event_tokens
+    watched_tokens = await watch_event_tokens(slug, event)
 
     # Try to acquire recording lock for this tab
     is_owner = False
@@ -332,3 +305,38 @@ async def delete_archive(slug: str):
     delete_archive_files(slug)
     await redis_store.delete_archive_meta(slug)
     return {"deleted": slug}
+
+
+# ── Auto-record config ────────────────────────────────────────────────────────
+
+
+class AutoRecordConfigRequest(BaseModel):
+    durations: list[str]
+
+
+@router.get("/auto-record/config")
+async def get_auto_record_config():
+    """获取自动录制配置及各时长实时状态。"""
+    config = await redis_store.get_auto_record_config()
+    states: dict = {}
+    from app.services.auto_recorder import VALID_DURATIONS
+    for dur in VALID_DURATIONS:
+        st = await redis_store.get_auto_record_state(dur)
+        if st:
+            states[dur] = st
+    return {"durations": config, "states": states}
+
+
+@router.put("/auto-record/config")
+async def update_auto_record_config(req: AutoRecordConfigRequest):
+    """更新自动录制配置 — 立即生效，不中断正在进行的录制。"""
+    from app.services.auto_recorder import VALID_DURATIONS
+    durations = [d for d in req.durations if d in VALID_DURATIONS]
+    await redis_store.set_auto_record_config(durations)
+    # Return updated state
+    states: dict = {}
+    for dur in VALID_DURATIONS:
+        st = await redis_store.get_auto_record_state(dur)
+        if st:
+            states[dur] = st
+    return {"durations": durations, "states": states}

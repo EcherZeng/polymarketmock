@@ -2,6 +2,7 @@ import axios from "axios"
 import type {
   AccountOverview,
   ArchivedEvent,
+  AutoRecordConfig,
   EstimateRequest,
   EstimateResult,
   EventStatusResponse,
@@ -299,5 +300,19 @@ export async function executeReplayTrade(
     side,
     amount,
   })
+  return data
+}
+
+// ── Auto-record ─────────────────────────────────────────────────────────────
+
+export async function fetchAutoRecordConfig(): Promise<AutoRecordConfig> {
+  const { data } = await api.get("/auto-record/config")
+  return data
+}
+
+export async function updateAutoRecordConfig(
+  durations: string[],
+): Promise<AutoRecordConfig> {
+  const { data } = await api.put("/auto-record/config", { durations })
   return data
 }

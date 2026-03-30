@@ -149,6 +149,45 @@ def _compute_status(slug: str, event: dict, now_utc: datetime) -> dict:
     }
 
 
+# ── Watch (register tokens for recording) ────────────────────────────────────
+
+
+async def watch_event_tokens(slug: str, event: dict) -> list[str]:
+    """Register all tokens from an event for data collection.
+
+    Idempotent — safe to call multiple times.
+    Returns list of watched token IDs.
+    """
+    markets = event.get("markets", [])
+    watched_tokens: list[str] = []
+
+    for m in markets:
+        token_ids_raw = m.get("clobTokenIds", [])
+        if isinstance(token_ids_raw, str):
+            try:
+                token_ids_raw = json.loads(token_ids_raw)
+            except (ValueError, TypeError):
+                token_ids_raw = [token_ids_raw]
+        market_id = m.get("id", "")
+        for tid in token_ids_raw:
+            if not tid:
+                continue
+            await redis_store.add_watched_market(tid, market_id)
+            watched_tokens.append(tid)
+            info = {
+                "id": market_id,
+                "question": m.get("question", ""),
+                "slug": slug,
+                "startDate": m.get("startDate", "") or m.get("eventStartTime", ""),
+                "endDate": m.get("endDate", "") or event.get("endDate", ""),
+                "clobTokenIds": token_ids_raw,
+                "outcomes": m.get("outcomes", []),
+            }
+            await redis_store.set_token_market_info(tid, json.dumps(info))
+
+    return watched_tokens
+
+
 # ── Next event lookup ────────────────────────────────────────────────────────
 
 # Patterns like btc-updown-5m-1774334100
@@ -206,6 +245,36 @@ async def _find_next_btc(prefix: str, curr_ts: int, interval: int) -> dict | Non
                     "slug": slug,
                     "event": event,
                     "status": _compute_status(slug, event, datetime.now(timezone.utc)).get("status", "unknown"),
+                }
+        except Exception:
+            continue
+    return None
+
+
+async def find_current_or_next_event(prefix: str, interval: int) -> dict | None:
+    """Find the current LIVE or next upcoming event for a BTC series.
+
+    Unlike ``_find_next_btc`` this includes the slot aligned to *now*,
+    so it can discover an event that is already in progress.
+    """
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    window_start = now_ts - (now_ts % interval)
+
+    for offset in range(0, 6):
+        candidate_ts = window_start + offset * interval
+        slug = f"{prefix}-{candidate_ts}"
+        try:
+            event = await resolve_event_slug(slug)
+            if not event:
+                continue
+            status_info = _compute_status(slug, event, datetime.now(timezone.utc))
+            st = status_info.get("status", "unknown")
+            if st in ("live", "upcoming"):
+                return {
+                    "slug": slug,
+                    "event": event,
+                    "status": st,
+                    "seconds_remaining": status_info.get("seconds_remaining"),
                 }
         except Exception:
             continue

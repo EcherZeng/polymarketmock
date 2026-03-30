@@ -7,6 +7,8 @@ Polymarket 模拟交易平台 — 代理真实行情数据，提供模拟买卖 
 ```
 ├── backend/          # FastAPI 后端 (Python 3.11+)
 ├── frontend/         # React + Vite 前端
+├── Strategy/         # 策略回测引擎后端 (FastAPI, port 8072)
+├── Strategyfrontend/ # 策略回测前端 (React + Vite, port 3022)
 ├── docker-compose.yml          # Docker 完整部署（前端 + 后端 + Redis）
 ├── docker-compose-redis.yml    # Docker 部署（后端 + Redis，无前端）
 └── docs/             # 设计文档
@@ -95,6 +97,26 @@ npm run dev
 ```
 
 前端页面: http://localhost:5173
+
+#### 4. 启动策略回测后端
+
+```bash
+cd Strategy
+pip install -r requirements.txt   # 安装依赖
+python main.py server --reload    # 启动 HTTP API（默认端口 8072）
+```
+
+策略后端 API: http://localhost:8072
+
+#### 5. 启动策略回测前端
+
+```bash
+cd Strategyfrontend
+npm install
+npm run dev
+```
+
+策略前端页面: http://localhost:3022
 
 ---
 

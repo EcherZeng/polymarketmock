@@ -430,3 +430,42 @@ async def release_recording_lock(slug: str, client_id: str) -> bool:
 async def get_recording_lock_owner(slug: str) -> str | None:
     """Return the client_id that currently holds the recording lock, or None."""
     return await get_redis().get(f"{RECORDING_LOCK_PREFIX}{slug}")
+
+
+# ── Auto-record config & state ──────────────────────────────────────────────
+
+AUTO_RECORD_CONFIG_KEY = "auto-record:config"
+AUTO_RECORD_STATE_PREFIX = "auto-record:state:"
+
+
+async def get_auto_record_config() -> list[str]:
+    """Return list of active durations, e.g. ["5m", "15m"]."""
+    val = await get_redis().get(AUTO_RECORD_CONFIG_KEY)
+    if not val:
+        return []
+    try:
+        return json.loads(val)
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+async def set_auto_record_config(durations: list[str]) -> None:
+    await get_redis().set(AUTO_RECORD_CONFIG_KEY, json.dumps(durations))
+
+
+async def get_auto_record_state(duration: str) -> dict | None:
+    val = await get_redis().get(f"{AUTO_RECORD_STATE_PREFIX}{duration}")
+    if not val:
+        return None
+    try:
+        return json.loads(val)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+async def set_auto_record_state(duration: str, state_json: str) -> None:
+    await get_redis().set(f"{AUTO_RECORD_STATE_PREFIX}{duration}", state_json)
+
+
+async def delete_auto_record_state(duration: str) -> None:
+    await get_redis().delete(f"{AUTO_RECORD_STATE_PREFIX}{duration}")

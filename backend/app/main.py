@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import account, backtest, markets, trading, ws
+from app.services.auto_recorder import start_auto_recorder, stop_auto_recorder
 from app.services.ws_manager import start_ws_manager, stop_ws_manager
 from app.storage.data_collector import start_collector, stop_collector
 from app.storage.duckdb_store import init_parquet_buffer, shutdown_parquet_buffer
@@ -16,7 +17,9 @@ async def lifespan(app: FastAPI):
     await init_redis()
     ws_mgr = await start_ws_manager()
     collector_task = await start_collector()
+    auto_rec = await start_auto_recorder()
     yield
+    await stop_auto_recorder()
     await stop_collector(collector_task)
     await stop_ws_manager()
     shutdown_parquet_buffer()
