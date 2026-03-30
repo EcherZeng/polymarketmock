@@ -72,6 +72,9 @@ class PolymarketWSManager:
         # Subscribed asset_ids on the upstream connection
         self._subscribed: set[str] = set()
 
+        # Asset_ids held by auto-recorder (headless) — immune to frontend disconnect
+        self._headless: set[str] = set()
+
         # Frontend client connections: asset_id → set of FastAPI WebSocket
         self._clients: dict[str, set[WebSocket]] = {}
         self._client_lock = asyncio.Lock()
@@ -137,8 +140,7 @@ class PolymarketWSManager:
                 # Only log + backoff if we still have subscribers
                 if self._subscribed:
                     logger.warning("WS upstream error: %s — reconnecting in %ss", e, backoff)
-                else:
-                    logger.info("WS upstream closed (no subscribers)")
+                # else: upstream was closed by _close_upstream (already logged)
             self.connected = False
 
             if not self._subscribed:
@@ -215,6 +217,27 @@ class PolymarketWSManager:
         if not self._subscribed:
             self._has_subscriptions.clear()
             await self._close_upstream()
+
+    async def subscribe_headless(self, asset_ids: list[str]) -> None:
+        """Subscribe assets for auto-recorder (immune to frontend disconnect)."""
+        self._headless.update(asset_ids)
+        await self.subscribe(asset_ids)
+
+    async def unsubscribe_headless(self, asset_ids: list[str]) -> None:
+        """Remove auto-recorder hold on assets.
+
+        Only unsubscribes upstream if no frontend clients still need them.
+        """
+        self._headless -= set(asset_ids)
+        to_unsub: list[str] = []
+        async with self._client_lock:
+            for aid in asset_ids:
+                if aid not in self._headless and (
+                    aid not in self._clients or not self._clients[aid]
+                ):
+                    to_unsub.append(aid)
+        if to_unsub:
+            await self.unsubscribe(to_unsub)
 
     async def _send_subscribe(self, asset_ids: list[str]) -> None:
         if not self._ws:
@@ -533,9 +556,12 @@ class PolymarketWSManager:
                     )
 
         # Cascade: unsubscribe upstream for assets with no remaining clients
+        # BUT skip assets still held by auto-recorder (headless)
         if orphaned:
-            await self.unsubscribe(orphaned)
-            await self.stop_recording(orphaned)
+            client_only = [a for a in orphaned if a not in self._headless]
+            if client_only:
+                await self.unsubscribe(client_only)
+                await self.stop_recording(client_only)
 
     async def update_client_subscription(
         self, ws: WebSocket, subscribe_ids: list[str], unsubscribe_ids: list[str],
@@ -556,8 +582,10 @@ class PolymarketWSManager:
             await self.subscribe(subscribe_ids)
             await self.start_recording(subscribe_ids)
         if orphaned:
-            await self.unsubscribe(orphaned)
-            await self.stop_recording(orphaned)
+            client_only = [a for a in orphaned if a not in self._headless]
+            if client_only:
+                await self.unsubscribe(client_only)
+                await self.stop_recording(client_only)
 
     async def _push_cached_state(self, ws: WebSocket, asset_ids: list[str]) -> None:
         """Send cached orderbook + best_bid_ask from Redis to a newly subscribed client."""
@@ -635,6 +663,7 @@ class PolymarketWSManager:
                     self._clients.pop(aid, None)
 
         # Always unsubscribe upstream — even when no frontend clients existed
+        self._headless -= set(asset_ids)  # clean up stale headless holds
         await self.unsubscribe(asset_ids)
         logger.info("Closed %d clients for ended assets", len(to_close))
 
@@ -687,11 +716,14 @@ class PolymarketWSManager:
             slug = await self._resolve_slug(aid)
             if not slug or slug not in self._sessions:
                 continue
-            # Check that no asset of this session still has clients
+            # Check that no asset of this session still has clients or headless subscribers
             session = self._sessions[slug]
             still_active = False
             async with self._client_lock:
                 for tid in session.get("token_ids", []):
+                    if tid in self._headless:
+                        still_active = True
+                        break
                     if tid in self._clients and self._clients[tid]:
                         still_active = True
                         break
@@ -713,6 +745,11 @@ class PolymarketWSManager:
                 session = raw
         if not session:
             return
+        prev_status = session.get("status")
+        if prev_status == "incomplete":
+            logger.warning(
+                "Recording %s was incomplete — archived data may have gaps", slug,
+            )
         session["status"] = "complete"
         session["end_time"] = datetime.now(timezone.utc).isoformat()
         if data_counts:

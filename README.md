@@ -133,3 +133,16 @@ npm run dev
 | `PM_WS_URL` | `wss://ws-subscriptions-clob.polymarket.com/ws/market` | Polymarket WebSocket 地址 |
 | `PM_WS_PING_INTERVAL` | `10` | WS 应用级 PING 间隔（秒） |
 | `PM_WS_RECONNECT_MAX` | `30` | WS 断线重连最大退避（秒） |
+
+
+## 录制生命周期
+
+         ┌──────────┐   发现    ┌──────────┐  startDate到达  ┌──────┐
+Registry │ upcoming │ ────────→ │ waiting  │ ─────────────→ │ live  │
+         └──────────┘           └──────────┘                └───┬──┘
+                                                                │ endDate 到达
+                                                                ▼
+       ┌──────────┐  archive_event  ┌────────┐  complete_recording ┌──────────┐
+       │ archived │ ←────────────── │ ended  │ ──────────────────→ │ complete │
+       └──────────┘                 └────────┘                     └──────────┘
+         (Parquet)                    (触发归档)                     (session状态)

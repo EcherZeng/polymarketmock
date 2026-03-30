@@ -171,7 +171,7 @@ class AutoRecorder:
                 # Subscribe to WS for real-time data (headless — no frontend needed)
                 ws_mgr = self._get_ws_manager()
                 if ws_mgr and watched:
-                    await ws_mgr.subscribe(watched)
+                    await ws_mgr.subscribe_headless(watched)
                     await ws_mgr.start_recording(watched)
                     logger.info("AutoRecorder %s: WS subscribed for %s", duration, slug)
 
@@ -196,7 +196,7 @@ class AutoRecorder:
                     next_event = next_result["event"]
                     next_watched = await watch_event_tokens(next_result["slug"], next_event)
                     if ws_mgr and next_watched:
-                        await ws_mgr.subscribe(next_watched)
+                        await ws_mgr.subscribe_headless(next_watched)
                         logger.info(
                             "AutoRecorder %s: pre-subscribed %d tokens for %s",
                             duration, len(next_watched), next_result["slug"],
@@ -254,7 +254,7 @@ class AutoRecorder:
         if not ws_mgr:
             return
         try:
-            await ws_mgr.unsubscribe(token_ids)
+            await ws_mgr.unsubscribe_headless(token_ids)
             logger.info("AutoRecorder: unsubscribed %d tokens", len(token_ids))
         except Exception as e:
             logger.warning("AutoRecorder: unsubscribe failed: %s", e)
