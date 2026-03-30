@@ -146,3 +146,5 @@ Registry │ upcoming │ ────────→ │ waiting  │ ───
        │ archived │ ←────────────── │ ended  │ ──────────────────→ │ complete │
        └──────────┘                 └────────┘                     └──────────┘
          (Parquet)                    (触发归档)                     (session状态)
+
+         
