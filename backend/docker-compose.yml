@@ -1,0 +1,51 @@
+# 单独构建/更新 backend 服务
+# 用法: cd backend && docker compose up -d --build
+#
+# 注意: 依赖主项目的 redis 服务，需确保 redis 已在运行
+# 或使用根目录: docker compose up -d --build backend
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8071:8071"
+    volumes:
+      - backend_data:/app/data
+    environment:
+      PM_REDIS_URL: redis://redis:6379
+      PM_GAMMA_API_URL: https://gamma-api.polymarket.com
+      PM_CLOB_API_URL: https://clob.polymarket.com
+      PM_DATA_API_URL: https://data-api.polymarket.com
+      PM_DATA_DIR: /app/data
+      PM_WS_URL: wss://ws-subscriptions-clob.polymarket.com/ws/market
+      PM_LOG_LEVEL: INFO
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; print(httpx.get('http://localhost:8071/api/health').status_code)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  redis_data:
+  backend_data:

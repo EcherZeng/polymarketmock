@@ -1,0 +1,11 @@
+# 单独构建/更新 strategyfrontend 服务
+# 用法: cd Strategyfrontend && docker compose up -d --build
+
+services:
+  strategyfrontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3022:3022"
+    restart: unless-stopped

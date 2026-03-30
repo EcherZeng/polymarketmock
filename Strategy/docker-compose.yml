@@ -1,0 +1,27 @@
+# 单独构建/更新 strategy 服务
+# 用法: cd Strategy && docker compose up -d --build
+#
+# 注意: 依赖 backend 服务提供的数据卷 (backend_data)
+# 需确保 backend 已运行并创建了数据卷
+
+services:
+  strategy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8072:8072"
+    volumes:
+      - backend_data:/app/data:ro
+      - strategy_results:/app/results
+    environment:
+      STRATEGY_DATA_DIR: /app/data
+      STRATEGY_STRATEGIES_DIR: /app/strategies
+      STRATEGY_SERVER_PORT: "8072"
+    restart: unless-stopped
+
+volumes:
+  backend_data:
+    external: true
+    name: polymarketmock_backend_data
+  strategy_results:

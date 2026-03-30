@@ -1,0 +1,11 @@
+# 单独构建/更新 frontend 服务
+# 用法: cd frontend && docker compose up -d --build
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3021:3021"
+    restart: unless-stopped
