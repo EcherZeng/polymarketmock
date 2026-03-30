@@ -139,7 +139,7 @@ class AutoRecorder:
                         return
                     continue  # Re-discover — event should now be live
 
-                # 3. Event is LIVE — watch tokens
+                # 3. Event is LIVE — watch tokens + subscribe WS
                 logger.info("AutoRecorder %s: recording %s", duration, slug)
                 from app.services.event_lifecycle import watch_event_tokens
                 watched = await watch_event_tokens(slug, event)
@@ -147,6 +147,13 @@ class AutoRecorder:
                     "AutoRecorder %s: watching %d tokens for %s",
                     duration, len(watched), slug,
                 )
+
+                # Subscribe to WS for real-time data (headless — no frontend needed)
+                ws_mgr = self._get_ws_manager()
+                if ws_mgr and watched:
+                    await ws_mgr.subscribe(watched)
+                    await ws_mgr.start_recording(watched)
+                    logger.info("AutoRecorder %s: WS subscribed for %s", duration, slug)
 
                 await self._update_state(
                     duration, status="recording", slug=slug,
@@ -171,6 +178,8 @@ class AutoRecorder:
 
             except asyncio.CancelledError:
                 logger.info("AutoRecorder %s: loop cancelled", duration)
+                # Cleanup: unsubscribe WS for any tokens we were watching
+                await self._cleanup_ws_subscriptions()
                 return
             except Exception as e:
                 logger.warning("AutoRecorder %s: error in loop: %s", duration, e)
@@ -180,6 +189,25 @@ class AutoRecorder:
         await redis_store.delete_auto_record_state(duration)
 
     # ── Helpers ──────────────────────────────────────────────
+
+    @staticmethod
+    def _get_ws_manager():
+        from app.services.ws_manager import get_ws_manager
+        try:
+            return get_ws_manager()
+        except AssertionError:
+            return None
+
+    async def _cleanup_ws_subscriptions(self) -> None:
+        """Unsubscribe all currently watched tokens from WS."""
+        ws_mgr = self._get_ws_manager()
+        if not ws_mgr:
+            return
+        watched = await redis_store.get_watched_markets()
+        if watched:
+            token_ids = list(watched.keys())
+            await ws_mgr.unsubscribe(token_ids)
+            await ws_mgr.stop_recording(token_ids)
 
     async def _is_duration_active(self, duration: str) -> bool:
         config = await redis_store.get_auto_record_config()

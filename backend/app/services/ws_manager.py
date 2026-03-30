@@ -1,9 +1,9 @@
 """Polymarket WebSocket manager — connects to Market Channel, processes events,
 updates Redis caches, persists to Parquet, and broadcasts to frontend clients.
 
-Upstream WS connection is **lazy**: only established when at least one frontend
-client is subscribed.  When the last client disconnects the upstream connection
-is gracefully closed and the run-loop waits for new subscriptions.
+Upstream WS connection is established when either a frontend client subscribes
+or auto_recorder starts headless recording via ``start_recording()``.  When all
+subscriptions are removed the upstream connection is gracefully closed.
 
 Recording sessions are tracked in ``backend/data/sessions.jsonl`` so that
 downstream consumers can distinguish complete vs. incomplete data."""
@@ -496,7 +496,7 @@ class PolymarketWSManager:
         # Ensure upstream is subscribed
         await self.subscribe(asset_ids)
         # Start recording session for these assets
-        await self._start_recording(asset_ids)
+        await self.start_recording(asset_ids)
         # Push cached data so client has initial state immediately
         await self._push_cached_state(ws, asset_ids)
 
@@ -511,7 +511,7 @@ class PolymarketWSManager:
         # Cascade: unsubscribe upstream for assets with no remaining clients
         if orphaned:
             await self.unsubscribe(orphaned)
-            await self._stop_recording(orphaned)
+            await self.stop_recording(orphaned)
 
     async def update_client_subscription(
         self, ws: WebSocket, subscribe_ids: list[str], unsubscribe_ids: list[str],
@@ -530,10 +530,10 @@ class PolymarketWSManager:
                 self._clients[aid].add(ws)
         if subscribe_ids:
             await self.subscribe(subscribe_ids)
-            await self._start_recording(subscribe_ids)
+            await self.start_recording(subscribe_ids)
         if orphaned:
             await self.unsubscribe(orphaned)
-            await self._stop_recording(orphaned)
+            await self.stop_recording(orphaned)
 
     async def _push_cached_state(self, ws: WebSocket, asset_ids: list[str]) -> None:
         """Send cached orderbook + best_bid_ask from Redis to a newly subscribed client."""
@@ -617,8 +617,11 @@ class PolymarketWSManager:
 
     # ── Recording session management ──────────────────────────
 
-    async def _start_recording(self, asset_ids: list[str]) -> None:
-        """Begin or resume a recording session for asset_ids."""
+    async def start_recording(self, asset_ids: list[str]) -> None:
+        """Begin or resume a recording session for asset_ids.
+
+        Called by ``register_client`` (frontend) and ``auto_recorder`` (headless).
+        """
         for aid in asset_ids:
             slug = await self._resolve_slug(aid)
             if not slug or slug in self._sessions:
@@ -637,7 +640,7 @@ class PolymarketWSManager:
             self._append_session_log(session)
             logger.info("Recording session started: %s", slug)
 
-    async def _stop_recording(self, asset_ids: list[str]) -> None:
+    async def stop_recording(self, asset_ids: list[str]) -> None:
         """Mark sessions as incomplete when all frontend clients leave."""
         for aid in asset_ids:
             slug = await self._resolve_slug(aid)
@@ -708,8 +711,6 @@ async def start_ws_manager() -> PolymarketWSManager:
     global _manager
     _manager = PolymarketWSManager()
     await _manager.start()
-    # No auto-subscribe: upstream connection is fully frontend-driven.
-    # watched:markets is still used by data_collector and archive logic.
     return _manager
 
 
