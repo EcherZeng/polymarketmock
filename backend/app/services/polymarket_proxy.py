@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 
 import httpx
 
 from app.config import settings
+from app.services.log_buffer import metrics
 from app.storage.redis_store import cache_get, cache_set
+
+logger = logging.getLogger(__name__)
 
 _client: httpx.AsyncClient | None = None
 
@@ -72,6 +76,7 @@ async def get_markets(
     data = resp.json()
     data = [_normalize_market(m) for m in data] if isinstance(data, list) else data
     await cache_set(cache_key, json.dumps(data), settings.cache_ttl_markets)
+    metrics.inc("proxy.api_calls")
     return data
 
 
@@ -84,6 +89,7 @@ async def get_market(market_id: str) -> dict:
     url = f"{settings.gamma_api_url}/markets/{market_id}"
     resp = await _get_client().get(url)
     resp.raise_for_status()
+    metrics.inc("proxy.api_calls")
     data = _normalize_market(resp.json())
     await cache_set(cache_key, json.dumps(data), settings.cache_ttl_markets)
     return data
@@ -155,9 +161,16 @@ async def get_midpoint(token_id: str) -> float:
 async def get_orderbook_raw(token_id: str) -> dict:
     """Fetch orderbook without caching (for matching engine)."""
     url = f"{settings.clob_api_url}/book"
-    resp = await _get_client().get(url, params={"token_id": token_id})
-    resp.raise_for_status()
-    return resp.json()
+    try:
+        resp = await _get_client().get(url, params={"token_id": token_id})
+        resp.raise_for_status()
+        return resp.json()
+    except httpx.HTTPStatusError as e:
+        logger.error("CLOB orderbook_raw failed for %s: HTTP %d", token_id[:12], e.response.status_code)
+        raise
+    except httpx.RequestError as e:
+        logger.error("CLOB orderbook_raw request error for %s: %s", token_id[:12], e)
+        raise
 
 
 async def get_prices_history(

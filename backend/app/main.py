@@ -1,29 +1,70 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.config import settings
 from app.routers import account, backtest, markets, trading, ws
+from app.routers import monitor as monitor_router
 from app.services.auto_recorder import start_auto_recorder, stop_auto_recorder
+from app.services.log_buffer import get_log_handler
 from app.services.ws_manager import start_ws_manager, stop_ws_manager
 from app.storage.data_collector import start_collector, stop_collector
 from app.storage.duckdb_store import init_parquet_buffer, shutdown_parquet_buffer
 from app.storage.redis_store import close_redis, init_redis
 
+logger = logging.getLogger(__name__)
+
+
+def _setup_logging() -> None:
+    """Configure root logger with format and level from settings."""
+    log_fmt = "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s"
+    logging.basicConfig(
+        level=getattr(logging, settings.log_level.upper(), logging.INFO),
+        format=log_fmt,
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    # Attach in-memory buffer handler for dashboard
+    buf_handler = get_log_handler()
+    buf_handler.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
+    buf_handler.setFormatter(logging.Formatter(log_fmt, datefmt="%Y-%m-%d %H:%M:%S"))
+    logging.getLogger().addHandler(buf_handler)
+    # Quieten noisy third-party loggers
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("websockets").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _setup_logging()
+    logger.info("=== Polymarket Mock Trading — starting ===")
     init_parquet_buffer()
+    logger.info("Parquet buffer initialised")
     await init_redis()
+    logger.info("Redis connected")
     ws_mgr = await start_ws_manager()
+    logger.info("WebSocket manager started")
     collector_task = await start_collector()
+    logger.info("Data collector started")
     auto_rec = await start_auto_recorder()
+    logger.info("Auto recorder started")
+    logger.info("=== All services ready ===")
     yield
+    logger.info("=== Shutting down ===")
     await stop_auto_recorder()
+    logger.info("Auto recorder stopped")
     await stop_collector(collector_task)
+    logger.info("Data collector stopped")
     await stop_ws_manager()
+    logger.info("WebSocket manager stopped")
     shutdown_parquet_buffer()
+    logger.info("Parquet buffer flushed & closed")
     await close_redis()
+    logger.info("Redis closed")
+    logger.info("=== Shutdown complete ===")
 
 
 app = FastAPI(
@@ -45,6 +86,8 @@ app.include_router(markets.router, prefix="/api", tags=["Markets"])
 app.include_router(trading.router, prefix="/api/trading", tags=["Trading"])
 app.include_router(account.router, prefix="/api/account", tags=["Account"])
 app.include_router(backtest.router, prefix="/api/backtest", tags=["Backtest"])
+app.include_router(monitor_router.router, prefix="/api", tags=["Monitor"])
+app.include_router(monitor_router.ws_router, tags=["Monitor WS"])
 app.include_router(ws.router, tags=["WebSocket"])
 
 

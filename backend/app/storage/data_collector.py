@@ -14,6 +14,7 @@ import json
 import logging
 
 from app.config import settings
+from app.services.log_buffer import metrics
 from app.services.matching_engine import check_and_fill_limit_orders
 from app.services.polymarket_proxy import get_data_trades, get_midpoint, get_orderbook_raw
 from app.services.trade_feed import detect_trades
@@ -197,6 +198,7 @@ async def _maybe_archive_ended() -> None:
 
 
 async def _collector_loop() -> None:
+    logger.info("Data collector loop started")
     ob_counter = 0
     price_counter = 0
     live_counter = 0
@@ -264,10 +266,12 @@ async def _collector_loop() -> None:
 
 
 async def start_collector() -> asyncio.Task:
+    logger.info("Starting data collector")
     return asyncio.create_task(_collector_loop())
 
 
 async def stop_collector(task: asyncio.Task) -> None:
+    logger.info("Stopping data collector")
     task.cancel()
     try:
         await task

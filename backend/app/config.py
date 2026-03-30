@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     parquet_flush_interval: int = 60   # seconds between auto-flushes
     parquet_flush_threshold: int = 2000  # rows before forced flush
 
+    # Logging
+    log_level: str = "INFO"
+
     model_config = {"env_prefix": "PM_"}
 
 

@@ -22,6 +22,7 @@ import websockets
 from starlette.websockets import WebSocket
 
 from app.config import settings
+from app.services.log_buffer import metrics
 from app.storage import redis_store
 from app.storage.duckdb_store import (
     write_live_trade,
@@ -159,6 +160,7 @@ class PolymarketWSManager:
         ) as ws:
             self._ws = ws
             self.connected = True
+            metrics.set("ws.upstream_connected", True)
             logger.info("Polymarket WS connected")
 
             # Re-subscribe to any previously tracked assets
@@ -178,6 +180,7 @@ class PolymarketWSManager:
                     self._ping_task.cancel()
                 self._ws = None
                 self.connected = False
+                metrics.set("ws.upstream_connected", False)
 
     async def _ping_loop(self, ws: websockets.WebSocketClientProtocol) -> None:  # type: ignore[name-defined]
         try:
@@ -224,6 +227,7 @@ class PolymarketWSManager:
         }
         await self._ws.send(json.dumps(msg))
         logger.info("WS subscribed to %d assets", len(asset_ids))
+        metrics.set("ws.subscribed_assets", len(self._subscribed))
 
     async def _send_unsubscribe(self, asset_ids: list[str]) -> None:
         if not self._ws:
@@ -234,6 +238,7 @@ class PolymarketWSManager:
         }
         await self._ws.send(json.dumps(msg))
         logger.info("WS unsubscribed from %d assets", len(asset_ids))
+        metrics.set("ws.subscribed_assets", len(self._subscribed))
 
     async def _close_upstream(self) -> None:
         """Gracefully close the upstream WS connection (sends close frame)."""
@@ -267,6 +272,7 @@ class PolymarketWSManager:
         for data in items:
             if not isinstance(data, dict):
                 continue
+            metrics.inc("ws.messages_received")
             await self._dispatch(data, text)
 
     async def _dispatch(self, data: dict, raw_text: str) -> None:
@@ -493,6 +499,8 @@ class PolymarketWSManager:
                 if aid not in self._clients:
                     self._clients[aid] = set()
                 self._clients[aid].add(ws)
+        total = sum(len(s) for s in self._clients.values())
+        metrics.set("ws.frontend_clients", total)
         # Ensure upstream is subscribed
         await self.subscribe(asset_ids)
         # Start recording session for these assets
@@ -508,6 +516,8 @@ class PolymarketWSManager:
                 if not self._clients[aid]:
                     del self._clients[aid]
                     orphaned.append(aid)
+        total = sum(len(s) for s in self._clients.values())
+        metrics.set("ws.frontend_clients", total)
         # Cascade: unsubscribe upstream for assets with no remaining clients
         if orphaned:
             await self.unsubscribe(orphaned)

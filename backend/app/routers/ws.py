@@ -20,6 +20,8 @@ async def market_ws(ws: WebSocket) -> None:
     await ws.accept()
     manager = get_ws_manager()
     subscribed_ids: list[str] = []
+    client_id = id(ws)
+    logger.info("WS client %d connected", client_id)
 
     try:
         while True:
@@ -42,18 +44,20 @@ async def market_ws(ws: WebSocket) -> None:
                 if asset_ids:
                     await manager.register_client(ws, asset_ids)
                     subscribed_ids.extend(asset_ids)
+                    logger.info("WS client %d subscribed to %d assets", client_id, len(asset_ids))
 
             elif msg_type == "unsubscribe":
                 asset_ids = data.get("asset_ids", [])
                 if asset_ids:
                     await manager.update_client_subscription(ws, [], asset_ids)
                     subscribed_ids = [a for a in subscribed_ids if a not in asset_ids]
+                    logger.info("WS client %d unsubscribed from %d assets", client_id, len(asset_ids))
 
     except WebSocketDisconnect:
-        pass
+        logger.info("WS client %d disconnected", client_id)
     except asyncio.CancelledError:
         pass
     except Exception as e:
-        logger.warning("WS client error: %s", e)
+        logger.warning("WS client %d error: %s", client_id, e)
     finally:
         await manager.unregister_client(ws)

@@ -7,12 +7,14 @@ import TradingDashboard from "@/pages/TradingDashboard"
 import HistoryPage from "@/pages/HistoryPage"
 import ReplayPage from "@/pages/ReplayPage"
 import SessionHistoryPage from "@/pages/SessionHistoryPage"
+import MonitorPage from "@/pages/MonitorPage"
 
 const navItems = [
   { to: "/", label: "Events" },
   { to: "/sessions", label: "Sessions" },
   { to: "/trading", label: "Trading" },
   { to: "/history", label: "History" },
+  { to: "/monitor", label: "Monitor" },
 ]
 
 export default function App() {
@@ -59,6 +61,7 @@ export default function App() {
             <Route path="/replay/:slug" element={<ReplayPage />} />
             <Route path="/trading" element={<TradingDashboard />} />
             <Route path="/history" element={<HistoryPage />} />
+            <Route path="/monitor" element={<MonitorPage />} />
           </Routes>
         </ErrorBoundary>
       </main>

@@ -418,3 +418,19 @@ export interface AutoRecordConfig {
   durations: string[]
   states: Record<string, AutoRecordState>
 }
+
+// ── Monitor (logs + metrics) ────────────────────────────────────────────────
+
+export interface LogEntry {
+  ts: string
+  level: "DEBUG" | "INFO" | "WARNING" | "ERROR" | "CRITICAL"
+  module: string
+  message: string
+}
+
+export interface MetricsSnapshot {
+  counters: Record<string, number>
+  gauges: Record<string, unknown>
+  uptime_seconds: number
+  log_buffer_size: number
+}

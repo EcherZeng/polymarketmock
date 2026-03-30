@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 import redis.asyncio as aioredis
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 _redis: aioredis.Redis | None = None
 
@@ -15,6 +18,13 @@ _redis: aioredis.Redis | None = None
 async def init_redis() -> None:
     global _redis
     _redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+    # Verify connectivity
+    try:
+        await _redis.ping()
+        logger.info("Redis connected: %s", settings.redis_url)
+    except Exception as e:
+        logger.error("Redis connection failed: %s", e)
+        raise
 
 
 async def close_redis() -> None:
@@ -22,6 +32,7 @@ async def close_redis() -> None:
     if _redis:
         await _redis.close()
         _redis = None
+        logger.info("Redis connection closed")
 
 
 def get_redis() -> aioredis.Redis:

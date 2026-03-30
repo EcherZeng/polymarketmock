@@ -231,11 +231,14 @@ def init_parquet_buffer() -> None:
         flush_interval=settings.parquet_flush_interval,
         flush_threshold=settings.parquet_flush_threshold,
     )
+    logger.info("Parquet buffer initialised (flush: %ds / %d rows)", settings.parquet_flush_interval, settings.parquet_flush_threshold)
 
 
 def shutdown_parquet_buffer() -> None:
     if _buffer:
         _buffer.flush_all()
+        total = sum(len(v) for v in _buffer._buffers.values())
+        logger.info("Parquet buffer shutdown — remaining rows after flush: %d", total)
 
 
 # ── Write helpers ────────────────────────────────────────────────────────────

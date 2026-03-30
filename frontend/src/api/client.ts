@@ -6,8 +6,10 @@ import type {
   EstimateRequest,
   EstimateResult,
   EventStatusResponse,
+  LogEntry,
   Market,
   MarketEvent,
+  MetricsSnapshot,
   NextEventResponse,
   Orderbook,
   OrderRequest,
@@ -314,5 +316,24 @@ export async function updateAutoRecordConfig(
   durations: string[],
 ): Promise<AutoRecordConfig> {
   const { data } = await api.put("/auto-record/config", { durations })
+  return data
+}
+
+// ── Monitor (logs + metrics) ───────────────────────────────────────────────────────
+
+export async function fetchLogs(
+  limit = 200,
+  level?: string,
+  module?: string,
+): Promise<LogEntry[]> {
+  const params: Record<string, unknown> = { limit }
+  if (level) params.level = level
+  if (module) params.module = module
+  const { data } = await api.get("/logs", { params })
+  return data
+}
+
+export async function fetchMetrics(): Promise<MetricsSnapshot> {
+  const { data } = await api.get("/metrics")
   return data
 }
