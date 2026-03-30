@@ -101,7 +101,6 @@ app.include_router(trading.router, prefix="/api/trading", tags=["Trading"])
 app.include_router(account.router, prefix="/api/account", tags=["Account"])
 app.include_router(backtest.router, prefix="/api/backtest", tags=["Backtest"])
 app.include_router(monitor_router.router, prefix="/api", tags=["Monitor"])
-app.include_router(monitor_router.ws_router, tags=["Monitor WS"])
 app.include_router(ws.router, tags=["WebSocket"])
 
 

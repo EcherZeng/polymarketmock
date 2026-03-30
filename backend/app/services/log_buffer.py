@@ -2,14 +2,12 @@
 
 Provides:
 - ``BufferHandler`` — a ``logging.Handler`` that captures log records into a
-  fixed-size ring buffer and optionally pushes them to connected WebSocket
-  clients in real time.
+  fixed-size ring buffer for REST polling by the dashboard.
 - ``metrics`` — a simple counter/gauge registry for key business metrics.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import threading
 import time
@@ -21,28 +19,17 @@ from typing import Any
 # ── Log Ring Buffer ──────────────────────────────────────────────────────────
 
 class BufferHandler(logging.Handler):
-    """Captures log records into a thread-safe ring buffer (deque).
-
-    Also queues serialised records for real-time WebSocket fanout.
-    """
+    """Captures log records into a thread-safe ring buffer (deque)."""
 
     def __init__(self, capacity: int = 2000) -> None:
         super().__init__()
         self._buffer: deque[dict] = deque(maxlen=capacity)
         self._lock = threading.Lock()
-        # Async queue for WS push (bounded to avoid memory leak if no reader)
-        self._ws_queue: asyncio.Queue[dict] | None = None
 
     def emit(self, record: logging.LogRecord) -> None:
         entry = self._format_record(record)
         with self._lock:
             self._buffer.append(entry)
-        # Non-blocking push to WS queue
-        if self._ws_queue is not None:
-            try:
-                self._ws_queue.put_nowait(entry)
-            except asyncio.QueueFull:
-                pass  # drop if consumer is too slow
 
     def get_logs(
         self,
@@ -59,11 +46,6 @@ class BufferHandler(logging.Handler):
         if module:
             items = [i for i in items if module in i["module"]]
         return items[-limit:]
-
-    def init_ws_queue(self) -> asyncio.Queue[dict]:
-        """Initialise (or reset) the async queue used for WS fanout."""
-        self._ws_queue = asyncio.Queue(maxsize=500)
-        return self._ws_queue
 
     @staticmethod
     def _format_record(record: logging.LogRecord) -> dict:

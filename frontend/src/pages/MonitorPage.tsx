@@ -1,11 +1,9 @@
-import { useEffect, useRef, useState, useCallback } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { fetchLogs, fetchMetrics } from "@/api/client"
 import type { LogEntry, MetricsSnapshot } from "@/types"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import {
   Select,
@@ -16,15 +14,7 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
-import {
-  Activity,
-  Circle,
-  Pause,
-  Play,
-  Trash2,
-  Wifi,
-  WifiOff,
-} from "lucide-react"
+import { Wifi, WifiOff } from "lucide-react"
 
 const LEVEL_COLORS: Record<string, string> = {
   DEBUG: "text-muted-foreground",
@@ -54,16 +44,13 @@ function formatUptime(seconds: number): string {
 export default function MonitorPage() {
   const [levelFilter, setLevelFilter] = useState<string>("ALL")
   const [moduleFilter, setModuleFilter] = useState("")
-  const [wsLogs, setWsLogs] = useState<LogEntry[]>([])
-  const [liveEnabled, setLiveEnabled] = useState(true)
-  const [wsConnected, setWsConnected] = useState(false)
+  const [autoRefresh, setAutoRefresh] = useState(true)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const wsRef = useRef<WebSocket | null>(null)
   const autoScrollRef = useRef(true)
 
-  // ── REST: initial logs + metrics ─────────────────────────
+  // ── REST polling ─────────────────────────────────────────
 
-  const { data: initialLogs } = useQuery({
+  const { data: logs } = useQuery({
     queryKey: ["logs", levelFilter, moduleFilter],
     queryFn: () =>
       fetchLogs(
@@ -71,75 +58,24 @@ export default function MonitorPage() {
         levelFilter === "ALL" ? undefined : levelFilter,
         moduleFilter || undefined,
       ),
+    refetchInterval: autoRefresh ? 2000 : false,
   })
 
   const { data: metricsData } = useQuery<MetricsSnapshot>({
     queryKey: ["metrics"],
     queryFn: fetchMetrics,
-    refetchInterval: 3000,
+    refetchInterval: autoRefresh ? 3000 : false,
   })
 
-  // ── WebSocket: live log stream ───────────────────────────
-
-  const connectWs = useCallback(() => {
-    if (wsRef.current) return
-    const proto = window.location.protocol === "https:" ? "wss" : "ws"
-    const ws = new WebSocket(`${proto}://${window.location.host}/ws/logs`)
-    wsRef.current = ws
-
-    ws.onopen = () => setWsConnected(true)
-    ws.onclose = () => {
-      setWsConnected(false)
-      wsRef.current = null
-      // auto-reconnect after 3s
-      if (liveEnabled) setTimeout(connectWs, 3000)
-    }
-    ws.onmessage = (ev) => {
-      try {
-        const entry: LogEntry = JSON.parse(ev.data)
-        setWsLogs((prev) => {
-          const next = [...prev, entry]
-          return next.length > 1000 ? next.slice(-800) : next
-        })
-      } catch {
-        // ignore malformed
-      }
-    }
-  }, [liveEnabled])
-
-  useEffect(() => {
-    if (liveEnabled) {
-      connectWs()
-    } else {
-      wsRef.current?.close()
-      wsRef.current = null
-    }
-    return () => {
-      wsRef.current?.close()
-      wsRef.current = null
-    }
-  }, [liveEnabled, connectWs])
-
-  // Auto-scroll to bottom when new logs arrive
+  // Auto-scroll to bottom when logs update
   useEffect(() => {
     if (autoScrollRef.current && scrollRef.current) {
-      const el = scrollRef.current
-      el.scrollTop = el.scrollHeight
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [wsLogs])
+  }, [logs])
 
-  // ── Merged & filtered view ───────────────────────────────
-
-  const allLogs = liveEnabled && wsLogs.length > 0 ? wsLogs : (initialLogs ?? [])
-  const filteredLogs = allLogs.filter((l) => {
-    if (levelFilter !== "ALL" && l.level !== levelFilter) return false
-    if (moduleFilter && !l.module.includes(moduleFilter)) return false
-    return true
-  })
-
-  // ── Extract unique modules for filter ────────────────────
-
-  const modules = Array.from(new Set(allLogs.map((l) => l.module))).sort()
+  const filteredLogs = logs ?? []
+  const modules = Array.from(new Set(filteredLogs.map((l) => l.module))).sort()
 
   // ── Metrics cards ────────────────────────────────────────
 
@@ -217,24 +153,8 @@ export default function MonitorPage() {
       {/* ── Log controls ───────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2">
-          <Switch checked={liveEnabled} onCheckedChange={setLiveEnabled} />
-          <span className="text-sm">
-            Live stream
-          </span>
-          {liveEnabled && (
-            <Badge
-              variant="outline"
-              className={cn(
-                "text-xs",
-                wsConnected ? "border-green-500 text-green-600" : "border-red-500 text-red-600",
-              )}
-            >
-              <Circle
-                className={cn("size-2", wsConnected ? "fill-green-500" : "fill-red-500")}
-              />
-              {wsConnected ? "Connected" : "Reconnecting…"}
-            </Badge>
-          )}
+          <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
+          <span className="text-sm">Auto-refresh (2s)</span>
         </div>
 
         <Select value={levelFilter} onValueChange={setLevelFilter}>
@@ -274,15 +194,6 @@ export default function MonitorPage() {
           />
           <span className="text-sm">Auto-scroll</span>
         </div>
-
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setWsLogs([])}
-        >
-          <Trash2 data-icon="inline-start" />
-          Clear
-        </Button>
 
         <span className="ml-auto text-xs text-muted-foreground">
           {filteredLogs.length} entries

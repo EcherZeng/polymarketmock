@@ -341,28 +341,8 @@ async def archive_event(slug: str, market_info: dict) -> dict:
         except (json.JSONDecodeError, TypeError):
             token_ids = [token_ids]
 
-    # Copy data to archive directory
-    prices_count = 0
-    ob_count = 0
-    live_trades_count = 0
-    ob_deltas_count = 0
-    try:
-        prices_count = archive_event_data(
-            slug, market_id, "prices", start_str, end_str,
-        )
-        ob_count = archive_event_data(
-            slug, market_id, "orderbooks", start_str, end_str,
-        )
-        live_trades_count = archive_event_data(
-            slug, market_id, "live_trades", start_str, end_str,
-        )
-        ob_deltas_count = archive_event_data(
-            slug, market_id, "ob_deltas", start_str, end_str,
-        )
-    except Exception as e:
-        logger.warning("Partial archive for %s: %s", slug, e)
-
-    # Derive event start/end from slug timestamp (e.g. btc-updown-5m-1774505700)
+    # Derive precise event window from slug timestamp BEFORE archiving,
+    # so the time filter uses the actual event window (not market creation time).
     event_start = start_str
     event_end = end_str
     m = re.search(r"(\d+)m-(\d{10})$", slug)
@@ -371,6 +351,30 @@ async def archive_event(slug: str, market_info: dict) -> dict:
         epoch = int(m.group(2))
         event_start = datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
         event_end = datetime.fromtimestamp(epoch + interval_min * 60, tz=timezone.utc).isoformat()
+
+    filter_start = event_start
+    filter_end = event_end
+
+    # Copy data to archive directory
+    prices_count = 0
+    ob_count = 0
+    live_trades_count = 0
+    ob_deltas_count = 0
+    try:
+        prices_count = archive_event_data(
+            slug, market_id, "prices", filter_start, filter_end,
+        )
+        ob_count = archive_event_data(
+            slug, market_id, "orderbooks", filter_start, filter_end,
+        )
+        live_trades_count = archive_event_data(
+            slug, market_id, "live_trades", filter_start, filter_end,
+        )
+        ob_deltas_count = archive_event_data(
+            slug, market_id, "ob_deltas", filter_start, filter_end,
+        )
+    except Exception as e:
+        logger.warning("Partial archive for %s: %s", slug, e)
 
     # Get actual data time range from parquet files
     data_range = get_archive_data_range(slug)
