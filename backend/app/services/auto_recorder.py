@@ -94,14 +94,26 @@ class AutoRecorder:
     # ── Per-duration recording loop ─────────────────────────
 
     async def _record_loop(self, duration: str) -> None:
-        """Main loop for a single duration — find event → record → repeat."""
+        """Main loop for a single duration — find event → record → repeat.
+
+        Lifecycle per event:
+          1. Discover current/next event (or use pre-loaded slug)
+          2. Watch tokens + subscribe WS
+          3. Monitor until event ends
+          4. Immediately unsubscribe old tokens + subscribe next event
+          5. Archive runs in background (no blocking)
+        """
         prefix, interval = _DURATION_MAP[duration]
+        # Track tokens we subscribed so we can unsubscribe them later
+        current_tokens: list[str] = []
 
         while not self._stop_event.is_set():
             try:
                 # Check if still in config
                 if not await self._is_duration_active(duration):
                     logger.info("AutoRecorder: %s no longer in config, exiting loop", duration)
+                    await self._unsubscribe_tokens(current_tokens)
+                    current_tokens = []
                     await redis_store.delete_auto_record_state(duration)
                     return
 
@@ -135,6 +147,8 @@ class AutoRecorder:
                     await self._interruptible_sleep(secs)
                     # Re-check config after waiting
                     if not await self._is_duration_active(duration):
+                        await self._unsubscribe_tokens(current_tokens)
+                        current_tokens = []
                         await redis_store.delete_auto_record_state(duration)
                         return
                     continue  # Re-discover — event should now be live
@@ -147,6 +161,12 @@ class AutoRecorder:
                     "AutoRecorder %s: watching %d tokens for %s",
                     duration, len(watched), slug,
                 )
+
+                # Unsubscribe previous event tokens before subscribing new ones
+                old_tokens = [t for t in current_tokens if t not in watched]
+                if old_tokens:
+                    await self._unsubscribe_tokens(old_tokens)
+                current_tokens = watched
 
                 # Subscribe to WS for real-time data (headless — no frontend needed)
                 ws_mgr = self._get_ws_manager()
@@ -162,7 +182,31 @@ class AutoRecorder:
                 # 4. Monitor until event ends
                 await self._wait_for_event_end(duration, slug, interval)
 
-                # 5. Wait for archival to complete
+                # 5. Pre-resolve next event slug so we can subscribe immediately
+                next_slug = f"{prefix}-{self._extract_epoch(slug) + interval}"
+                next_result = None
+                try:
+                    from app.services.event_lifecycle import find_current_or_next_event as _find
+                    next_result = await _find(prefix, interval)
+                except Exception:
+                    pass
+
+                # 6. Subscribe next event tokens BEFORE archiving (zero-gap switch)
+                if next_result and next_result.get("status") in ("live", "upcoming"):
+                    next_event = next_result["event"]
+                    next_watched = await watch_event_tokens(next_result["slug"], next_event)
+                    if ws_mgr and next_watched:
+                        await ws_mgr.subscribe(next_watched)
+                        logger.info(
+                            "AutoRecorder %s: pre-subscribed %d tokens for %s",
+                            duration, len(next_watched), next_result["slug"],
+                        )
+
+                # 7. Unsubscribe old tokens (this event is done)
+                await self._unsubscribe_tokens(current_tokens)
+                current_tokens = []
+
+                # 8. Archive (non-blocking — trigger and move on)
                 await self._update_state(
                     duration, status="archiving", slug=slug,
                 )
@@ -174,18 +218,18 @@ class AutoRecorder:
                 )
 
                 # Brief pause before next cycle
-                await self._interruptible_sleep(5)
+                await self._interruptible_sleep(2)
 
             except asyncio.CancelledError:
                 logger.info("AutoRecorder %s: loop cancelled", duration)
-                # Cleanup: unsubscribe WS for any tokens we were watching
-                await self._cleanup_ws_subscriptions()
+                await self._unsubscribe_tokens(current_tokens)
                 return
             except Exception as e:
                 logger.warning("AutoRecorder %s: error in loop: %s", duration, e)
                 await self._interruptible_sleep(10)
 
         # Clean up state on exit
+        await self._unsubscribe_tokens(current_tokens)
         await redis_store.delete_auto_record_state(duration)
 
     # ── Helpers ──────────────────────────────────────────────
@@ -198,16 +242,30 @@ class AutoRecorder:
         except AssertionError:
             return None
 
-    async def _cleanup_ws_subscriptions(self) -> None:
-        """Unsubscribe all currently watched tokens from WS."""
+    async def _unsubscribe_tokens(self, token_ids: list[str]) -> None:
+        """Unsubscribe specific tokens from upstream WS.
+
+        Does NOT call ``stop_recording`` — recording lifecycle is managed
+        exclusively by ``archive_event`` → ``complete_recording``.
+        """
+        if not token_ids:
+            return
         ws_mgr = self._get_ws_manager()
         if not ws_mgr:
             return
-        watched = await redis_store.get_watched_markets()
-        if watched:
-            token_ids = list(watched.keys())
+        try:
             await ws_mgr.unsubscribe(token_ids)
-            await ws_mgr.stop_recording(token_ids)
+            logger.info("AutoRecorder: unsubscribed %d tokens", len(token_ids))
+        except Exception as e:
+            logger.warning("AutoRecorder: unsubscribe failed: %s", e)
+
+    @staticmethod
+    def _extract_epoch(slug: str) -> int:
+        """Extract the unix epoch from a slug like 'btc-updown-5m-1774839900'."""
+        try:
+            return int(slug.rsplit("-", 1)[-1])
+        except (ValueError, IndexError):
+            return 0
 
     async def _is_duration_active(self, duration: str) -> bool:
         config = await redis_store.get_auto_record_config()

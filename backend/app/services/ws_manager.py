@@ -518,6 +518,20 @@ class PolymarketWSManager:
                     orphaned.append(aid)
         total = sum(len(s) for s in self._clients.values())
         metrics.set("ws.frontend_clients", total)
+
+        # Detect stale connections — tokens already archived but client still lingered
+        for aid in orphaned:
+            slug = await self._resolve_slug(aid)
+            if slug:
+                meta = await redis_store.get_archive_meta(slug)
+                if meta:
+                    archived_at = meta.get("archived_at", "")
+                    logger.warning(
+                        "Stale WS client for %s (archived at %s) — "
+                        "client lingered past event end. Check close_clients_for_assets flow.",
+                        slug, archived_at,
+                    )
+
         # Cascade: unsubscribe upstream for assets with no remaining clients
         if orphaned:
             await self.unsubscribe(orphaned)
@@ -576,36 +590,53 @@ class PolymarketWSManager:
                 logger.warning("Failed to push cached state for %s: %s", aid, e)
 
     async def close_clients_for_assets(self, asset_ids: list[str], reason: str = "event_ended") -> None:
-        """Send an event_ended message and close all frontend clients subscribed to given asset_ids."""
+        """Send an event_ended message and close all frontend clients subscribed to given asset_ids.
+
+        Always unsubscribes the asset_ids from upstream, even if no frontend
+        clients are currently connected (headless auto_recorder scenario).
+        """
         # Collect unique clients across all asset_ids
         to_close: set[WebSocket] = set()
         async with self._client_lock:
+            registered_keys = list(self._clients.keys())
             for aid in asset_ids:
                 to_close.update(self._clients.get(aid, set()))
 
         if not to_close:
-            return
+            logger.warning(
+                "close_clients_for_assets: no frontend clients found for %d asset_ids. "
+                "Registered keys (%d): %s",
+                len(asset_ids),
+                len(registered_keys),
+                registered_keys[:6],  # first few for diagnostics
+            )
+        else:
+            logger.info(
+                "close_clients_for_assets: closing %d frontend clients for %d assets",
+                len(to_close), len(asset_ids),
+            )
 
-        # Notify and close each client
-        msg = json.dumps({"event_type": "event_ended", "reason": reason, "asset_ids": asset_ids})
-        for ws in to_close:
-            try:
-                await ws.send_text(msg)
-            except Exception:
-                pass
-            try:
-                await ws.close(code=1000, reason=reason)
-            except Exception:
-                pass
+        # Notify and close each frontend client (if any)
+        if to_close:
+            msg = json.dumps({"event_type": "event_ended", "reason": reason, "asset_ids": asset_ids})
+            for ws in to_close:
+                try:
+                    await ws.send_text(msg)
+                except Exception:
+                    pass
+                try:
+                    await ws.close(code=1000, reason=reason)
+                except Exception:
+                    pass
 
-        # Remove clients from tracking
-        async with self._client_lock:
-            for aid in asset_ids:
-                self._clients.pop(aid, None)
+            # Remove clients from tracking
+            async with self._client_lock:
+                for aid in asset_ids:
+                    self._clients.pop(aid, None)
 
-        # Unsubscribe upstream if no other clients need these assets
+        # Always unsubscribe upstream — even when no frontend clients existed
         await self.unsubscribe(asset_ids)
-        logger.info("Closed %d clients for ended assets: %s", len(to_close), asset_ids)
+        logger.info("Closed %d clients for ended assets", len(to_close))
 
     async def _broadcast(self, asset_id: str, message: str) -> None:
         """Send message to all frontend clients subscribed to asset_id."""

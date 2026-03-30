@@ -269,10 +269,15 @@ export default function useMarketWebSocket(assetIds: string[]): MarketWsState {
       }
     }
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       cleanup()
       if (!mountedRef.current) return
       setState((prev) => ({ ...prev, connected: false }))
+      // Server closes with reason="event_ended" — treat same as event_ended msg
+      if (ev.reason === "event_ended" || ev.code === 1000) {
+        eventEndedRef.current = true
+        setState((prev) => ({ ...prev, eventEnded: true }))
+      }
       // Don't reconnect if event has ended
       if (eventEndedRef.current) return
       // Reconnect with backoff

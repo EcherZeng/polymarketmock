@@ -61,6 +61,9 @@ export default function EventDetailPage() {
 
   const isEnded = eventStatus?.status === "ended" || eventStatus?.status === "settled"
 
+  // Track WS event_ended separately (set later from ws hook, read here for queries)
+  const [wsEventEnded, setWsEventEnded] = useState(false)
+
   // ── Auto-record: watch event when LIVE ─────────────
   const [isRecording, setIsRecording] = useState(false)
   const [isOwner, setIsOwner] = useState(false)
@@ -141,7 +144,7 @@ export default function EventDetailPage() {
   const { data: nextEvent } = useQuery<NextEventResponse>({
     queryKey: ["nextEvent", slug],
     queryFn: () => fetchNextEvent(slug!),
-    enabled: !!slug && isEnded,
+    enabled: !!slug && (isEnded || wsEventEnded),
     staleTime: 10_000,
   })
 
@@ -161,6 +164,7 @@ export default function EventDetailPage() {
   useEffect(() => {
     setSelectedMarket(null)
     setSelectedTokenId("")
+    setWsEventEnded(false)
   }, [slug])
 
   function handleSelectMarket(m: Market) {
@@ -190,6 +194,19 @@ export default function EventDetailPage() {
   // ── WebSocket real-time data ──────────────────────────────
   const wsAssetIds = useMemo(() => tokens.filter(Boolean), [tokens.join(",")])
   const ws = useMarketWebSocket(wsAssetIds)
+
+  // Auto-navigate to next event when WS reports event_ended
+  useEffect(() => {
+    if (ws.eventEnded) setWsEventEnded(true)
+  }, [ws.eventEnded])
+
+  useEffect(() => {
+    if (!wsEventEnded || !nextEvent?.slug) return
+    const timer = setTimeout(() => {
+      navigate(`/event/${nextEvent.slug}`, { replace: true })
+    }, 1500)
+    return () => clearTimeout(timer)
+  }, [wsEventEnded, nextEvent?.slug]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (isLoading) {
     return (

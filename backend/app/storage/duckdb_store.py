@@ -550,6 +550,43 @@ def delete_archive(slug: str) -> bool:
     return False
 
 
+def delete_live_data(market_id: str) -> list[str]:
+    """Delete live data directories for a market_id. Returns list of removed dirs."""
+    removed: list[str] = []
+    for data_type in ("prices", "orderbooks", "ob_deltas", "live_trades"):
+        dir_path = os.path.join(settings.data_dir, data_type, market_id)
+        if os.path.isdir(dir_path):
+            shutil.rmtree(dir_path)
+            removed.append(data_type)
+    return removed
+
+
+def remove_session_log_entries(slug: str) -> int:
+    """Remove all entries for a given slug from sessions.jsonl. Returns count removed."""
+    sessions_file = os.path.join(settings.data_dir, "sessions.jsonl")
+    if not os.path.isfile(sessions_file):
+        return 0
+    kept: list[str] = []
+    removed = 0
+    with open(sessions_file, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+                if entry.get("slug") == slug:
+                    removed += 1
+                    continue
+            except (json.JSONDecodeError, TypeError):
+                pass
+            kept.append(line)
+    with open(sessions_file, "w", encoding="utf-8") as f:
+        for line in kept:
+            f.write(line + "\n")
+    return removed
+
+
 def _query_parquet_file(
     file_path: str,
     start_time: str | None = None,

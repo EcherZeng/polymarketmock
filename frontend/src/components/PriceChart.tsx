@@ -111,15 +111,15 @@ export default function PriceChart({ tokens, outcomes, wsBestBidAsks, wsConnecte
 
   // Push HTTP data for token0
   useEffect(() => {
-    if (!mid0 || wsConnected) return
+    if (!mid0 || (wsConnected && wsBestBidAsks?.[token0])) return
     pushPoint(token0, mid0.mid)
-  }, [mid0, wsConnected]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mid0, wsConnected, wsBestBidAsks]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Push HTTP data for token1
   useEffect(() => {
-    if (!mid1 || wsConnected) return
+    if (!mid1 || (wsConnected && wsBestBidAsks?.[token1])) return
     pushPoint(token1, mid1.mid)
-  }, [mid1, wsConnected]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mid1, wsConnected, wsBestBidAsks]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Push WS data for all tokens
   useEffect(() => {

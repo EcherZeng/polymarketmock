@@ -405,14 +405,8 @@ async def archive_event(slug: str, market_info: dict) -> dict:
     }
     await redis_store.set_archive_meta(slug, json.dumps(meta))
 
-    # Unwatch tokens after successful archival
-    for tid in token_ids:
-        try:
-            await redis_store.remove_watched_market(str(tid))
-        except Exception:
-            pass
-
-    # Close WS connections for ended event tokens
+    # Close WS connections for ended event tokens BEFORE unwatching
+    # (unwatch removes token_market_info which is needed for slug resolution)
     ws_mgr = _get_ws_manager()
     if ws_mgr and token_ids:
         try:
@@ -434,6 +428,13 @@ async def archive_event(slug: str, market_info: dict) -> dict:
             })
         except Exception as e:
             logger.warning("Failed to complete recording session for %s: %s", slug, e)
+
+    # Unwatch tokens after successful archival + client closure
+    for tid in token_ids:
+        try:
+            await redis_store.remove_watched_market(str(tid))
+        except Exception:
+            pass
 
     return meta
 

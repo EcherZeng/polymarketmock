@@ -300,10 +300,56 @@ async def get_archive(slug: str):
 
 @router.delete("/archives/{slug:path}")
 async def delete_archive(slug: str):
-    """删除归档场次 (Parquet + Redis 元数据)。"""
-    from app.storage.duckdb_store import delete_archive as delete_archive_files
+    """删除归档场次及其所有关联数据 (Parquet + Redis + sessions.jsonl)。"""
+    from app.storage.duckdb_store import (
+        delete_archive as delete_archive_files,
+        delete_live_data,
+        remove_session_log_entries,
+    )
+
+    # 1. 获取元数据（删除前需要 market_id / token_ids）
+    meta = await redis_store.get_archive_meta(slug)
+    market_id = meta.get("market_id", "") if meta else ""
+    token_ids: list[str] = meta.get("token_ids", []) if meta else []
+
+    # 2. 删除归档目录
     delete_archive_files(slug)
+
+    # 3. 删除 Redis 归档元数据 + 录制会话
     await redis_store.delete_archive_meta(slug)
+    await redis_store.delete_recording_session(slug)
+
+    # 4. 删除实时数据目录（仅当没有其他归档引用同一 market_id 时）
+    if market_id:
+        other_slugs = await redis_store.list_archive_slugs()
+        market_id_in_use = False
+        for other_slug in other_slugs:
+            other_meta = await redis_store.get_archive_meta(other_slug)
+            if other_meta and other_meta.get("market_id") == market_id:
+                market_id_in_use = True
+                break
+        if not market_id_in_use:
+            delete_live_data(market_id)
+            # 清理 market 级别 Redis 键
+            r = redis_store.get_redis()
+            await r.delete(f"live:trades:{market_id}")
+            await r.delete(f"live:seen:{market_id}")
+
+    # 5. 清理 token 级别 Redis 键
+    if token_ids:
+        r = redis_store.get_redis()
+        for tid in token_ids:
+            await r.delete(f"realtime:trades:{tid}")
+            await r.delete(f"token:market:{tid}")
+            await r.delete(f"prev:book:{tid}")
+
+    # 6. 清理 event status 缓存
+    r = redis_store.get_redis()
+    await r.delete(f"event:status:{slug}")
+
+    # 7. 从 sessions.jsonl 中移除该场次记录
+    remove_session_log_entries(slug)
+
     return {"deleted": slug}
 
 
