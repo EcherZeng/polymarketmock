@@ -73,7 +73,13 @@ export default function EventDetailPage() {
   const clientId = useMemo(() => {
     let id = sessionStorage.getItem("pm_client_id")
     if (!id) {
-      id = crypto.randomUUID()
+      // crypto.randomUUID() is unavailable in non-secure contexts (plain HTTP)
+      const bytes = crypto.getRandomValues(new Uint8Array(16))
+      bytes[6] = (bytes[6] & 0x0f) | 0x40
+      bytes[8] = (bytes[8] & 0x3f) | 0x80
+      id = Array.from(bytes)
+        .map((b, i) => b.toString(16).padStart(2, "0") + ([3, 5, 7, 9].includes(i) ? "-" : ""))
+        .join("")
       sessionStorage.setItem("pm_client_id", id)
     }
     return id
