@@ -1,5 +1,6 @@
 # 单独构建/更新 frontend 服务
 # 用法: cd frontend && docker compose up -d --build
+# 注意: 需先通过根目录 docker compose up 启动主网络
 
 services:
   frontend:
@@ -8,4 +9,11 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3021:3021"
+    networks:
+      - polymarket
     restart: unless-stopped
+
+networks:
+  polymarket:
+    external: true
+    name: polymarketmock_default

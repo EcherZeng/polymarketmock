@@ -224,12 +224,12 @@ async def get_next_live_event(current_slug: str) -> dict | None:
 
 
 def _interval_from_prefix(prefix: str) -> int:
-    if "5m" in prefix:
-        return 300
-    if "15m" in prefix:
-        return 900
     if "30m" in prefix:
         return 1800
+    if "15m" in prefix:
+        return 900
+    if "5m" in prefix:
+        return 300
     return 300
 
 

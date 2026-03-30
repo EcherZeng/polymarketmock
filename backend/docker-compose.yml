@@ -13,6 +13,8 @@ services:
       - redis_data:/data
     command: redis-server --appendonly yes
     restart: unless-stopped
+    networks:
+      - polymarket
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -35,6 +37,8 @@ services:
       PM_DATA_DIR: /app/data
       PM_WS_URL: wss://ws-subscriptions-clob.polymarket.com/ws/market
       PM_LOG_LEVEL: INFO
+    networks:
+      - polymarket
     depends_on:
       redis:
         condition: service_healthy
@@ -45,6 +49,11 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
+
+networks:
+  polymarket:
+    external: true
+    name: polymarketmock_default
 
 volumes:
   redis_data:
