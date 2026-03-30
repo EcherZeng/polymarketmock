@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useParams, Link, useNavigate } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { Badge } from "@/components/ui/badge"
@@ -14,7 +14,8 @@ import PriceChart from "@/components/PriceChart"
 import TradingPanel from "@/components/TradingPanel"
 import PositionTable from "@/components/PositionTable"
 import ActivityFeed from "@/components/ActivityFeed"
-import { resolveSlug, fetchEventStatus, fetchNextEvent, watchEvent } from "@/api/client"
+import useMarketWebSocket from "@/hooks/useMarketWebSocket"
+import { resolveSlug, fetchEventStatus, fetchNextEvent, watchEvent, recordingHeartbeat } from "@/api/client"
 import type { Market, MarketEvent, EventStatusResponse, NextEventResponse } from "@/types"
 
 function parseTokenIds(raw: unknown): string[] {
@@ -42,7 +43,6 @@ export default function EventDetailPage() {
   const navigate = useNavigate()
   const [selectedMarket, setSelectedMarket] = useState<Market | null>(null)
   const [selectedTokenId, setSelectedTokenId] = useState("")
-  const [selectedOutcomeIdx, setSelectedOutcomeIdx] = useState(0)
 
   const { data: event, isLoading, error } = useQuery<MarketEvent>({
     queryKey: ["event", slug],
@@ -61,18 +61,57 @@ export default function EventDetailPage() {
 
   const isEnded = eventStatus?.status === "ended" || eventStatus?.status === "settled"
 
+  // Track WS event_ended separately (set later from ws hook, read here for queries)
+  const [wsEventEnded, setWsEventEnded] = useState(false)
+
   // ── Auto-record: watch event when LIVE ─────────────
   const [isRecording, setIsRecording] = useState(false)
+  const [isOwner, setIsOwner] = useState(false)
   const watchedRef = useRef(false)
+
+  // Stable per-tab client ID (survives page refreshes within same tab)
+  const clientId = useMemo(() => {
+    let id = sessionStorage.getItem("pm_client_id")
+    if (!id) {
+      id = crypto.randomUUID()
+      sessionStorage.setItem("pm_client_id", id)
+    }
+    return id
+  }, [])
 
   useEffect(() => {
     if (!slug || !event || isEnded || watchedRef.current) return
     if (eventStatus?.status !== "live") return
     watchedRef.current = true
-    watchEvent(slug)
-      .then(() => setIsRecording(true))
+    watchEvent(slug, clientId)
+      .then((res) => {
+        setIsRecording(true)
+        setIsOwner(res.is_owner)
+      })
       .catch(() => { /* non-critical */ })
   }, [slug, event?.id, eventStatus?.status])
+
+  // Heartbeat: keep recording lock alive if this tab is the owner
+  useEffect(() => {
+    if (!slug || !isOwner || isEnded) return
+    const id = window.setInterval(() => {
+      recordingHeartbeat(slug, clientId)
+        .then((res) => { if (!res.is_owner) setIsOwner(false) })
+        .catch(() => {})
+    }, 10_000)
+    return () => window.clearInterval(id)
+  }, [slug, isOwner, isEnded])
+
+  // Non-owner tabs: detect when lock expires and try to claim
+  useEffect(() => {
+    if (!slug || isOwner || !isRecording || isEnded) return
+    if (eventStatus?.recording_active === false) {
+      // Lock expired — try to claim
+      watchEvent(slug, clientId)
+        .then((res) => setIsOwner(res.is_owner))
+        .catch(() => {})
+    }
+  }, [eventStatus?.recording_active])
 
   // ── Client-side countdown (synced from server every 5s) ────
   const [countdown, setCountdown] = useState<number | null>(null)
@@ -105,7 +144,7 @@ export default function EventDetailPage() {
   const { data: nextEvent } = useQuery<NextEventResponse>({
     queryKey: ["nextEvent", slug],
     queryFn: () => fetchNextEvent(slug!),
-    enabled: !!slug && isEnded,
+    enabled: !!slug && (isEnded || wsEventEnded),
     staleTime: 10_000,
   })
 
@@ -117,7 +156,6 @@ export default function EventDetailPage() {
       const tokens = parseTokenIds(m.clobTokenIds)
       if (tokens[0]) {
         setSelectedTokenId(tokens[0])
-        setSelectedOutcomeIdx(0)
       }
     }
   }, [event?.id])
@@ -126,7 +164,7 @@ export default function EventDetailPage() {
   useEffect(() => {
     setSelectedMarket(null)
     setSelectedTokenId("")
-    setSelectedOutcomeIdx(0)
+    setWsEventEnded(false)
   }, [slug])
 
   function handleSelectMarket(m: Market) {
@@ -134,16 +172,6 @@ export default function EventDetailPage() {
     const tokens = parseTokenIds(m.clobTokenIds)
     if (tokens[0]) {
       setSelectedTokenId(tokens[0])
-      setSelectedOutcomeIdx(0)
-    }
-  }
-
-  function handleSelectOutcome(idx: number) {
-    if (!selectedMarket) return
-    const tokens = parseTokenIds(selectedMarket.clobTokenIds)
-    if (tokens[idx]) {
-      setSelectedTokenId(tokens[idx])
-      setSelectedOutcomeIdx(idx)
     }
   }
 
@@ -154,11 +182,31 @@ export default function EventDetailPage() {
       const idx = tokens.indexOf(tokenId)
       if (idx >= 0) {
         setSelectedTokenId(tokenId)
-        setSelectedOutcomeIdx(idx)
       }
     },
     [selectedMarket],
   )
+
+  // ── Derived values (must be before early returns for hooks below) ──
+  const tokens = selectedMarket ? parseTokenIds(selectedMarket.clobTokenIds) : []
+  const outcomes = selectedMarket ? parseOutcomes(selectedMarket.outcomes) : []
+
+  // ── WebSocket real-time data ──────────────────────────────
+  const wsAssetIds = useMemo(() => tokens.filter(Boolean), [tokens.join(",")])
+  const ws = useMarketWebSocket(wsAssetIds)
+
+  // Auto-navigate to next event when WS reports event_ended
+  useEffect(() => {
+    if (ws.eventEnded) setWsEventEnded(true)
+  }, [ws.eventEnded])
+
+  useEffect(() => {
+    if (!wsEventEnded || !nextEvent?.slug) return
+    const timer = setTimeout(() => {
+      navigate(`/event/${nextEvent.slug}`, { replace: true })
+    }, 1500)
+    return () => clearTimeout(timer)
+  }, [wsEventEnded, nextEvent?.slug]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (isLoading) {
     return (
@@ -191,9 +239,6 @@ export default function EventDetailPage() {
     )
   }
 
-  const tokens = selectedMarket ? parseTokenIds(selectedMarket.clobTokenIds) : []
-  const outcomes = selectedMarket ? parseOutcomes(selectedMarket.outcomes) : []
-
   return (
     <div className="flex flex-col gap-4">
       {/* ── Ended event banner ───────────────────────────────── */}
@@ -209,9 +254,15 @@ export default function EventDetailPage() {
               )}
             </span>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" asChild>
-                <Link to={`/replay/${slug}`}>回放此场次</Link>
-              </Button>
+              {eventStatus?.archive_ready ? (
+                <Button variant="outline" size="sm" asChild>
+                  <Link to={`/replay/${slug}`}>回放此场次</Link>
+                </Button>
+              ) : (
+                <Button variant="outline" size="sm" disabled className="opacity-60">
+                  归档中…
+                </Button>
+              )}
               {nextEvent?.slug && (
                 <Button
                   size="sm"
@@ -236,10 +287,16 @@ export default function EventDetailPage() {
         <div className="flex items-start justify-between gap-2">
           <h1 className="text-xl font-semibold leading-tight">{event.title}</h1>
           <div className="flex shrink-0 gap-1">
-            {isRecording && (
+            {isRecording && isOwner && (
               <Badge variant="destructive" className="animate-pulse gap-1">
                 <span className="inline-block h-2 w-2 rounded-full bg-white" />
                 录制中
+              </Badge>
+            )}
+            {isRecording && !isOwner && eventStatus?.recording_active && (
+              <Badge variant="secondary" className="gap-1">
+                <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
+                其他窗口录制中
               </Badge>
             )}
             {isEnded ? (
@@ -278,7 +335,7 @@ export default function EventDetailPage() {
         {/* Left column: markets list + selected market details */}
         <div className="flex flex-col gap-4 lg:col-span-8">
           {/* Market info card — prices, volume, liquidity, spread */}
-          {selectedMarket && <MarketInfo marketId={selectedMarket.id} tokenId={selectedTokenId || undefined} />}
+          {selectedMarket && <MarketInfo marketId={selectedMarket.id} tokenId={tokens[0] || undefined} wsBestBidAsk={ws.bestBidAsks[tokens[0]] ?? null} wsConnected={ws.connected} />}
 
           {/* Sub-markets list */}
           {event.markets.length > 1 && (
@@ -299,28 +356,11 @@ export default function EventDetailPage() {
             </div>
           )}
 
-          {/* Outcome token selector */}
-          {selectedMarket && tokens.length > 1 && (
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">Outcome:</span>
-              {outcomes.map((name, i) => (
-                <Button
-                  key={tokens[i] ?? i}
-                  variant={selectedOutcomeIdx === i ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => handleSelectOutcome(i)}
-                >
-                  {name}
-                </Button>
-              ))}
-            </div>
-          )}
-
-          {/* Orderbook + Price chart side by side on large screens */}
-          {selectedTokenId && (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <OrderbookView tokenId={selectedTokenId} />
-              <PriceChart tokenId={selectedTokenId} />
+          {/* Orderbook (UP left, DOWN right) then Price chart below */}
+          {tokens.length > 0 && (
+            <div className="flex flex-col gap-4">
+              <OrderbookView tokens={tokens} outcomes={outcomes} wsOrderbooks={ws.orderbooks} wsConnected={ws.connected} />
+              <PriceChart tokens={tokens} outcomes={outcomes} wsBestBidAsks={ws.bestBidAsks} wsConnected={ws.connected} />
             </div>
           )}
 
@@ -331,6 +371,10 @@ export default function EventDetailPage() {
               marketId={selectedMarket.id}
               conditionId={selectedMarket.conditionId}
               enabled={!isEnded}
+              wsTrades={ws.trades}
+              wsConnected={ws.connected}
+              outcomes={outcomes}
+              tokenIds={tokens}
             />
           )}
         </div>
@@ -343,6 +387,8 @@ export default function EventDetailPage() {
               outcomes={outcomes}
               tokenIds={tokens}
               onSwitchToken={handleSwitchToken}
+              wsBestBidAsk={ws.bestBidAsks[selectedTokenId] ?? null}
+              wsConnected={ws.connected}
             />
           )}
           {selectedTokenId && isEnded && (

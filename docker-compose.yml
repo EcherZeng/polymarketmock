@@ -1,25 +1,89 @@
 services:
+  # ── Redis ────────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
     volumes:
-      - redis-data:/data
+      - redis_data:/data
     command: redis-server --appendonly yes
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
+  # ── Backend (Trading API) ────────────────────────────────────────────────────
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     ports:
       - "8071:8071"
-    depends_on:
-      - redis
     volumes:
-      - ./backend/data:/app/data
+      - backend_data:/app/data
     environment:
-      - PM_REDIS_URL=redis://redis:6379
-      - PM_GAMMA_API_URL=https://gamma-api.polymarket.com
-      - PM_CLOB_API_URL=https://clob.polymarket.com
-      - PM_DATA_DIR=/app/data
+      PM_REDIS_URL: redis://redis:6379
+      PM_GAMMA_API_URL: https://gamma-api.polymarket.com
+      PM_CLOB_API_URL: https://clob.polymarket.com
+      PM_DATA_API_URL: https://data-api.polymarket.com
+      PM_DATA_DIR: /app/data
+      PM_WS_URL: wss://ws-subscriptions-clob.polymarket.com/ws/market
+      PM_LOG_LEVEL: INFO
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; print(httpx.get('http://localhost:8071/api/health').status_code)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── Strategy Engine ──────────────────────────────────────────────────────────
+  strategy:
+    build:
+      context: ./Strategy
+      dockerfile: Dockerfile
+    ports:
+      - "8072:8072"
+    volumes:
+      - backend_data:/app/data:ro
+      - strategy_results:/app/results
+    environment:
+      STRATEGY_DATA_DIR: /app/data
+      STRATEGY_STRATEGIES_DIR: /app/strategies
+      STRATEGY_SERVER_PORT: "8072"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Frontend (Trading UI) ───────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3021:3021"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # ── Strategy Frontend ──────────────────────────────────────────────────────
+  strategyfrontend:
+    build:
+      context: ./Strategyfrontend
+      dockerfile: Dockerfile
+    ports:
+      - "3022:3022"
+    depends_on:
+      - strategy
+    restart: unless-stopped
 
 volumes:
-  redis-data:
+  redis_data:
+  backend_data:
+  strategy_results:

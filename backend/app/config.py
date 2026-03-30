@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     cache_ttl_data_trades: int = 3
 
     # Data collector intervals (seconds)
-    collector_orderbook_interval: int = 15
-    collector_price_interval: int = 60
+    collector_orderbook_interval: int = 2
+    collector_price_interval: int = 5
 
     # Limit order check interval (seconds)
     limit_order_check_interval: int = 5
@@ -42,6 +42,21 @@ class Settings(BaseSettings):
 
     # Max live trades per market kept in Redis
     live_trades_max: int = 500
+
+    # WebSocket — Polymarket Market Channel
+    ws_url: str = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
+    ws_ping_interval: int = 10
+    ws_reconnect_max: int = 30
+
+    # Parquet buffer — batched writes
+    parquet_flush_interval: int = 60   # seconds between auto-flushes
+    parquet_flush_threshold: int = 2000  # rows before forced flush
+
+    # Logging
+    log_level: str = "INFO"
+    log_file_level: str = "WARNING"          # file handler min level
+    log_file_max_bytes: int = 5_242_880      # 5 MB per file
+    log_file_backup_count: int = 3           # keep 3 rotated files
 
     model_config = {"env_prefix": "PM_"}
 

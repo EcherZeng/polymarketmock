@@ -2,6 +2,9 @@
 
 Supports adaptive polling: LIVE event tokens are polled at higher frequency
 and trade activity is inferred from orderbook diffs.
+
+When the WebSocket manager is connected, expensive HTTP polling is suppressed
+(WS already updates Redis caches + Parquet). Polling resumes automatically as fallback.
 """
 
 from __future__ import annotations
@@ -11,16 +14,34 @@ import json
 import logging
 
 from app.config import settings
+from app.services.log_buffer import metrics
 from app.services.matching_engine import check_and_fill_limit_orders
 from app.services.polymarket_proxy import get_data_trades, get_midpoint, get_orderbook_raw
 from app.services.trade_feed import detect_trades
-from app.storage.duckdb_store import write_live_trade, write_orderbook_snapshot, write_price_snapshot, write_trade_snapshot
+from app.storage.duckdb_store import write_live_trade, write_orderbook_snapshot, write_price_snapshot
 from app.storage import redis_store
 
 logger = logging.getLogger(__name__)
 
 # In-memory prev-snapshots for fast diff (avoids extra Redis round-trip per tick)
 _prev_books: dict[str, dict] = {}
+
+
+async def _resolve_slug(token_id: str) -> str | None:
+    """Get slug for a token_id from token:market_info."""
+    info = await redis_store.get_token_market_info(token_id)
+    if info:
+        return info.get("slug")
+    return None
+
+
+def _ws_connected() -> bool:
+    """Check if the WS manager is connected (non-import-time safe)."""
+    try:
+        from app.services.ws_manager import get_ws_manager
+        return get_ws_manager().connected
+    except Exception:
+        return False
 
 
 async def _collect_and_detect(token_id: str, market_id: str) -> None:
@@ -30,6 +51,9 @@ async def _collect_and_detect(token_id: str, market_id: str) -> None:
     except Exception as e:
         logger.warning("Failed to fetch orderbook for %s: %s", token_id, e)
         return
+
+    # Resolve slug for Parquet storage
+    slug = await _resolve_slug(token_id)
 
     # Detect trades from diff
     prev = _prev_books.get(token_id)
@@ -45,32 +69,23 @@ async def _collect_and_detect(token_id: str, market_id: str) -> None:
                 )
             except Exception as e:
                 logger.warning("Failed to store realtime trade: %s", e)
-            # Also persist to Parquet for archival
-            try:
-                write_trade_snapshot(
-                    market_id=market_id or token_id,
-                    token_id=token_id,
-                    side=t.get("side", "UNKNOWN"),
-                    price=t.get("price", 0),
-                    size=t.get("size", 0),
-                    timestamp=t.get("timestamp"),
-                )
-            except Exception as e:
-                logger.warning("Failed to write trade snapshot: %s", e)
 
     _prev_books[token_id] = book
+
+    if not slug:
+        return
 
     # Write orderbook snapshot to Parquet
     bids = book.get("bids", [])
     asks = book.get("asks", [])
     try:
         write_orderbook_snapshot(
-            market_id=market_id or token_id,
+            slug=slug,
             token_id=token_id,
-            bid_prices=json.dumps([b["price"] for b in bids]),
-            bid_sizes=json.dumps([b["size"] for b in bids]),
-            ask_prices=json.dumps([a["price"] for a in asks]),
-            ask_sizes=json.dumps([a["size"] for a in asks]),
+            bid_prices=[float(b["price"]) for b in bids],
+            bid_sizes=[float(b["size"]) for b in bids],
+            ask_prices=[float(a["price"]) for a in asks],
+            ask_sizes=[float(a["size"]) for a in asks],
         )
     except Exception as e:
         logger.warning("Failed to write orderbook snapshot for %s: %s", token_id, e)
@@ -82,7 +97,7 @@ async def _collect_and_detect(token_id: str, market_id: str) -> None:
         mid_price = (best_bid + best_ask) / 2 if (best_bid and best_ask) else best_bid or best_ask
         spread = best_ask - best_bid if (best_bid and best_ask) else 0
         write_price_snapshot(
-            market_id=market_id or token_id,
+            slug=slug,
             token_id=token_id,
             mid_price=mid_price,
             best_bid=best_bid,
@@ -102,6 +117,9 @@ async def _collect_orderbooks() -> None:
 async def _collect_prices() -> None:
     watched = await redis_store.get_watched_markets()
     for token_id, market_id in watched.items():
+        slug = await _resolve_slug(token_id)
+        if not slug:
+            continue
         try:
             book = await get_orderbook_raw(token_id)
             mid = await get_midpoint(token_id)
@@ -112,7 +130,7 @@ async def _collect_prices() -> None:
             spread = best_ask - best_bid
 
             write_price_snapshot(
-                market_id=market_id or token_id,
+                slug=slug,
                 token_id=token_id,
                 mid_price=mid,
                 best_bid=best_bid,
@@ -137,12 +155,21 @@ async def _collect_live_trades() -> None:
         return
 
     # Group by market_id to avoid duplicate API calls
+    # Also build market_id → slug mapping
     market_ids: dict[str, str] = {}  # market_id -> any token_id
+    market_slug: dict[str, str] = {}  # market_id -> slug
     for token_id, market_id in watched.items():
         if market_id and market_id not in market_ids:
             market_ids[market_id] = token_id
+            slug = await _resolve_slug(token_id)
+            if slug:
+                market_slug[market_id] = slug
 
     for market_id, _ in market_ids.items():
+        slug = market_slug.get(market_id)
+        if not slug:
+            continue
+
         try:
             trades = await get_data_trades(market_id=market_id, limit=30)
         except Exception as e:
@@ -175,15 +202,11 @@ async def _collect_live_trades() -> None:
                 from datetime import datetime, timezone
                 ts_iso = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if ts else None
                 write_live_trade(
-                    market_id=market_id,
+                    slug=slug,
                     token_id=t.get("asset", ""),
-                    condition_id=t.get("conditionId", ""),
                     side=t.get("side", ""),
                     price=float(t.get("price", 0)),
                     size=float(t.get("size", 0)),
-                    outcome=t.get("outcome", ""),
-                    pseudonym=t.get("pseudonym", ""),
-                    name=t.get("name", ""),
                     transaction_hash=tx_hash,
                     timestamp=ts_iso,
                 )
@@ -201,6 +224,7 @@ async def _maybe_archive_ended() -> None:
 
 
 async def _collector_loop() -> None:
+    logger.info("Data collector loop started")
     ob_counter = 0
     price_counter = 0
     live_counter = 0
@@ -223,12 +247,14 @@ async def _collector_loop() -> None:
                 logger.warning("Limit order check failed: %s", e)
 
         # High-frequency trade detection for watched tokens
+        # Skip when WS is connected — WS handles orderbook updates + trade detection
         if live_counter >= settings.collector_live_interval:
             live_counter = 0
-            try:
-                await _live_tick()
-            except Exception as e:
-                logger.warning("Live tick failed: %s", e)
+            if not _ws_connected():
+                try:
+                    await _live_tick()
+                except Exception as e:
+                    logger.warning("Live tick failed: %s", e)
 
         # Orderbook snapshots (standard interval, also writes Parquet)
         if ob_counter >= settings.collector_orderbook_interval:
@@ -237,16 +263,19 @@ async def _collector_loop() -> None:
             # This is a catch-all for the standard path
             pass
 
-        # Price snapshots
+        # Price snapshots — skip when WS provides best_bid_ask
         if price_counter >= settings.collector_price_interval:
             price_counter = 0
-            try:
-                await _collect_prices()
-            except Exception as e:
-                logger.warning("Price collection failed: %s", e)
+            if not _ws_connected():
+                try:
+                    await _collect_prices()
+                except Exception as e:
+                    logger.warning("Price collection failed: %s", e)
 
         # Collect real trades from Data API
-        if live_trades_counter >= settings.collector_live_trades_interval:
+        # When WS connected, reduce frequency (WS covers most trades via last_trade_price)
+        live_trades_threshold = 30 if _ws_connected() else settings.collector_live_trades_interval
+        if live_trades_counter >= live_trades_threshold:
             live_trades_counter = 0
             try:
                 await _collect_live_trades()
@@ -263,10 +292,12 @@ async def _collector_loop() -> None:
 
 
 async def start_collector() -> asyncio.Task:
+    logger.info("Starting data collector")
     return asyncio.create_task(_collector_loop())
 
 
 async def stop_collector(task: asyncio.Task) -> None:
+    logger.info("Stopping data collector")
     task.cancel()
     try:
         await task

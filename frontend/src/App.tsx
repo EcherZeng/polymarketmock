@@ -6,11 +6,15 @@ import EventDetailPage from "@/pages/EventDetailPage"
 import TradingDashboard from "@/pages/TradingDashboard"
 import HistoryPage from "@/pages/HistoryPage"
 import ReplayPage from "@/pages/ReplayPage"
+import SessionHistoryPage from "@/pages/SessionHistoryPage"
+import MonitorPage from "@/pages/MonitorPage"
 
 const navItems = [
   { to: "/", label: "Events" },
+  { to: "/sessions", label: "Sessions" },
   { to: "/trading", label: "Trading" },
   { to: "/history", label: "History" },
+  { to: "/monitor", label: "Monitor" },
 ]
 
 export default function App() {
@@ -24,20 +28,27 @@ export default function App() {
             Polymarket Mock
           </Link>
           <nav className="flex gap-4">
-            {navItems.map((item) => (
-              <Link
-                key={item.to}
-                to={item.to}
-                className={cn(
-                  "text-sm font-medium transition-colors hover:text-primary",
-                  location.pathname === item.to
-                    ? "text-primary"
-                    : "text-muted-foreground",
-                )}
-              >
-                {item.label}
-              </Link>
-            ))}
+            {navItems.map((item) => {
+              const active =
+                item.to === "/"
+                  ? location.pathname === "/"
+                  : item.to === "/sessions"
+                    ? location.pathname === "/sessions" ||
+                      location.pathname.startsWith("/replay/")
+                    : location.pathname.startsWith(item.to)
+              return (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  className={cn(
+                    "text-sm font-medium transition-colors hover:text-primary",
+                    active ? "text-primary" : "text-muted-foreground",
+                  )}
+                >
+                  {item.label}
+                </Link>
+              )
+            })}
           </nav>
         </div>
       </header>
@@ -46,9 +57,11 @@ export default function App() {
           <Routes>
             <Route path="/" element={<EventListPage />} />
             <Route path="/event/:slug" element={<EventDetailPage />} />
+            <Route path="/sessions" element={<SessionHistoryPage />} />
             <Route path="/replay/:slug" element={<ReplayPage />} />
             <Route path="/trading" element={<TradingDashboard />} />
             <Route path="/history" element={<HistoryPage />} />
+            <Route path="/monitor" element={<MonitorPage />} />
           </Routes>
         </ErrorBoundary>
       </main>

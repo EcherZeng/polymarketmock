@@ -19,13 +19,20 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { fetchLiveTrades, fetchTradeHistory } from "@/api/client"
-import type { PolymarketTrade, TradeRecord } from "@/types"
+import type { PolymarketTrade, TradeRecord, WsLastTradeEvent } from "@/types"
 
 interface ActivityFeedProps {
   tokenId: string
   marketId?: string
   conditionId?: string
   enabled?: boolean
+  /** WS-driven trade events (real-time stream) */
+  wsTrades?: WsLastTradeEvent[]
+  wsConnected?: boolean
+  /** Outcome labels (e.g. ["Up", "Down"]) for mapping WS trades */
+  outcomes?: string[]
+  /** Token IDs corresponding to outcomes */
+  tokenIds?: string[]
 }
 
 function fmtTime(iso: string): string {
@@ -56,7 +63,7 @@ function shortenPseudonym(pseudonym: string, name: string): string {
   return "匿名"
 }
 
-export default function ActivityFeed({ tokenId, marketId, conditionId, enabled = true }: ActivityFeedProps) {
+export default function ActivityFeed({ tokenId, marketId, conditionId, enabled = true, wsTrades = [], wsConnected, outcomes = [], tokenIds = [] }: ActivityFeedProps) {
   const [tab, setTab] = useState("market")
   const prevTradesRef = useRef<Set<string>>(new Set())
   const [newTxHashes, setNewTxHashes] = useState<Set<string>>(new Set())
@@ -65,11 +72,12 @@ export default function ActivityFeed({ tokenId, marketId, conditionId, enabled =
   const liveQueryId = conditionId || marketId
 
   // ── Live trades from Polymarket Data API ─────────────────
+  // When WS is connected, reduce polling frequency (WS provides real-time trades)
   const { data: liveData, isLoading: liveLoading } = useQuery({
     queryKey: ["liveTrades", liveQueryId],
     queryFn: () => fetchLiveTrades(liveQueryId!, 40),
     enabled: !!liveQueryId && enabled && tab === "market",
-    refetchInterval: 3_000,
+    refetchInterval: wsConnected ? 30_000 : 3_000,
   })
 
   // ── My simulated trades ──────────────────────────────────
@@ -80,8 +88,51 @@ export default function ActivityFeed({ tokenId, marketId, conditionId, enabled =
     refetchInterval: 3_000,
   })
 
-  const liveTrades: PolymarketTrade[] = liveData?.trades ?? []
+  const httpTrades: PolymarketTrade[] = liveData?.trades ?? []
   const myTrades: TradeRecord[] = myData?.trades ?? []
+
+  // Merge WS trades into the HTTP trade list (WS trades prepended as PolymarketTrade-like)
+  const liveTrades: PolymarketTrade[] = useMemo(() => {
+    if (!wsConnected || wsTrades.length === 0) return httpTrades
+
+    // Convert WS trades to PolymarketTrade shape for unified rendering
+    const wsConverted: PolymarketTrade[] = wsTrades.map((t) => {
+      // Map asset_id to outcome (not by side — side is buy/sell direction, not the outcome)
+      const outcomeIdx = tokenIds.indexOf(t.asset_id)
+      const outcomeName = outcomeIdx >= 0 && outcomeIdx < outcomes.length
+        ? outcomes[outcomeIdx]
+        : (t.side === "BUY" ? "Yes" : "No")
+      return {
+        proxyWallet: "",
+        side: t.side,
+        asset: t.asset_id,
+        conditionId: t.market,
+        size: parseFloat(t.size),
+        price: parseFloat(t.price),
+        timestamp: parseFloat(t.timestamp) / 1000,
+        title: "",
+        slug: "",
+        icon: "",
+        eventSlug: "",
+        outcome: outcomeName,
+        outcomeIndex: outcomeIdx >= 0 ? outcomeIdx : 0,
+        name: "",
+        pseudonym: "WS",
+        transactionHash: t.transaction_hash ?? `ws-${t.timestamp}-${t.price}`,
+      }
+    })
+
+    // Merge: WS first, then HTTP, deduped by transactionHash
+    const seen = new Set<string>()
+    const merged: PolymarketTrade[] = []
+    for (const t of [...wsConverted, ...httpTrades]) {
+      if (!seen.has(t.transactionHash)) {
+        seen.add(t.transactionHash)
+        merged.push(t)
+      }
+    }
+    return merged.slice(0, 60)
+  }, [httpTrades, wsTrades, wsConnected])
 
   // ── Detect new trades for animation ──────────────────────
   useEffect(() => {

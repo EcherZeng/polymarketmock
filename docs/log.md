@@ -1,28 +1,28 @@
-INFO:     127.0.0.1:62545 - "GET /api/account HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60834 - "GET /api/btc/markets HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61326 - "GET /api/resolve/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61327 - "POST /api/watch/event/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61329 - "GET /api/event/status/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57830 - "GET /api/account HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62928 - "GET /api/event/status/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59062 - "GET /api/resolve/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59064 - "GET /api/event/status/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59070 - "POST /api/watch/event/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59072 - "GET /api/markets/1701571 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54731 - "GET /api/trades/live?market_id=0x04ffd4d19eaa489b6591729ca14e708ff57d2da4e6b4871b8b9b28ab0f4ceebc&limit=40&offset=0 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59068 - "GET /api/account HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59074 - "GET /api/midpoint?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50514 - "GET /api/orderbook?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51617 - "GET /api/midpoint?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52391 - "GET /api/event/status/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64402 - "GET /api/event/status/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52655 - "GET /api/trades/live?market_id=0x04ffd4d19eaa489b6591729ca14e708ff57d2da4e6b4871b8b9b28ab0f4ceebc&limit=40&offset=0 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51773 - "GET /api/midpoint?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49401 - "GET /api/orderbook?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60946 - "GET /api/event/status/btc-updown-15m-1774430100 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58756 - "GET /api/trades/live?market_id=0x04ffd4d19eaa489b6591729ca14e708ff57d2da4e6b4871b8b9b28ab0f4ceebc&limit=40&offset=0 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58758 - "GET /api/midpoint?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54172 - "GET /api/account HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51043 - "GET /api/orderbook?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58405 - "GET /api/midpoint?token_id=64339191421439489720827709066029904660574039438397504455567265185693317317772 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52291 - "GET /api/trades/live?market_id=0x04ffd4d19eaa489b6591729ca14e708ff57d2da4e6b4871b8b9b28ab0f4ceebc&limit=40&offset=0 HTTP/1.1" 200 OK
+2026-03-30 14:56:58 | INFO    | app.services.event_registry | Registry[15m]: expanded right +6 2026-03-30 14:57:24 | INFO    | app.services.auto_recorder | AutoRecorder 5m: recording btc-updown-5m-1774853700
+2026-03-30 14:57:24 | INFO    | app.services.auto_recorder | AutoRecorder 5m: watching 2 tokens for btc-updown-5m-1774853700
+2026-03-30 14:57:24 | INFO    | app.services.ws_manager | Connecting to Polymarket WS: wss://ws-subscriptions-clob.polymarket.com/ws/market
+2026-03-30 14:57:24 | INFO    | app.services.ws_manager | Recording session started: btc-updown-5m-1774853700
+2026-03-30 14:57:24 | INFO    | app.services.auto_recorder | AutoRecorder 5m: WS subscribed for btc-updown-5m-1774853700
+2026-03-30 14:57:25 | INFO    | app.services.ws_manager | Polymarket WS connected
+2026-03-30 14:57:25 | INFO    | app.services.ws_manager | WS subscribed to 2 assets
+INFO:     127.0.0.1:65212 - "WebSocket /ws/market" [accepted]
+2026-03-30 14:58:04 | INFO    | app.routers.ws | WS client 2539722968912 connected
+INFO:     connection open
+2026-03-30 14:58:05 | INFO    | app.routers.ws | WS client 2539722968912 subscribed to 2 assets
+2026-03-30 14:59:00 | INFO    | app.routers.ws | WS client 2539722968912 disconnected
+INFO:     connection closed
+2026-03-30 14:59:00 | INFO    | app.services.ws_manager | WS unsubscribed from 2 assets
+2026-03-30 14:59:10 | INFO    | app.services.ws_manager | WS upstream closed — no active subscribers
+2026-03-30 14:59:10 | INFO    | app.services.ws_manager | Recording session incomplete: btc-updown-5m-1774853700
+2026-03-30 14:59:11 | INFO    | app.services.ws_manager | WS upstream closed (no subscribers)
+2026-03-30 15:00:04 | INFO    | app.services.auto_recorder | AutoRecorder 5m: pre-subscribed 2 tokens for btc-updown-5m-1774854000
+2026-03-30 15:00:04 | INFO    | app.services.auto_recorder | AutoRecorder: unsubscribed 2 tokens
+2026-03-30 15:00:04 | INFO    | app.services.ws_manager | Connecting to Polymarket WS: wss://ws-subscriptions-clob.polymarket.com/ws/market
+2026-03-30 15:00:04 | INFO    | app.services.auto_recorder | AutoRecorder 5m: btc-updown-5m-1774853700 archived, moving to next
+2026-03-30 15:00:06 | INFO    | app.services.ws_manager | Polymarket WS connected
+2026-03-30 15:00:06 | INFO    | app.services.ws_manager | WS subscribed to 2 assets
+2026-03-30 15:00:06 | INFO    | app.services.auto_recorder | AutoRecorder 5m: recording btc-updown-5m-1774854000
+2026-03-30 15:00:06 | INFO    | app.services.auto_recorder | AutoRecorder 5m: watching 2 tokens for btc-updown-5m-1774854000
+2026-03-30 15:00:07 | INFO    | app.services.ws_manager | Recording session started: btc-updown-5m-1774854000
+2026-03-30 15:00:07 | INFO    | app.services.auto_recorder | AutoRecorder 5m: WS subscribed for btc-updown-5m-1774854000
+

@@ -2,11 +2,14 @@ import axios from "axios"
 import type {
   AccountOverview,
   ArchivedEvent,
+  AutoRecordConfig,
   EstimateRequest,
   EstimateResult,
   EventStatusResponse,
+  LogEntry,
   Market,
   MarketEvent,
+  MetricsSnapshot,
   NextEventResponse,
   Orderbook,
   OrderRequest,
@@ -224,12 +227,31 @@ export async function fetchArchive(slug: string): Promise<ArchivedEvent> {
   return data
 }
 
+export async function deleteArchive(slug: string): Promise<{ deleted: string }> {
+  const { data } = await api.delete(`/archives/${slug}`)
+  return data
+}
+
 // ── Watch / Recording ────────────────────────────────────────────────────────
 
 export async function watchEvent(
   slug: string,
-): Promise<{ watched_tokens: string[]; recording_started: boolean }> {
-  const { data } = await api.post(`/watch/event/${slug}`)
+  clientId?: string,
+): Promise<{ watched_tokens: string[]; recording_started: boolean; is_owner: boolean }> {
+  const { data } = await api.post(`/watch/event/${slug}`, null, {
+    params: clientId ? { client_id: clientId } : undefined,
+  })
+  return data
+}
+
+export async function recordingHeartbeat(
+  slug: string,
+  clientId: string,
+): Promise<{ is_owner: boolean }> {
+  const { data } = await api.post("/recording/heartbeat", {
+    slug,
+    client_id: clientId,
+  })
   return data
 }
 
@@ -280,5 +302,38 @@ export async function executeReplayTrade(
     side,
     amount,
   })
+  return data
+}
+
+// ── Auto-record ─────────────────────────────────────────────────────────────
+
+export async function fetchAutoRecordConfig(): Promise<AutoRecordConfig> {
+  const { data } = await api.get("/auto-record/config")
+  return data
+}
+
+export async function updateAutoRecordConfig(
+  durations: string[],
+): Promise<AutoRecordConfig> {
+  const { data } = await api.put("/auto-record/config", { durations })
+  return data
+}
+
+// ── Monitor (logs + metrics) ───────────────────────────────────────────────────────
+
+export async function fetchLogs(
+  limit = 200,
+  level?: string,
+  module?: string,
+): Promise<LogEntry[]> {
+  const params: Record<string, unknown> = { limit }
+  if (level) params.level = level
+  if (module) params.module = module
+  const { data } = await api.get("/logs", { params })
+  return data
+}
+
+export async function fetchMetrics(): Promise<MetricsSnapshot> {
+  const { data } = await api.get("/metrics")
   return data
 }

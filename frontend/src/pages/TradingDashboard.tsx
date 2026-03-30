@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Switch } from "@/components/ui/switch"
 import {
   Card,
   CardContent,
@@ -18,8 +19,8 @@ import PriceChart from "@/components/PriceChart"
 import TradingPanel from "@/components/TradingPanel"
 import PositionTable from "@/components/PositionTable"
 import TradeHistory from "@/components/TradeHistory"
-import { fetchMarket, searchEvents, resolveSlug, fetchBtcMarkets } from "@/api/client"
-import type { Market, MarketEvent } from "@/types"
+import { fetchMarket, searchEvents, resolveSlug, fetchBtcMarkets, fetchAutoRecordConfig, updateAutoRecordConfig } from "@/api/client"
+import type { Market, MarketEvent, AutoRecordConfig, AutoRecordState } from "@/types"
 
 /** Parse clobTokenIds — handles both array and legacy JSON-string format. */
 function parseTokenIds(raw: unknown): string[] {
@@ -191,7 +192,10 @@ export default function TradingDashboard() {
 
       {/* BTC Quick Access Panel */}
       {!activeMarketId && btcMarkets && (
-        <BtcMarketPanel btcMarkets={btcMarkets} onSelect={handleSelectEventMarket} onNavigate={(slug) => navigate(`/event/${slug}`)} />
+        <>
+          <AutoRecordPanel />
+          <BtcMarketPanel btcMarkets={btcMarkets} onSelect={handleSelectEventMarket} onNavigate={(slug) => navigate(`/event/${slug}`)} />
+        </>
       )}
 
       {activeMarketId && activeTokenId && (
@@ -199,8 +203,8 @@ export default function TradingDashboard() {
           {/* Left column — Market info + Orderbook + Price chart */}
           <div className="flex flex-col gap-4 lg:col-span-4">
             <MarketInfo marketId={activeMarketId} />
-            <OrderbookView tokenId={activeTokenId} />
-            <PriceChart tokenId={activeTokenId} />
+            <OrderbookView tokens={[activeTokenId]} outcomes={["Token"]} />
+            <PriceChart tokens={[activeTokenId]} outcomes={["Token"]} />
           </div>
 
           {/* Middle column — Trading panel */}
@@ -216,6 +220,112 @@ export default function TradingDashboard() {
         </div>
       )}
     </div>
+  )
+}
+
+// ── Auto-Record Control Panel ───────────────────────────────────────────────
+
+const DURATION_OPTIONS = [
+  { key: "5m", label: "5 分钟" },
+  { key: "15m", label: "15 分钟" },
+  { key: "30m", label: "30 分钟" },
+] as const
+
+const STATUS_LABEL: Record<string, { text: string; color: string }> = {
+  searching: { text: "搜索中…", color: "text-blue-500" },
+  waiting: { text: "等待开始", color: "text-blue-500" },
+  recording: { text: "录制中", color: "text-destructive" },
+  archiving: { text: "归档中", color: "text-amber-500" },
+  completed: { text: "已完成", color: "text-emerald-500" },
+}
+
+function formatRemaining(secs: number | null | undefined): string {
+  if (secs == null || secs <= 0) return ""
+  const m = Math.floor(secs / 60)
+  const s = Math.floor(secs % 60)
+  return `${m}:${String(s).padStart(2, "0")}`
+}
+
+function AutoRecordPanel() {
+  const queryClient = useQueryClient()
+
+  const { data: config } = useQuery<AutoRecordConfig>({
+    queryKey: ["autoRecordConfig"],
+    queryFn: fetchAutoRecordConfig,
+    refetchInterval: 5_000,
+  })
+
+  const mutation = useMutation({
+    mutationFn: (durations: string[]) => updateAutoRecordConfig(durations),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["autoRecordConfig"] }),
+  })
+
+  const activeDurations = new Set(config?.durations ?? [])
+
+  function handleToggle(dur: string, checked: boolean) {
+    const next = checked
+      ? [...activeDurations, dur]
+      : [...activeDurations].filter((d) => d !== dur)
+    mutation.mutate(next)
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base">自动循环录制</CardTitle>
+          {activeDurations.size > 0 && (
+            <Badge variant="destructive" className="animate-pulse gap-1">
+              <span className="inline-block size-2 rounded-full bg-white" />
+              {activeDurations.size} 个时长运行中
+            </Badge>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-col gap-3">
+          {DURATION_OPTIONS.map(({ key, label }) => {
+            const active = activeDurations.has(key)
+            const state = config?.states?.[key] as AutoRecordState | undefined
+            const sl = state ? STATUS_LABEL[state.status] : null
+
+            return (
+              <div
+                key={key}
+                className={`flex items-center justify-between rounded-md border px-3 py-2 ${
+                  active ? "border-destructive/30 bg-destructive/5" : ""
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <Switch
+                    checked={active}
+                    onCheckedChange={(v) => handleToggle(key, v)}
+                    disabled={mutation.isPending}
+                  />
+                  <span className="text-sm font-medium">{label}</span>
+                </div>
+                {active && state && (
+                  <div className="flex items-center gap-2 text-xs">
+                    {state.status === "recording" && (
+                      <span className="inline-block size-2 animate-pulse rounded-full bg-destructive" />
+                    )}
+                    {sl && <span className={sl.color}>{sl.text}</span>}
+                    {state.seconds_remaining != null && state.seconds_remaining > 0 && (
+                      <Badge variant="outline" className="tabular-nums text-xs">
+                        {formatRemaining(state.seconds_remaining)}
+                      </Badge>
+                    )}
+                    {state.slug && (
+                      <span className="max-w-40 truncate text-muted-foreground">{state.slug}</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 

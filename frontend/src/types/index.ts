@@ -201,6 +201,92 @@ export interface PolymarketTradesResponse {
   count: number
 }
 
+// ── WebSocket event types (Polymarket Market Channel) ───────────────────────
+
+export interface WsBookEvent {
+  event_type: "book"
+  asset_id: string
+  market: string
+  bids: PriceLevel[]
+  asks: PriceLevel[]
+  timestamp: string
+  hash: string
+}
+
+export interface WsPriceChangeItem {
+  asset_id: string
+  price: string
+  size: string
+  side: "BUY" | "SELL"
+  hash: string
+  best_bid?: string
+  best_ask?: string
+}
+
+export interface WsPriceChangeEvent {
+  event_type: "price_change"
+  market: string
+  price_changes: WsPriceChangeItem[]
+  timestamp: string
+}
+
+export interface WsLastTradeEvent {
+  event_type: "last_trade_price"
+  asset_id: string
+  market: string
+  price: string
+  size: string
+  side: "BUY" | "SELL"
+  timestamp: string
+  fee_rate_bps?: string
+  transaction_hash?: string
+}
+
+export interface WsBestBidAskEvent {
+  event_type: "best_bid_ask"
+  asset_id: string
+  market: string
+  best_bid: string
+  best_ask: string
+  spread: string
+  timestamp: string
+}
+
+export interface WsTickSizeChangeEvent {
+  event_type: "tick_size_change"
+  asset_id: string
+  market: string
+  old_tick_size: string
+  new_tick_size: string
+  timestamp: string
+}
+
+export interface WsMarketResolvedEvent {
+  event_type: "market_resolved"
+  id: string
+  market: string
+  assets_ids: string[]
+  winning_asset_id: string
+  winning_outcome: string
+  timestamp: string
+  tags?: string[]
+}
+
+export interface WsEventEndedEvent {
+  event_type: "event_ended"
+  reason: string
+  asset_ids: string[]
+}
+
+export type WsMarketEvent =
+  | WsBookEvent
+  | WsPriceChangeEvent
+  | WsLastTradeEvent
+  | WsBestBidAskEvent
+  | WsTickSizeChangeEvent
+  | WsMarketResolvedEvent
+  | WsEventEndedEvent
+
 // ── Event status ────────────────────────────────────────────────────────────
 
 export interface EventStatusResponse {
@@ -208,6 +294,8 @@ export interface EventStatusResponse {
   status: "upcoming" | "live" | "ended" | "settled" | "unknown"
   ended_at: string | null
   seconds_remaining: number | null
+  archive_ready?: boolean
+  recording_active?: boolean
 }
 
 export interface NextEventResponse {
@@ -224,14 +312,24 @@ export interface ArchivedEvent {
   market_id: string
   start_time: string
   end_time: string
+  data_start: string
+  data_end: string
   token_ids: string[]
+  outcomes?: string[]
   prices_count: number
   orderbooks_count: number
   trades_count: number
+  live_trades_count: number
   archived_at: string
 }
 
 // ── Replay ──────────────────────────────────────────────────────────────────
+
+export interface ReplayDataRange {
+  count: number
+  start: string
+  end: string
+}
 
 export interface ReplayTimeline {
   slug: string
@@ -240,6 +338,12 @@ export interface ReplayTimeline {
   total_snapshots: number
   total_trades: number
   price_range: { min: number; max: number }
+  data_summary?: {
+    prices: ReplayDataRange
+    orderbooks: ReplayDataRange
+    live_trades: ReplayDataRange
+  }
+  token_ids: string[]
   timestamps: string[]
 }
 
@@ -249,10 +353,10 @@ export interface ReplaySnapshotTrade {
   side: string
   price: number
   size: number
+  transaction_hash?: string
 }
 
-export interface ReplaySnapshot {
-  timestamp: string
+export interface ReplayTokenData {
   mid_price: number
   best_bid: number
   best_ask: number
@@ -261,6 +365,12 @@ export interface ReplaySnapshot {
   bid_sizes: string[]
   ask_prices: string[]
   ask_sizes: string[]
+}
+
+export interface ReplaySnapshot {
+  timestamp: string
+  token_ids: string[]
+  tokens: Record<string, ReplayTokenData>
   trades: ReplaySnapshotTrade[]
 }
 
@@ -282,4 +392,45 @@ export interface ReplayTradeResult {
   total_cost: number
   slippage_pct: number
   balance_after: number
+}
+
+// ── SSE stream snapshot event ───────────────────────────────────────────────
+
+export interface StreamSnapshotEvent {
+  index: number
+  timestamp: string
+  token_ids: string[]
+  tokens: Record<string, ReplayTokenData>
+  new_trades: ReplaySnapshotTrade[]
+  total_trades: number
+}
+
+// ── Auto-record ─────────────────────────────────────────────────────────────────
+
+export interface AutoRecordState {
+  slug: string | null
+  status: "searching" | "waiting" | "recording" | "archiving" | "completed"
+  started_at: string | null
+  seconds_remaining: number | null
+}
+
+export interface AutoRecordConfig {
+  durations: string[]
+  states: Record<string, AutoRecordState>
+}
+
+// ── Monitor (logs + metrics) ────────────────────────────────────────────────
+
+export interface LogEntry {
+  ts: string
+  level: "DEBUG" | "INFO" | "WARNING" | "ERROR" | "CRITICAL"
+  module: string
+  message: string
+}
+
+export interface MetricsSnapshot {
+  counters: Record<string, number>
+  gauges: Record<string, number>
+  uptime_seconds: number
+  log_buffer_size: number
 }

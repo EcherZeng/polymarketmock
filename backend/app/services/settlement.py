@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
 from app.storage import redis_store
+
+logger = logging.getLogger(__name__)
 
 
 async def settle_market(market_id: str, winning_outcome: str, token_map: dict[str, str]) -> dict:
@@ -18,6 +22,7 @@ async def settle_market(market_id: str, winning_outcome: str, token_map: dict[st
     """
     settled_positions: list[dict] = []
     total_payout = 0.0
+    logger.info("Settling market %s — winning: %s", market_id, winning_outcome)
 
     all_positions = await redis_store.get_all_positions()
 
@@ -58,6 +63,11 @@ async def settle_market(market_id: str, winning_outcome: str, token_map: dict[st
         })
 
         await redis_store.delete_position(token_id)
+
+    logger.info(
+        "Settlement complete: market=%s, positions=%d, payout=%.4f",
+        market_id, len(settled_positions), total_payout,
+    )
 
     return {
         "market_id": market_id,
