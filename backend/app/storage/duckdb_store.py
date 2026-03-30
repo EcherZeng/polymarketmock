@@ -561,30 +561,30 @@ def delete_live_data(market_id: str) -> list[str]:
     return removed
 
 
-def remove_session_log_entries(slug: str) -> int:
-    """Remove all entries for a given slug from sessions.jsonl. Returns count removed."""
+def soft_delete_session_log_entries(slug: str) -> int:
+    """Soft-delete: mark all entries for a slug as deleted in sessions.jsonl."""
     sessions_file = os.path.join(settings.data_dir, "sessions.jsonl")
     if not os.path.isfile(sessions_file):
         return 0
-    kept: list[str] = []
-    removed = 0
+    lines_out: list[str] = []
+    marked = 0
     with open(sessions_file, "r", encoding="utf-8") as f:
         for line in f:
-            line = line.strip()
-            if not line:
+            raw = line.strip()
+            if not raw:
                 continue
             try:
-                entry = json.loads(line)
-                if entry.get("slug") == slug:
-                    removed += 1
-                    continue
+                entry = json.loads(raw)
+                if entry.get("slug") == slug and not entry.get("deleted"):
+                    entry["deleted"] = True
+                    marked += 1
+                lines_out.append(json.dumps(entry, ensure_ascii=False))
             except (json.JSONDecodeError, TypeError):
-                pass
-            kept.append(line)
+                lines_out.append(raw)
     with open(sessions_file, "w", encoding="utf-8") as f:
-        for line in kept:
+        for line in lines_out:
             f.write(line + "\n")
-    return removed
+    return marked
 
 
 def _query_parquet_file(

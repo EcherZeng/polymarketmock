@@ -40,7 +40,7 @@ async def check_event_status(slug: str) -> dict:
             # Always add fresh archive_ready for ended events
             if result.get("status") == "ended":
                 existing = await redis_store.get_archive_meta(slug)
-                result["archive_ready"] = existing is not None
+                result["archive_ready"] = existing is not None and not existing.get("deleted")
             # Add live recording lock info (not cached — changes per-tab)
             owner = await redis_store.get_recording_lock_owner(slug)
             result["recording_active"] = owner is not None
@@ -48,7 +48,15 @@ async def check_event_status(slug: str) -> dict:
         except (json.JSONDecodeError, TypeError):
             pass
 
-    event = await resolve_event_slug(slug)
+    event = None
+    # Try EventRegistry first (in-memory, 0 ms)
+    try:
+        from app.services.event_registry import get_registry
+        event = get_registry().get_event(slug)
+    except (AssertionError, Exception):
+        pass
+    if not event:
+        event = await resolve_event_slug(slug)
     if not event:
         return {"slug": slug, "status": "unknown"}
 
@@ -64,7 +72,7 @@ async def check_event_status(slug: str) -> dict:
     # Include archive_ready flag for ended events
     if result.get("status") == "ended":
         existing = await redis_store.get_archive_meta(slug)
-        result["archive_ready"] = existing is not None
+        result["archive_ready"] = existing is not None and not existing.get("deleted")
 
     # Add live recording lock info
     owner = await redis_store.get_recording_lock_owner(slug)
@@ -76,7 +84,7 @@ async def check_event_status(slug: str) -> dict:
 async def _trigger_archive_if_needed(slug: str) -> None:
     """Immediately trigger archival for a just-ended event (skip 30s cycle wait)."""
     existing = await redis_store.get_archive_meta(slug)
-    if existing:
+    if existing and not existing.get("deleted"):
         return  # Already archived
 
     watched = await redis_store.get_watched_markets()
@@ -229,8 +237,18 @@ def _interval_from_prefix(prefix: str) -> int:
 
 async def _find_next_btc(prefix: str, curr_ts: int, interval: int) -> dict | None:
     """Search forward for the next live/upcoming event."""
+    # Try EventRegistry first
+    try:
+        from app.services.event_registry import get_registry
+        current_slug = f"{prefix}-{curr_ts}"
+        result = get_registry().get_next_event(current_slug)
+        if result:
+            return result
+    except (AssertionError, Exception):
+        pass
+
+    # Fallback: direct Gamma API queries
     now_ts = int(datetime.now(timezone.utc).timestamp())
-    # Align to interval boundary
     window_start = now_ts - (now_ts % interval)
 
     for offset in range(0, 6):
@@ -257,6 +275,16 @@ async def find_current_or_next_event(prefix: str, interval: int) -> dict | None:
     Unlike ``_find_next_btc`` this includes the slot aligned to *now*,
     so it can discover an event that is already in progress.
     """
+    # Try EventRegistry first (in-memory lookup)
+    try:
+        from app.services.event_registry import get_registry
+        result = get_registry().get_current_or_next(prefix, interval)
+        if result:
+            return result
+    except (AssertionError, Exception):
+        pass
+
+    # Fallback: direct Gamma API queries
     now_ts = int(datetime.now(timezone.utc).timestamp())
     window_start = now_ts - (now_ts % interval)
 
@@ -311,7 +339,7 @@ async def auto_archive_if_ended() -> None:
         # Event has ended — archive
         slug = market_info.get("slug", market_id)
         existing = await redis_store.get_archive_meta(slug)
-        if existing:
+        if existing and not existing.get("deleted"):
             continue  # Already archived
 
         logger.info("Archiving ended event: %s (token %s)", slug, token_id)
@@ -440,12 +468,12 @@ async def archive_event(slug: str, market_info: dict) -> dict:
 
 
 async def list_archived_events() -> list[dict]:
-    """List all archived event slugs with metadata."""
+    """List all archived event slugs with metadata (excluding soft-deleted)."""
     slugs = await redis_store.list_archive_slugs()
     result: list[dict] = []
     for slug in slugs:
         meta = await redis_store.get_archive_meta(slug)
-        if meta:
+        if meta and not meta.get("deleted"):
             meta = await _ensure_archive_meta_fields(slug, meta)
             result.append(meta)
     return result

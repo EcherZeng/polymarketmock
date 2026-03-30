@@ -293,62 +293,58 @@ async def list_archives():
 async def get_archive(slug: str):
     """获取归档场次详情。"""
     meta = await redis_store.get_archive_meta(slug)
-    if not meta:
+    if not meta or meta.get("deleted"):
         raise HTTPException(status_code=404, detail=f"Archive not found: {slug}")
     return meta
 
 
 @router.delete("/archives/{slug:path}")
 async def delete_archive(slug: str):
-    """删除归档场次及其所有关联数据 (Parquet + Redis + sessions.jsonl)。"""
+    """删除归档场次：硬删数据文件，软删索引元数据。"""
     from app.storage.duckdb_store import (
         delete_archive as delete_archive_files,
         delete_live_data,
-        remove_session_log_entries,
+        soft_delete_session_log_entries,
     )
 
     # 1. 获取元数据（删除前需要 market_id / token_ids）
     meta = await redis_store.get_archive_meta(slug)
-    market_id = meta.get("market_id", "") if meta else ""
-    token_ids: list[str] = meta.get("token_ids", []) if meta else []
+    if not meta:
+        raise HTTPException(status_code=404, detail=f"Archive not found: {slug}")
+    market_id = meta.get("market_id", "")
+    token_ids: list[str] = meta.get("token_ids", [])
 
-    # 2. 删除归档目录
+    # 2. 硬删归档 Parquet 目录
     delete_archive_files(slug)
 
-    # 3. 删除 Redis 归档元数据 + 录制会话
-    await redis_store.delete_archive_meta(slug)
-    await redis_store.delete_recording_session(slug)
-
-    # 4. 删除实时数据目录（仅当没有其他归档引用同一 market_id 时）
+    # 3. 硬删实时数据目录（仅当没有其他未删除归档引用同一 market_id 时）
     if market_id:
         other_slugs = await redis_store.list_archive_slugs()
         market_id_in_use = False
-        for other_slug in other_slugs:
-            other_meta = await redis_store.get_archive_meta(other_slug)
-            if other_meta and other_meta.get("market_id") == market_id:
+        for s in other_slugs:
+            if s == slug:
+                continue
+            m = await redis_store.get_archive_meta(s)
+            if m and not m.get("deleted") and m.get("market_id") == market_id:
                 market_id_in_use = True
                 break
         if not market_id_in_use:
             delete_live_data(market_id)
-            # 清理 market 级别 Redis 键
-            r = redis_store.get_redis()
-            await r.delete(f"live:trades:{market_id}")
-            await r.delete(f"live:seen:{market_id}")
 
-    # 5. 清理 token 级别 Redis 键
-    if token_ids:
-        r = redis_store.get_redis()
-        for tid in token_ids:
-            await r.delete(f"realtime:trades:{tid}")
-            await r.delete(f"token:market:{tid}")
-            await r.delete(f"prev:book:{tid}")
-
-    # 6. 清理 event status 缓存
+    # 4. 硬删交易类 Redis 键（这些是重量的临时数据，不是索引）
     r = redis_store.get_redis()
-    await r.delete(f"event:status:{slug}")
+    if market_id:
+        await r.delete(f"live:trades:{market_id}")
+        await r.delete(f"live:seen:{market_id}")
+    for tid in token_ids:
+        await r.delete(f"realtime:trades:{tid}")
+        await r.delete(f"prev:book:{tid}")
 
-    # 7. 从 sessions.jsonl 中移除该场次记录
-    remove_session_log_entries(slug)
+    # 5. 软删 Redis archive 元数据（保留 key，标记 deleted=true）
+    await redis_store.soft_delete_archive_meta(slug)
+
+    # 6. 软删 sessions.jsonl 中对应条目
+    soft_delete_session_log_entries(slug)
 
     return {"deleted": slug}
 

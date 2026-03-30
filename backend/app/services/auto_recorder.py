@@ -317,7 +317,7 @@ class AutoRecorder:
             if self._stop_event.is_set():
                 return
             meta = await redis_store.get_archive_meta(slug)
-            if meta is not None:
+            if meta is not None and not meta.get("deleted"):
                 return
             await self._interruptible_sleep(5)
         logger.warning("AutoRecorder %s: archive timeout for %s", duration, slug)

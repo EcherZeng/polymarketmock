@@ -299,33 +299,68 @@ async def search_events(
 
 
 async def resolve_event_slug(slug: str) -> dict | None:
-    """Resolve a Polymarket event slug to its event data."""
+    """Resolve a Polymarket event slug to its event data.
+
+    Lookup chain: EventRegistry (memory) → Redis slug cache → Gamma API.
+    """
+    # 1. EventRegistry (memory, 0 ms)
+    try:
+        from app.services.event_registry import get_registry
+        reg_event = get_registry().get_event(slug)
+        if reg_event:
+            return reg_event
+    except (AssertionError, Exception):
+        pass  # Registry not started yet (e.g. during startup)
+
+    # 2. Redis slug cache (short TTL)
+    cache_key = f"resolve:slug:{slug}"
+    cached = await cache_get(cache_key)
+    if cached:
+        return json.loads(cached)
+
+    # 3. Gamma API fallback
     url = f"{settings.gamma_api_url}/events"
     resp = await _get_client().get(url, params={"limit": 1, "slug": slug})
     resp.raise_for_status()
     data = resp.json()
-    return _normalize_event(data[0]) if data else None
+    if not data:
+        return None
+    event = _normalize_event(data[0])
+    await cache_set(cache_key, json.dumps(event), 30)
+    metrics.inc("proxy.api_calls")
+    return event
 
 
 async def discover_btc_markets() -> dict[str, list[dict]]:
     """Discover BTC up/down markets around the current time, grouped by duration.
 
-    Computes slug timestamps to query Gamma API precisely, avoiding the problem
-    of current events being buried in large generic queries.  Uses cache (20s TTL)
-    to stay well under the 10 req/s rate limit.
+    Delegates to EventRegistry when available (in-memory, 0 ms).
+    Falls back to the legacy Gamma-per-slug approach during startup
+    or if the registry is not yet initialised.
     """
+    # Fast path: EventRegistry
+    try:
+        from app.services.event_registry import get_registry
+        return get_registry().get_all_windows()
+    except (AssertionError, Exception):
+        pass  # Registry not started yet
+
+    # Fallback: legacy Gamma API per-slug queries (only during cold start)
+    return await _discover_btc_markets_legacy()
+
+
+async def _discover_btc_markets_legacy() -> dict[str, list[dict]]:
+    """Legacy discovery — kept as fallback when registry is unavailable."""
     cache_key = "btc:discovery"
     cached = await cache_get(cache_key)
     if cached:
         return json.loads(cached)
 
     now_ts = int(datetime.now(timezone.utc).timestamp())
-
-    # Duration configs: (slug_prefix, interval_seconds, slots_before, slots_after)
     durations = [
-        ("btc-updown-5m", 300, 4, 6),     # 4 past + 6 upcoming = 10
-        ("btc-updown-15m", 900, 2, 4),     # 2 past + 4 upcoming = 6
-        ("btc-updown-30m", 1800, 1, 3),    # 1 past + 3 upcoming = 4
+        ("btc-updown-5m", 300, 4, 6),
+        ("btc-updown-15m", 900, 2, 4),
+        ("btc-updown-30m", 1800, 1, 3),
     ]
 
     groups: dict[str, list[dict]] = {}
@@ -346,7 +381,6 @@ async def discover_btc_markets() -> dict[str, list[dict]]:
             if not data:
                 continue
             e = _normalize_event(data[0])
-            # Compute real-time status from eventStartTime + endDate
             end_str = e.get("endDate", "")
             m0 = e["markets"][0] if e.get("markets") else {}
             start_str = m0.get("eventStartTime", e.get("startDate", ""))

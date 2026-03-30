@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 import redis.asyncio as aioredis
@@ -362,6 +363,18 @@ async def delete_archive_meta(slug: str) -> bool:
     return bool(await get_redis().delete(f"{ARCHIVE_PREFIX}{slug}"))
 
 
+async def soft_delete_archive_meta(slug: str) -> bool:
+    """Soft-delete: set deleted flag on archive meta. Returns True if key existed."""
+    val = await get_redis().get(f"{ARCHIVE_PREFIX}{slug}")
+    if not val:
+        return False
+    meta = json.loads(val)
+    meta["deleted"] = True
+    meta["deleted_at"] = datetime.now(timezone.utc).isoformat()
+    await get_redis().set(f"{ARCHIVE_PREFIX}{slug}", json.dumps(meta))
+    return True
+
+
 # ── Recording sessions (WS data completeness tracking) ──────────────────────
 
 RECORDING_SESSION_PREFIX = "recording:session:"
@@ -480,3 +493,40 @@ async def set_auto_record_state(duration: str, state_json: str) -> None:
 
 async def delete_auto_record_state(duration: str) -> None:
     await get_redis().delete(f"{AUTO_RECORD_STATE_PREFIX}{duration}")
+
+
+# ── Event Registry ───────────────────────────────────────────────────────────
+
+REGISTRY_EVENT_PREFIX = "registry:event:"
+REGISTRY_WINDOW_PREFIX = "registry:window:"
+
+
+async def registry_get_event(slug: str) -> dict | None:
+    """Read a cached event from the registry."""
+    val = await get_redis().get(f"{REGISTRY_EVENT_PREFIX}{slug}")
+    return json.loads(val) if val else None
+
+
+async def registry_set_event(slug: str, event_json: str, ttl: int = 0) -> None:
+    """Write event JSON to registry. ttl=0 means no expiry (ended events)."""
+    key = f"{REGISTRY_EVENT_PREFIX}{slug}"
+    if ttl > 0:
+        await get_redis().set(key, event_json, ex=ttl)
+    else:
+        await get_redis().set(key, event_json)
+
+
+async def registry_get_window(duration: str) -> list[str]:
+    """Return ordered list of slugs for a duration window."""
+    val = await get_redis().get(f"{REGISTRY_WINDOW_PREFIX}{duration}")
+    if not val:
+        return []
+    try:
+        return json.loads(val)
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+async def registry_set_window(duration: str, slugs: list[str]) -> None:
+    """Persist the ordered slug list for a duration window."""
+    await get_redis().set(f"{REGISTRY_WINDOW_PREFIX}{duration}", json.dumps(slugs))

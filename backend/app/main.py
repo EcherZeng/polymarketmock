@@ -10,6 +10,7 @@ from app.config import settings
 from app.routers import account, backtest, markets, trading, ws
 from app.routers import monitor as monitor_router
 from app.services.auto_recorder import start_auto_recorder, stop_auto_recorder
+from app.services.event_registry import start_event_registry, stop_event_registry
 from app.services.log_buffer import get_log_handler
 from app.services.ws_manager import start_ws_manager, stop_ws_manager
 from app.storage.data_collector import start_collector, stop_collector
@@ -59,6 +60,9 @@ async def lifespan(app: FastAPI):
     logger.info("Parquet buffer initialised")
     await init_redis()
     logger.info("Redis connected")
+    registry = await start_event_registry()
+    logger.info("Event registry started — %d events loaded",
+                sum(len(d) for d in registry._windows.values()))
     ws_mgr = await start_ws_manager()
     logger.info("WebSocket manager started")
     collector_task = await start_collector()
@@ -74,6 +78,8 @@ async def lifespan(app: FastAPI):
     logger.info("Data collector stopped")
     await stop_ws_manager()
     logger.info("WebSocket manager stopped")
+    await stop_event_registry()
+    logger.info("Event registry stopped")
     shutdown_parquet_buffer()
     logger.info("Parquet buffer flushed & closed")
     await close_redis()
