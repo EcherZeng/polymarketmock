@@ -300,38 +300,20 @@ async def get_archive(slug: str):
 
 @router.delete("/archives/{slug:path}")
 async def delete_archive(slug: str):
-    """删除归档场次：硬删数据文件，软删索引元数据。"""
-    from app.storage.duckdb_store import (
-        delete_archive as delete_archive_files,
-        delete_live_data,
-        soft_delete_session_log_entries,
-    )
+    """删除归档场次：硬删数据目录，软删索引元数据。"""
+    from app.storage.duckdb_store import delete_session
 
-    # 1. 获取元数据（删除前需要 market_id / token_ids）
+    # 1. 获取元数据（删除前需要 market_id / token_ids 来清理 Redis）
     meta = await redis_store.get_archive_meta(slug)
     if not meta:
         raise HTTPException(status_code=404, detail=f"Archive not found: {slug}")
     market_id = meta.get("market_id", "")
     token_ids: list[str] = meta.get("token_ids", [])
 
-    # 2. 硬删归档 Parquet 目录
-    delete_archive_files(slug)
+    # 2. 硬删整个 session 目录（live + archive + meta.json）
+    delete_session(slug)
 
-    # 3. 硬删实时数据目录（仅当没有其他未删除归档引用同一 market_id 时）
-    if market_id:
-        other_slugs = await redis_store.list_archive_slugs()
-        market_id_in_use = False
-        for s in other_slugs:
-            if s == slug:
-                continue
-            m = await redis_store.get_archive_meta(s)
-            if m and not m.get("deleted") and m.get("market_id") == market_id:
-                market_id_in_use = True
-                break
-        if not market_id_in_use:
-            delete_live_data(market_id)
-
-    # 4. 硬删交易类 Redis 键（这些是重量的临时数据，不是索引）
+    # 3. 硬删交易类 Redis 键
     r = redis_store.get_redis()
     if market_id:
         await r.delete(f"live:trades:{market_id}")
@@ -340,11 +322,8 @@ async def delete_archive(slug: str):
         await r.delete(f"realtime:trades:{tid}")
         await r.delete(f"prev:book:{tid}")
 
-    # 5. 软删 Redis archive 元数据（保留 key，标记 deleted=true）
+    # 4. 软删 Redis archive 元数据（保留 key，标记 deleted=true）
     await redis_store.soft_delete_archive_meta(slug)
-
-    # 6. 软删 sessions.jsonl 中对应条目
-    soft_delete_session_log_entries(slug)
 
     return {"deleted": slug}
 

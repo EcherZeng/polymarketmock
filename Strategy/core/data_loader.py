@@ -52,7 +52,7 @@ def _decode_rows(rows: list[dict], has_side: bool = False) -> list[dict]:
 
 def load_archive(data_dir: Path, slug: str) -> ArchiveData:
     """Load all Parquet files for one archived event."""
-    base = data_dir / "archives" / slug
+    base = data_dir / "sessions" / slug / "archive"
     if not base.exists():
         logger.warning("Archive not found: %s", base)
         return ArchiveData()

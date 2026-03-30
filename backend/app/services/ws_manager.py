@@ -5,7 +5,7 @@ Upstream WS connection is established when either a frontend client subscribes
 or auto_recorder starts headless recording via ``start_recording()``.  When all
 subscriptions are removed the upstream connection is gracefully closed.
 
-Recording sessions are tracked in ``backend/data/sessions.jsonl`` so that
+Recording sessions are tracked per-slug in ``backend/data/sessions/{slug}/meta.json`` so that
 downstream consumers can distinguish complete vs. incomplete data."""
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from app.storage.duckdb_store import (
     write_ob_delta,
     write_orderbook_snapshot,
     write_price_snapshot,
+    write_session_meta,
 )
 
 logger = logging.getLogger(__name__)
@@ -88,7 +89,6 @@ class PolymarketWSManager:
 
         # Recording sessions: slug → session dict
         self._sessions: dict[str, dict] = {}
-        self._sessions_file = os.path.join(settings.data_dir, "sessions.jsonl")
 
     # ── Lifecycle ─────────────────────────────────────────────
 
@@ -360,19 +360,20 @@ class PolymarketWSManager:
         last = self._last_ob_write.get(asset_id, 0)
         if now - last >= settings.collector_orderbook_interval:
             self._last_ob_write[asset_id] = now
-            market_id = await self._resolve_market_id(asset_id)
-            try:
-                write_orderbook_snapshot(
-                    market_id=market_id,
-                    token_id=asset_id,
-                    bid_prices=[float(b["price"]) for b in bids],
-                    bid_sizes=[float(b["size"]) for b in bids],
-                    ask_prices=[float(a["price"]) for a in asks],
-                    ask_sizes=[float(a["size"]) for a in asks],
-                    timestamp=ts_iso,
-                )
-            except Exception as e:
-                logger.warning("WS book parquet write failed: %s", e)
+            slug = await self._resolve_slug(asset_id)
+            if slug:
+                try:
+                    write_orderbook_snapshot(
+                        slug=slug,
+                        token_id=asset_id,
+                        bid_prices=[float(b["price"]) for b in bids],
+                        bid_sizes=[float(b["size"]) for b in bids],
+                        ask_prices=[float(a["price"]) for a in asks],
+                        ask_sizes=[float(a["size"]) for a in asks],
+                        timestamp=ts_iso,
+                    )
+                except Exception as e:
+                    logger.warning("WS book parquet write failed: %s", e)
 
     async def _handle_price_change(self, data: dict) -> None:
         """Incremental orderbook update — update Redis cache with new levels
@@ -388,18 +389,19 @@ class PolymarketWSManager:
             size = pc.get("size", "0")
 
             # Persist delta to Parquet (no throttling — every event)
-            market_id = await self._resolve_market_id(asset_id)
-            try:
-                write_ob_delta(
-                    market_id=market_id,
-                    token_id=asset_id,
-                    side=side,
-                    price=float(price),
-                    size=float(size),
-                    timestamp=ts_iso,
-                )
-            except Exception as e:
-                logger.warning("WS ob_delta parquet write failed: %s", e)
+            slug = await self._resolve_slug(asset_id)
+            if slug:
+                try:
+                    write_ob_delta(
+                        slug=slug,
+                        token_id=asset_id,
+                        side=side,
+                        price=float(price),
+                        size=float(size),
+                        timestamp=ts_iso,
+                    )
+                except Exception as e:
+                    logger.warning("WS ob_delta parquet write failed: %s", e)
 
             # Read current cached book, apply delta
             cached = await redis_store.cache_get(f"clob:book:{asset_id}")
@@ -460,19 +462,20 @@ class PolymarketWSManager:
             logger.warning("WS trade redis write failed: %s", e)
 
         # Persist to Parquet
-        market_id = await self._resolve_market_id(asset_id)
-        try:
-            write_live_trade(
-                market_id=market_id,
-                token_id=asset_id,
-                side=data.get("side", ""),
-                price=float(data.get("price", "0")),
-                size=float(data.get("size", "0")),
-                transaction_hash=data.get("transaction_hash", ""),
-                timestamp=trade["timestamp"],
-            )
-        except Exception as e:
-            logger.warning("WS trade parquet write failed: %s", e)
+        slug = await self._resolve_slug(asset_id)
+        if slug:
+            try:
+                write_live_trade(
+                    slug=slug,
+                    token_id=asset_id,
+                    side=data.get("side", ""),
+                    price=float(data.get("price", "0")),
+                    size=float(data.get("size", "0")),
+                    transaction_hash=data.get("transaction_hash", ""),
+                    timestamp=trade["timestamp"],
+                )
+            except Exception as e:
+                logger.warning("WS trade parquet write failed: %s", e)
 
     async def _handle_best_bid_ask(self, data: dict) -> None:
         """Best bid/ask event — update Redis midpoint cache."""
@@ -491,20 +494,21 @@ class PolymarketWSManager:
         last = self._last_price_write.get(asset_id, 0)
         if now - last >= settings.collector_price_interval:
             self._last_price_write[asset_id] = now
-            market_id = await self._resolve_market_id(asset_id)
+            slug = await self._resolve_slug(asset_id)
             spread = float(data.get("spread", "0"))
-            try:
-                write_price_snapshot(
-                    market_id=market_id,
-                    token_id=asset_id,
-                    mid_price=mid,
-                    best_bid=best_bid,
-                    best_ask=best_ask,
-                    spread=spread,
-                    timestamp=ts_iso,
-                )
-            except Exception as e:
-                logger.warning("WS BBA parquet write failed: %s", e)
+            if slug:
+                try:
+                    write_price_snapshot(
+                        slug=slug,
+                        token_id=asset_id,
+                        mid_price=mid,
+                        best_bid=best_bid,
+                        best_ask=best_ask,
+                        spread=spread,
+                        timestamp=ts_iso,
+                    )
+                except Exception as e:
+                    logger.warning("WS BBA parquet write failed: %s", e)
 
     async def _handle_tick_size_change(self, data: dict) -> None:
         """Tick size change — broadcast only (no persistent storage needed)."""
@@ -707,7 +711,7 @@ class PolymarketWSManager:
             }
             self._sessions[slug] = session
             await redis_store.set_recording_session(slug, json.dumps(session))
-            self._append_session_log(session)
+            self._write_session_meta(session)
             logger.info("Recording session started: %s", slug)
 
     async def stop_recording(self, asset_ids: list[str]) -> None:
@@ -732,7 +736,7 @@ class PolymarketWSManager:
             session["status"] = "incomplete"
             session["end_time"] = datetime.now(timezone.utc).isoformat()
             await redis_store.set_recording_session(slug, json.dumps(session))
-            self._append_session_log(session)
+            self._write_session_meta(session)
             del self._sessions[slug]
             logger.info("Recording session incomplete: %s", slug)
 
@@ -755,17 +759,18 @@ class PolymarketWSManager:
         if data_counts:
             session["data_counts"] = data_counts
         await redis_store.set_recording_session(slug, json.dumps(session))
-        self._append_session_log(session)
+        self._write_session_meta(session)
         logger.info("Recording session complete: %s", slug)
 
-    def _append_session_log(self, session: dict) -> None:
-        """Append a session record to the sessions.jsonl index file."""
+    def _write_session_meta(self, session: dict) -> None:
+        """Write session metadata to sessions/{slug}/meta.json (overwrites)."""
+        slug = session.get("slug", "")
+        if not slug:
+            return
         try:
-            os.makedirs(os.path.dirname(self._sessions_file), exist_ok=True)
-            with open(self._sessions_file, "a", encoding="utf-8") as f:
-                f.write(json.dumps(session, ensure_ascii=False) + "\n")
+            write_session_meta(slug, session)
         except Exception as e:
-            logger.warning("Failed to write session log: %s", e)
+            logger.warning("Failed to write session meta for %s: %s", slug, e)
 
     # ── Helpers ───────────────────────────────────────────────
 

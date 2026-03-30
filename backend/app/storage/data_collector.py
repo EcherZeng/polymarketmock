@@ -27,6 +27,14 @@ logger = logging.getLogger(__name__)
 _prev_books: dict[str, dict] = {}
 
 
+async def _resolve_slug(token_id: str) -> str | None:
+    """Get slug for a token_id from token:market_info."""
+    info = await redis_store.get_token_market_info(token_id)
+    if info:
+        return info.get("slug")
+    return None
+
+
 def _ws_connected() -> bool:
     """Check if the WS manager is connected (non-import-time safe)."""
     try:
@@ -43,6 +51,9 @@ async def _collect_and_detect(token_id: str, market_id: str) -> None:
     except Exception as e:
         logger.warning("Failed to fetch orderbook for %s: %s", token_id, e)
         return
+
+    # Resolve slug for Parquet storage
+    slug = await _resolve_slug(token_id)
 
     # Detect trades from diff
     prev = _prev_books.get(token_id)
@@ -61,12 +72,15 @@ async def _collect_and_detect(token_id: str, market_id: str) -> None:
 
     _prev_books[token_id] = book
 
+    if not slug:
+        return
+
     # Write orderbook snapshot to Parquet
     bids = book.get("bids", [])
     asks = book.get("asks", [])
     try:
         write_orderbook_snapshot(
-            market_id=market_id or token_id,
+            slug=slug,
             token_id=token_id,
             bid_prices=[float(b["price"]) for b in bids],
             bid_sizes=[float(b["size"]) for b in bids],
@@ -83,7 +97,7 @@ async def _collect_and_detect(token_id: str, market_id: str) -> None:
         mid_price = (best_bid + best_ask) / 2 if (best_bid and best_ask) else best_bid or best_ask
         spread = best_ask - best_bid if (best_bid and best_ask) else 0
         write_price_snapshot(
-            market_id=market_id or token_id,
+            slug=slug,
             token_id=token_id,
             mid_price=mid_price,
             best_bid=best_bid,
@@ -103,6 +117,9 @@ async def _collect_orderbooks() -> None:
 async def _collect_prices() -> None:
     watched = await redis_store.get_watched_markets()
     for token_id, market_id in watched.items():
+        slug = await _resolve_slug(token_id)
+        if not slug:
+            continue
         try:
             book = await get_orderbook_raw(token_id)
             mid = await get_midpoint(token_id)
@@ -113,7 +130,7 @@ async def _collect_prices() -> None:
             spread = best_ask - best_bid
 
             write_price_snapshot(
-                market_id=market_id or token_id,
+                slug=slug,
                 token_id=token_id,
                 mid_price=mid,
                 best_bid=best_bid,
@@ -138,12 +155,21 @@ async def _collect_live_trades() -> None:
         return
 
     # Group by market_id to avoid duplicate API calls
+    # Also build market_id → slug mapping
     market_ids: dict[str, str] = {}  # market_id -> any token_id
+    market_slug: dict[str, str] = {}  # market_id -> slug
     for token_id, market_id in watched.items():
         if market_id and market_id not in market_ids:
             market_ids[market_id] = token_id
+            slug = await _resolve_slug(token_id)
+            if slug:
+                market_slug[market_id] = slug
 
     for market_id, _ in market_ids.items():
+        slug = market_slug.get(market_id)
+        if not slug:
+            continue
+
         try:
             trades = await get_data_trades(market_id=market_id, limit=30)
         except Exception as e:
@@ -176,7 +202,7 @@ async def _collect_live_trades() -> None:
                 from datetime import datetime, timezone
                 ts_iso = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if ts else None
                 write_live_trade(
-                    market_id=market_id,
+                    slug=slug,
                     token_id=t.get("asset", ""),
                     side=t.get("side", ""),
                     price=float(t.get("price", 0)),

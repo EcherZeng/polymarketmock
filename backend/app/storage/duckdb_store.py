@@ -140,17 +140,17 @@ class ParquetBuffer:
         self.flush_threshold = flush_threshold
         self._chunk_seq: int = 0
 
-    def _key(self, data_type: str, market_id: str) -> str:
-        return f"{data_type}/{market_id}"
+    def _key(self, data_type: str, slug: str) -> str:
+        return f"{data_type}/{slug}"
 
-    def append(self, data_type: str, market_id: str, row: dict) -> None:
-        key = self._key(data_type, market_id)
+    def append(self, data_type: str, slug: str, row: dict) -> None:
+        key = self._key(data_type, slug)
         with self._lock:
             self._buffers.setdefault(key, []).append(row)
-        self.maybe_flush(data_type, market_id)
+        self.maybe_flush(data_type, slug)
 
-    def maybe_flush(self, data_type: str, market_id: str) -> None:
-        key = self._key(data_type, market_id)
+    def maybe_flush(self, data_type: str, slug: str) -> None:
+        key = self._key(data_type, slug)
         with self._lock:
             rows = self._buffers.get(key)
             if not rows:
@@ -163,7 +163,7 @@ class ParquetBuffer:
             to_write = list(rows)
             self._last_flush[key] = now
         # Write OUTSIDE lock; only clear buffer after success
-        if self._write(data_type, market_id, to_write):
+        if self._write(data_type, slug, to_write):
             with self._lock:
                 buf = self._buffers.get(key)
                 if buf is not None:
@@ -181,7 +181,7 @@ class ParquetBuffer:
                         if buf is not None:
                             del buf[:len(rows)]
 
-    def _write(self, data_type: str, market_id: str, rows: list[dict]) -> bool:
+    def _write(self, data_type: str, slug: str, rows: list[dict]) -> bool:
         """Write rows as a new chunk file. Returns True on success."""
         if not rows:
             return True
@@ -195,7 +195,7 @@ class ParquetBuffer:
             date_str = ts.strftime("%Y-%m-%d") if isinstance(ts, datetime) else datetime.now(timezone.utc).strftime("%Y-%m-%d")
             by_date.setdefault(date_str, []).append(r)
 
-        dir_path = os.path.join(settings.data_dir, data_type, market_id)
+        dir_path = os.path.join(settings.data_dir, "sessions", slug, "live", data_type)
         _ensure_dir(dir_path)
 
         all_ok = True
@@ -211,7 +211,7 @@ class ParquetBuffer:
                 table = pa.table(columns, schema=schema)
                 pq.write_table(table, file_path, compression="zstd")
             except Exception as e:
-                logger.warning("Parquet chunk write failed %s/%s/%s: %s", data_type, market_id, chunk_name, e)
+                logger.warning("Parquet chunk write failed %s/%s/%s: %s", data_type, slug, chunk_name, e)
                 all_ok = False
         return all_ok
 
@@ -255,7 +255,7 @@ def _parse_ts(timestamp: str | None) -> datetime:
 
 
 def write_price_snapshot(
-    market_id: str,
+    slug: str,
     token_id: str,
     mid_price: float,
     best_bid: float,
@@ -263,7 +263,7 @@ def write_price_snapshot(
     spread: float,
     timestamp: str | None = None,
 ) -> None:
-    get_buffer().append("prices", market_id, {
+    get_buffer().append("prices", slug, {
         "timestamp": _parse_ts(timestamp),
         "token_id": encode_token(token_id),
         "mid_price": mid_price,
@@ -274,7 +274,7 @@ def write_price_snapshot(
 
 
 def write_orderbook_snapshot(
-    market_id: str,
+    slug: str,
     token_id: str,
     bid_prices: list[float],
     bid_sizes: list[float],
@@ -282,7 +282,7 @@ def write_orderbook_snapshot(
     ask_sizes: list[float],
     timestamp: str | None = None,
 ) -> None:
-    get_buffer().append("orderbooks", market_id, {
+    get_buffer().append("orderbooks", slug, {
         "timestamp": _parse_ts(timestamp),
         "token_id": encode_token(token_id),
         "bid_prices": [float(p) for p in bid_prices],
@@ -293,7 +293,7 @@ def write_orderbook_snapshot(
 
 
 def write_live_trade(
-    market_id: str,
+    slug: str,
     token_id: str,
     side: str,
     price: float,
@@ -301,7 +301,7 @@ def write_live_trade(
     transaction_hash: str = "",
     timestamp: str | None = None,
 ) -> None:
-    get_buffer().append("live_trades", market_id, {
+    get_buffer().append("live_trades", slug, {
         "timestamp": _parse_ts(timestamp),
         "transaction_hash": transaction_hash,
         "token_id": encode_token(token_id),
@@ -312,14 +312,14 @@ def write_live_trade(
 
 
 def write_ob_delta(
-    market_id: str,
+    slug: str,
     token_id: str,
     side: str,
     price: float,
     size: float,
     timestamp: str | None = None,
 ) -> None:
-    get_buffer().append("ob_deltas", market_id, {
+    get_buffer().append("ob_deltas", slug, {
         "timestamp": _parse_ts(timestamp),
         "token_id": encode_token(token_id),
         "side": _encode_side(side),
@@ -363,80 +363,69 @@ def _post_process_rows(rows: list[dict], has_side: bool = False) -> list[dict]:
     return rows
 
 
-def query_prices(
-    market_id: str,
+def _query_live_dir(
+    slug: str,
+    data_type: str,
     start_time: str | None = None,
     end_time: str | None = None,
+    has_side: bool = False,
 ) -> list[dict]:
-    dir_path = os.path.join(settings.data_dir, "prices", market_id)
+    """Query live chunk files under sessions/{slug}/live/{data_type}/."""
+    dir_path = os.path.join(settings.data_dir, "sessions", slug, "live", data_type)
     if not os.path.isdir(dir_path):
         return []
     glob = os.path.join(dir_path, "*.parquet").replace("\\", "/")
     sql = f"SELECT * FROM read_parquet('{glob}')" + _build_time_filter(start_time, end_time) + " ORDER BY timestamp"
     con = duckdb.connect()
     try:
-        return _post_process_rows(con.execute(sql).fetchdf().to_dict(orient="records"))
+        return _post_process_rows(con.execute(sql).fetchdf().to_dict(orient="records"), has_side=has_side)
     except Exception:
         return []
     finally:
         con.close()
+
+
+def query_prices(
+    slug: str,
+    start_time: str | None = None,
+    end_time: str | None = None,
+) -> list[dict]:
+    return _query_live_dir(slug, "prices", start_time, end_time)
 
 
 def query_orderbooks(
-    market_id: str,
+    slug: str,
     start_time: str | None = None,
     end_time: str | None = None,
 ) -> list[dict]:
-    dir_path = os.path.join(settings.data_dir, "orderbooks", market_id)
-    if not os.path.isdir(dir_path):
-        return []
-    glob = os.path.join(dir_path, "*.parquet").replace("\\", "/")
-    sql = f"SELECT * FROM read_parquet('{glob}')" + _build_time_filter(start_time, end_time) + " ORDER BY timestamp"
-    con = duckdb.connect()
-    try:
-        return _post_process_rows(con.execute(sql).fetchdf().to_dict(orient="records"))
-    except Exception:
-        return []
-    finally:
-        con.close()
+    return _query_live_dir(slug, "orderbooks", start_time, end_time)
 
 
 def query_live_trades(
-    market_id: str,
+    slug: str,
     start_time: str | None = None,
     end_time: str | None = None,
 ) -> list[dict]:
-    dir_path = os.path.join(settings.data_dir, "live_trades", market_id)
-    if not os.path.isdir(dir_path):
-        return []
-    glob = os.path.join(dir_path, "*.parquet").replace("\\", "/")
-    sql = f"SELECT * FROM read_parquet('{glob}')" + _build_time_filter(start_time, end_time) + " ORDER BY timestamp"
-    con = duckdb.connect()
-    try:
-        return _post_process_rows(con.execute(sql).fetchdf().to_dict(orient="records"), has_side=True)
-    except Exception:
-        return []
-    finally:
-        con.close()
+    return _query_live_dir(slug, "live_trades", start_time, end_time, has_side=True)
 
 
 def list_available_markets() -> list[dict]:
-    """List market IDs that have price data available."""
-    prices_dir = os.path.join(settings.data_dir, "prices")
-    if not os.path.isdir(prices_dir):
+    """List slugs that have live price data available."""
+    sessions_dir = os.path.join(settings.data_dir, "sessions")
+    if not os.path.isdir(sessions_dir):
         return []
 
     markets: list[dict] = []
-    for market_id in os.listdir(prices_dir):
-        market_path = os.path.join(prices_dir, market_id)
-        if not os.path.isdir(market_path):
+    for slug in os.listdir(sessions_dir):
+        prices_path = os.path.join(sessions_dir, slug, "live", "prices")
+        if not os.path.isdir(prices_path):
             continue
-        files = sorted(Path(market_path).glob("*.parquet"))
+        files = sorted(Path(prices_path).glob("*.parquet"))
         if not files:
             continue
         con = duckdb.connect()
         try:
-            glob = os.path.join(market_path, "*.parquet").replace("\\", "/")
+            glob = os.path.join(prices_path, "*.parquet").replace("\\", "/")
             row = con.execute(
                 f"SELECT MIN(timestamp) as earliest, MAX(timestamp) as latest, COUNT(*) as cnt "
                 f"FROM read_parquet('{glob}')"
@@ -447,7 +436,7 @@ def list_available_markets() -> list[dict]:
                 ).fetchall()
                 for tr in token_rows:
                     markets.append({
-                        "market_id": market_id,
+                        "slug": slug,
                         "token_id": decode_token(tr[0]) if isinstance(tr[0], int) else str(tr[0]),
                         "earliest_data": row[0].isoformat() if isinstance(row[0], datetime) else str(row[0]),
                         "latest_data": row[1].isoformat() if isinstance(row[1], datetime) else str(row[1]),
@@ -465,16 +454,15 @@ def list_available_markets() -> list[dict]:
 
 def archive_event_data(
     slug: str,
-    market_id: str,
     data_type: str,
     start_time: str | None = None,
     end_time: str | None = None,
 ) -> int:
-    """Copy data for a market into the archive directory. Returns rows archived."""
-    src_dir = os.path.join(settings.data_dir, data_type, market_id)
+    """Merge live chunks into a single archive file. Returns rows archived."""
+    src_dir = os.path.join(settings.data_dir, "sessions", slug, "live", data_type)
     if not os.path.isdir(src_dir):
         return 0
-    archive_dir = os.path.join(settings.data_dir, "archives", slug)
+    archive_dir = os.path.join(settings.data_dir, "sessions", slug, "archive")
     _ensure_dir(archive_dir)
     dest_path = os.path.join(archive_dir, f"{data_type}.parquet")
     glob_path = os.path.join(src_dir, "*.parquet").replace("\\", "/")
@@ -497,94 +485,106 @@ def archive_event_data(
 def query_archive_prices(
     slug: str, start_time: str | None = None, end_time: str | None = None,
 ) -> list[dict]:
-    fp = os.path.join(settings.data_dir, "archives", slug, "prices.parquet")
+    fp = os.path.join(settings.data_dir, "sessions", slug, "archive", "prices.parquet")
     return _query_parquet_file(fp, start_time, end_time) if os.path.exists(fp) else []
 
 
 def query_archive_orderbooks(
     slug: str, start_time: str | None = None, end_time: str | None = None,
 ) -> list[dict]:
-    fp = os.path.join(settings.data_dir, "archives", slug, "orderbooks.parquet")
+    fp = os.path.join(settings.data_dir, "sessions", slug, "archive", "orderbooks.parquet")
     return _query_parquet_file(fp, start_time, end_time) if os.path.exists(fp) else []
 
 
 def query_archive_live_trades(
     slug: str, start_time: str | None = None, end_time: str | None = None,
 ) -> list[dict]:
-    fp = os.path.join(settings.data_dir, "archives", slug, "live_trades.parquet")
+    fp = os.path.join(settings.data_dir, "sessions", slug, "archive", "live_trades.parquet")
     return _query_parquet_file(fp, start_time, end_time, has_side=True) if os.path.exists(fp) else []
 
 
 def query_ob_deltas(
-    market_id: str,
+    slug: str,
     start_time: str | None = None,
     end_time: str | None = None,
 ) -> list[dict]:
-    dir_path = os.path.join(settings.data_dir, "ob_deltas", market_id)
-    if not os.path.isdir(dir_path):
-        return []
-    glob = os.path.join(dir_path, "*.parquet").replace("\\", "/")
-    sql = f"SELECT * FROM read_parquet('{glob}')" + _build_time_filter(start_time, end_time) + " ORDER BY timestamp"
-    con = duckdb.connect()
-    try:
-        return _post_process_rows(con.execute(sql).fetchdf().to_dict(orient="records"), has_side=True)
-    except Exception:
-        return []
-    finally:
-        con.close()
+    return _query_live_dir(slug, "ob_deltas", start_time, end_time, has_side=True)
 
 
 def query_archive_ob_deltas(
     slug: str, start_time: str | None = None, end_time: str | None = None,
 ) -> list[dict]:
-    fp = os.path.join(settings.data_dir, "archives", slug, "ob_deltas.parquet")
+    fp = os.path.join(settings.data_dir, "sessions", slug, "archive", "ob_deltas.parquet")
     return _query_parquet_file(fp, start_time, end_time, has_side=True) if os.path.exists(fp) else []
 
 
 def delete_archive(slug: str) -> bool:
-    """Delete the archive directory for a given slug. Returns True if removed."""
-    archive_dir = os.path.join(settings.data_dir, "archives", slug)
+    """Delete the archive sub-directory for a given slug."""
+    archive_dir = os.path.join(settings.data_dir, "sessions", slug, "archive")
     if os.path.isdir(archive_dir):
         shutil.rmtree(archive_dir)
         return True
     return False
 
 
-def delete_live_data(market_id: str) -> list[str]:
-    """Delete live data directories for a market_id. Returns list of removed dirs."""
+def delete_live_data(slug: str) -> list[str]:
+    """Delete live data directories for a slug. Returns list of removed data types."""
     removed: list[str] = []
+    live_dir = os.path.join(settings.data_dir, "sessions", slug, "live")
+    if not os.path.isdir(live_dir):
+        return removed
     for data_type in ("prices", "orderbooks", "ob_deltas", "live_trades"):
-        dir_path = os.path.join(settings.data_dir, data_type, market_id)
+        dir_path = os.path.join(live_dir, data_type)
         if os.path.isdir(dir_path):
             shutil.rmtree(dir_path)
             removed.append(data_type)
     return removed
 
 
-def soft_delete_session_log_entries(slug: str) -> int:
-    """Soft-delete: mark all entries for a slug as deleted in sessions.jsonl."""
-    sessions_file = os.path.join(settings.data_dir, "sessions.jsonl")
-    if not os.path.isfile(sessions_file):
-        return 0
-    lines_out: list[str] = []
-    marked = 0
-    with open(sessions_file, "r", encoding="utf-8") as f:
-        for line in f:
-            raw = line.strip()
-            if not raw:
-                continue
-            try:
-                entry = json.loads(raw)
-                if entry.get("slug") == slug and not entry.get("deleted"):
-                    entry["deleted"] = True
-                    marked += 1
-                lines_out.append(json.dumps(entry, ensure_ascii=False))
-            except (json.JSONDecodeError, TypeError):
-                lines_out.append(raw)
-    with open(sessions_file, "w", encoding="utf-8") as f:
-        for line in lines_out:
-            f.write(line + "\n")
-    return marked
+def delete_session(slug: str) -> bool:
+    """Delete the entire session directory (live + archive + meta). Returns True if removed."""
+    session_dir = os.path.join(settings.data_dir, "sessions", slug)
+    if os.path.isdir(session_dir):
+        shutil.rmtree(session_dir)
+        return True
+    return False
+
+
+def soft_delete_session_meta(slug: str) -> bool:
+    """Soft-delete: mark meta.json as deleted=true. Returns True if marked."""
+    meta_path = os.path.join(settings.data_dir, "sessions", slug, "meta.json")
+    if not os.path.isfile(meta_path):
+        return False
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            entry = json.load(f)
+        entry["deleted"] = True
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(entry, f, ensure_ascii=False)
+        return True
+    except Exception:
+        return False
+
+
+def write_session_meta(slug: str, session: dict) -> None:
+    """Write (overwrite) session metadata to sessions/{slug}/meta.json."""
+    session_dir = os.path.join(settings.data_dir, "sessions", slug)
+    _ensure_dir(session_dir)
+    meta_path = os.path.join(session_dir, "meta.json")
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(session, f, ensure_ascii=False)
+
+
+def read_session_meta(slug: str) -> dict | None:
+    """Read session metadata from sessions/{slug}/meta.json."""
+    meta_path = os.path.join(settings.data_dir, "sessions", slug, "meta.json")
+    if not os.path.isfile(meta_path):
+        return None
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
 
 
 def _query_parquet_file(
@@ -607,7 +607,7 @@ def _query_parquet_file(
 
 def get_archive_data_range(slug: str) -> dict:
     """Return the actual min/max timestamps from archived parquet data."""
-    archive_dir = os.path.join(settings.data_dir, "archives", slug)
+    archive_dir = os.path.join(settings.data_dir, "sessions", slug, "archive")
     all_min: list[str] = []
     all_max: list[str] = []
     for name in ["prices", "orderbooks", "live_trades", "ob_deltas"]:
@@ -636,7 +636,13 @@ def get_archive_data_range(slug: str) -> dict:
 
 
 def list_archives() -> list[str]:
-    archive_dir = os.path.join(settings.data_dir, "archives")
-    if not os.path.isdir(archive_dir):
+    """List slugs that have an archive/ sub-directory."""
+    sessions_dir = os.path.join(settings.data_dir, "sessions")
+    if not os.path.isdir(sessions_dir):
         return []
-    return [d for d in os.listdir(archive_dir) if os.path.isdir(os.path.join(archive_dir, d))]
+    result: list[str] = []
+    for slug in os.listdir(sessions_dir):
+        archive_path = os.path.join(sessions_dir, slug, "archive")
+        if os.path.isdir(archive_path):
+            result.append(slug)
+    return result

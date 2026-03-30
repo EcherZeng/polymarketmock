@@ -13,8 +13,6 @@ from app.storage.duckdb_store import (
     archive_event_data,
     get_archive_data_range,
     list_available_markets,
-    query_orderbooks,
-    query_prices,
 )
 
 # Lazy import to avoid circular dependency at module level
@@ -390,16 +388,16 @@ async def archive_event(slug: str, market_info: dict) -> dict:
     ob_deltas_count = 0
     try:
         prices_count = archive_event_data(
-            slug, market_id, "prices", filter_start, filter_end,
+            slug, "prices", filter_start, filter_end,
         )
         ob_count = archive_event_data(
-            slug, market_id, "orderbooks", filter_start, filter_end,
+            slug, "orderbooks", filter_start, filter_end,
         )
         live_trades_count = archive_event_data(
-            slug, market_id, "live_trades", filter_start, filter_end,
+            slug, "live_trades", filter_start, filter_end,
         )
         ob_deltas_count = archive_event_data(
-            slug, market_id, "ob_deltas", filter_start, filter_end,
+            slug, "ob_deltas", filter_start, filter_end,
         )
     except Exception as e:
         logger.warning("Partial archive for %s: %s", slug, e)

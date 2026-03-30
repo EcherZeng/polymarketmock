@@ -23,8 +23,8 @@
 │     │                      │                  │                    │
 │     │               ┌──────▼──────────────────▼──────┐            │
 │     │               │  backend/data/  (共享磁盘)      │            │
-│     │               │  prices/ orderbooks/ ob_deltas/ │            │
-│     │               │  live_trades/ archives/         │            │
+│     │               │  sessions/{slug}/live/  (实时)   │            │
+│     │               │  sessions/{slug}/archive/ (归档) │            │
 │     │               │  (Parquet + DuckDB 只读)        │            │
 │     │               └────────────────────────────────┘            │
 └─────┼────────────────────────────────────────────────────────────┘
@@ -57,7 +57,7 @@ Strategy/
 │   ├── types.py             # 数据类型定义（Signal, TickContext, FillInfo 等）
 │   ├── base_strategy.py     # BaseStrategy 抽象基类
 │   ├── data_loader.py       # 历史数据加载（自实现 DuckDB 查询，不 import backend）
-│   ├── data_scanner.py      # 目录结构扫描：发现 archives/、prices/ 等可用数据
+│   ├── data_scanner.py      # 目录结构扫描：发现 sessions/*/archive/ 等可用数据
 │   ├── matching.py          # 撮合引擎（自实现 VWAP/滑点计算）
 │   ├── runner.py            # 单次回测 Workflow 执行器
 │   ├── batch_runner.py      # 批量并行回测调度器
@@ -440,9 +440,9 @@ class MomentumStrategy(BaseStrategy):
 
 | Method | Path | 功能 |
 |--------|------|------|
-| GET | `/data/archives` | 扫描 `archives/` 目录，列出所有归档场次 |
+| GET | `/data/archives` | 扫描 `sessions/*/archive/` 目录，列出所有归档场次 |
 | GET | `/data/archives/{slug}` | 获取某场次的详情（时间范围、数据量、token 列表） |
-| GET | `/data/markets` | 扫描 `prices/` + `orderbooks/` 目录，列出有数据的 market |
+| GET | `/data/markets` | 扫描 `sessions/*/live/{prices,orderbooks}/` 目录，列出有数据的 market |
 
 > **关键**：数据发现完全基于目录结构扫描（`Path.glob`），不调用 backend API。
 
@@ -451,7 +451,7 @@ class MomentumStrategy(BaseStrategy):
 [
   {
     "slug": "btc-updown-5m-1774600500",
-    "path": "archives/btc-updown-5m-1774600500",
+    "path": "sessions/btc-updown-5m-1774600500/archive",
     "files": ["prices.parquet", "orderbooks.parquet", "ob_deltas.parquet", "live_trades.parquet"],
     "size_mb": 12.4,
     "time_range": {"start": "2025-05-24T...", "end": "2025-05-24T..."},
@@ -583,21 +583,22 @@ Strategy Backtest Engine — 独立进程
 # data_scanner.py — 通过目录结构发现可用数据
 
 def scan_archives(data_dir: Path) -> list[ArchiveInfo]:
-    """扫描 archives/ 下所有子目录，每个子目录名即 slug。"""
+    """扫描 sessions/*/archive/ 下所有子目录，每个子目录名即 slug。"""
     results = []
-    for d in (data_dir / "archives").iterdir():
-        if d.is_dir():
-            files = [f.name for f in d.glob("*.parquet")]
+    for d in (data_dir / "sessions").iterdir():
+        archive_dir = d / "archive"
+        if archive_dir.is_dir():
+            files = [f.name for f in archive_dir.glob("*.parquet")]
             results.append(ArchiveInfo(
                 slug=d.name,
-                path=d,
+                path=archive_dir,
                 files=files,
-                size_bytes=sum(f.stat().st_size for f in d.glob("*.parquet")),
+                size_bytes=sum(f.stat().st_size for f in archive_dir.glob("*.parquet")),
             ))
     return results
 
 def scan_live_markets(data_dir: Path) -> list[MarketInfo]:
-    """扫描 prices/ + orderbooks/ 目录，发现有数据的 market_id。"""
+    """扫描 sessions/*/live/{prices,orderbooks}/ 目录，发现有数据的 slug。"""
     ...
 ```
 
@@ -610,7 +611,7 @@ import duckdb
 
 def load_archive(data_dir: Path, slug: str) -> ArchiveData:
     """加载一个归档场次的全部数据。"""
-    base = data_dir / "archives" / slug
+    base = data_dir / "sessions" / slug / "archive"
     return ArchiveData(
         prices=_query_parquet(base / "prices.parquet"),
         orderbooks=_query_parquet(base / "orderbooks.parquet"),
@@ -628,15 +629,18 @@ def _query_parquet(path: Path) -> list[dict]:
 
 ```
 backend/data/
-├── archives/{slug}/          ← 归档场次（主要数据源）
-│   ├── prices.parquet
-│   ├── orderbooks.parquet
-│   ├── ob_deltas.parquet
-│   └── live_trades.parquet
-├── prices/{market_id}/       ← 实时采集的历史数据（可选）
-├── orderbooks/{market_id}/
-├── ob_deltas/{market_id}/
-└── live_trades/{market_id}/
+└── sessions/{slug}/
+    ├── live/                 ← 实时采集的数据（ParquetBuffer chunk 文件）
+    │   ├── prices/*.parquet
+    │   ├── orderbooks/*.parquet
+    │   ├── ob_deltas/*.parquet
+    │   └── live_trades/*.parquet
+    ├── archive/              ← 归档场次（合并后的单文件，主要数据源）
+    │   ├── prices.parquet
+    │   ├── orderbooks.parquet
+    │   ├── ob_deltas.parquet
+    │   └── live_trades.parquet
+    └── meta.json             ← 场次元数据
          │
          │  Path.glob() 发现
          │  DuckDB READ_PARQUET() 只读

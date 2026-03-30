@@ -4,7 +4,7 @@ sys.path.insert(0, ".")
 from app.config import settings
 
 slug = "btc-updown-5m-1774405800"
-fp = os.path.join(settings.data_dir, "archives", slug, "prices.parquet")
+fp = os.path.join(settings.data_dir, "sessions", slug, "archive", "prices.parquet")
 print(f"File path: {fp}")
 print(f"Exists: {os.path.exists(fp)}")
 print(f"Size: {os.path.getsize(fp) if os.path.exists(fp) else 0}")
@@ -31,7 +31,7 @@ finally:
     con.close()
 
 # Also test orderbooks
-fp2 = os.path.join(settings.data_dir, "archives", slug, "orderbooks.parquet")
+fp2 = os.path.join(settings.data_dir, "sessions", slug, "archive", "orderbooks.parquet")
 print(f"\nOrderbook file: {fp2}")
 print(f"Exists: {os.path.exists(fp2)}")
 if os.path.exists(fp2):

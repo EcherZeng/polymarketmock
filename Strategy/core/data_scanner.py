@@ -46,23 +46,28 @@ def decode_side(side: int) -> str:
 
 
 def scan_archives(data_dir: Path) -> list[ArchiveInfo]:
-    """Scan archives/ directory. Each sub-directory is a slug."""
-    archives_dir = data_dir / "archives"
-    if not archives_dir.exists():
+    """Scan sessions/ directory for slugs that have an archive/ sub-directory."""
+    sessions_dir = data_dir / "sessions"
+    if not sessions_dir.exists():
         return []
 
     results: list[ArchiveInfo] = []
-    for d in sorted(archives_dir.iterdir()):
+    for d in sorted(sessions_dir.iterdir()):
         if not d.is_dir():
             continue
-        parquet_files = list(d.glob("*.parquet"))
+        archive_dir = d / "archive"
+        if not archive_dir.exists():
+            continue
+        parquet_files = list(archive_dir.glob("*.parquet"))
+        if not parquet_files:
+            continue
         files = [f.name for f in parquet_files]
         size = sum(f.stat().st_size for f in parquet_files)
 
         # Try to read time range and token ids from prices.parquet
         time_range: dict = {}
         token_ids: list[str] = []
-        prices_path = d / "prices.parquet"
+        prices_path = archive_dir / "prices.parquet"
         if prices_path.exists():
             try:
                 df = duckdb.sql(
@@ -86,7 +91,7 @@ def scan_archives(data_dir: Path) -> list[ArchiveInfo]:
 
         results.append(ArchiveInfo(
             slug=d.name,
-            path=str(d),
+            path=str(archive_dir),
             files=files,
             size_bytes=size,
             time_range=time_range,
@@ -96,31 +101,39 @@ def scan_archives(data_dir: Path) -> list[ArchiveInfo]:
 
 
 def scan_live_markets(data_dir: Path) -> list[dict]:
-    """Scan prices/ + orderbooks/ directories for live-collected market data."""
+    """Scan sessions/*/live/{prices,orderbooks}/ for live-collected market data."""
     results: list[dict] = []
     seen: set[str] = set()
+    sessions_dir = data_dir / "sessions"
+    if not sessions_dir.exists():
+        return []
 
-    for subdir in ("prices", "orderbooks"):
-        base = data_dir / subdir
-        if not base.exists():
+    for slug_dir in sessions_dir.iterdir():
+        if not slug_dir.is_dir():
             continue
-        for d in base.iterdir():
-            if d.is_dir() and d.name not in seen:
-                seen.add(d.name)
-                parquet_files = list(d.glob("*.parquet"))
-                results.append({
-                    "market_id": d.name,
-                    "data_types": [subdir],
-                    "files": len(parquet_files),
-                })
+        slug = slug_dir.name
+        for subdir in ("prices", "orderbooks"):
+            data_path = slug_dir / "live" / subdir
+            if not data_path.exists():
+                continue
+            key = f"{slug}/{subdir}"
+            if key in seen:
+                continue
+            seen.add(key)
+            parquet_files = list(data_path.glob("*.parquet"))
+            results.append({
+                "slug": slug,
+                "data_types": [subdir],
+                "files": len(parquet_files),
+            })
 
-    # Merge data_types for same market_id
+    # Merge data_types for same slug
     merged: dict[str, dict] = {}
     for r in results:
-        mid = r["market_id"]
-        if mid in merged:
-            merged[mid]["data_types"].extend(r["data_types"])
-            merged[mid]["files"] += r["files"]
+        s = r["slug"]
+        if s in merged:
+            merged[s]["data_types"].extend(r["data_types"])
+            merged[s]["files"] += r["files"]
         else:
-            merged[mid] = r
+            merged[s] = r
     return list(merged.values())

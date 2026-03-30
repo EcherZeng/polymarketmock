@@ -73,7 +73,7 @@ frontend/src/
 
 ## DATA PERSISTENCE (critical)
 
-- Real market prices/orderbook snapshots → **Parquet** (DuckDB query), partitioned `{market_id}/{date}.parquet` under `backend/data/`
+- Real market prices/orderbook snapshots → **Parquet** (DuckDB query), organized under `backend/data/sessions/{slug}/` (live chunks + archive)
 - Simulated trading data (balance, positions, orders, trades, PnL) → **Redis ONLY**
 - NEVER write simulated data to Parquet/DuckDB/files
 - NEVER store real market data in Redis only — must persist to Parquet

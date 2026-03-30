@@ -29,14 +29,14 @@ async def list_backtest_markets():
     return get_backtest_markets()
 
 
-@router.get("/data/{market_id}")
+@router.get("/data/{slug:path}")
 async def get_market_data(
-    market_id: str,
+    slug: str,
     start: str = Query(None, description="Start time ISO"),
     end: str = Query(None, description="End time ISO"),
 ):
-    """Get historical price data for a market."""
-    return query_prices(market_id, start_time=start, end_time=end)
+    """Get historical price data for a session slug."""
+    return query_prices(slug, start_time=start, end_time=end)
 
 
 @router.post("/replay", response_model=BacktestResult)

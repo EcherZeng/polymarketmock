@@ -115,20 +115,22 @@ async def health():
     import os
     from app.config import settings
     data_dir = settings.data_dir
-    archive_dir = os.path.join(data_dir, "archives")
-    archives_exist = os.path.isdir(archive_dir)
-    archive_slugs = os.listdir(archive_dir) if archives_exist else []
+    sessions_dir = os.path.join(data_dir, "sessions")
+    sessions_exist = os.path.isdir(sessions_dir)
+    session_slugs = os.listdir(sessions_dir) if sessions_exist else []
     slug_files = {}
-    for s in archive_slugs[:5]:
-        sp = os.path.join(archive_dir, s)
-        slug_files[s] = os.listdir(sp) if os.path.isdir(sp) else []
+    for s in session_slugs[:5]:
+        sp = os.path.join(sessions_dir, s)
+        if os.path.isdir(sp):
+            contents = os.listdir(sp)
+            slug_files[s] = contents
     return {
         "status": "ok",
         "cwd": os.getcwd(),
         "data_dir": data_dir,
         "data_dir_abs": os.path.abspath(data_dir),
         "data_dir_exists": os.path.isdir(data_dir),
-        "archives_dir_exists": archives_exist,
-        "archive_slugs": archive_slugs,
+        "sessions_dir_exists": sessions_exist,
+        "session_slugs": session_slugs,
         "slug_files": slug_files,
     }

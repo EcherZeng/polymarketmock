@@ -2,12 +2,13 @@
 import duckdb
 import os
 
-archives = os.listdir("data/archives")
-slug = "btc-updown-15m-1774503000"
+sessions_dir = "data/sessions"
+archives = [d for d in os.listdir(sessions_dir) if os.path.isdir(os.path.join(sessions_dir, d, "archive"))]
+slug = archives[0] if archives else "btc-updown-15m-1774503000"
 print("slug:", slug)
 
 for name in ["prices", "orderbooks"]:
-    fp = os.path.join("data", "archives", slug, f"{name}.parquet").replace("\\", "/")
+    fp = os.path.join("data", "sessions", slug, "archive", f"{name}.parquet").replace("\\", "/")
     if not os.path.exists(fp):
         print(f"{name}: NOT FOUND")
         continue
