@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { fetchLogs, fetchMetrics } from "@/api/client"
-import type { LogEntry, MetricsSnapshot } from "@/types"
+import type { MetricsSnapshot } from "@/types"
 import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import {
   Select,
@@ -97,13 +96,9 @@ export default function MonitorPage() {
           value={
             <span className="flex items-center gap-1.5">
               {gauges["ws.upstream_connected"] ? (
-                <>
-                  <Wifi className="text-green-500" /> Connected
-                </>
+                <span><Wifi className="text-green-500" /> Connected</span>
               ) : (
-                <>
-                  <WifiOff className="text-red-500" /> Disconnected
-                </>
+                <span><WifiOff className="text-red-500" /> Disconnected</span>
               )}
             </span>
           }

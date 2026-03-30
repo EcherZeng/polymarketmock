@@ -430,7 +430,7 @@ export interface LogEntry {
 
 export interface MetricsSnapshot {
   counters: Record<string, number>
-  gauges: Record<string, unknown>
+  gauges: Record<string, number>
   uptime_seconds: number
   log_buffer_size: number
 }
