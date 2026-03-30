@@ -54,6 +54,9 @@ class Settings(BaseSettings):
 
     # Logging
     log_level: str = "INFO"
+    log_file_level: str = "WARNING"          # file handler min level
+    log_file_max_bytes: int = 5_242_880      # 5 MB per file
+    log_file_backup_count: int = 3           # keep 3 rotated files
 
     model_config = {"env_prefix": "PM_"}
 

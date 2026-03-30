@@ -1,5 +1,7 @@
 import logging
+import os
 from contextlib import asynccontextmanager
+from logging.handlers import RotatingFileHandler
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,6 +32,18 @@ def _setup_logging() -> None:
     buf_handler.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
     buf_handler.setFormatter(logging.Formatter(log_fmt, datefmt="%Y-%m-%d %H:%M:%S"))
     logging.getLogger().addHandler(buf_handler)
+    # Rotating file handler for WARNING+ (persisted to disk)
+    log_dir = os.path.join(settings.data_dir, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    file_handler = RotatingFileHandler(
+        os.path.join(log_dir, "error.log"),
+        maxBytes=settings.log_file_max_bytes,
+        backupCount=settings.log_file_backup_count,
+        encoding="utf-8",
+    )
+    file_handler.setLevel(getattr(logging, settings.log_file_level.upper(), logging.WARNING))
+    file_handler.setFormatter(logging.Formatter(log_fmt, datefmt="%Y-%m-%d %H:%M:%S"))
+    logging.getLogger().addHandler(file_handler)
     # Quieten noisy third-party loggers
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
