@@ -98,3 +98,19 @@ def _level_map(levels: list[dict]) -> dict[str, float]:
         s = float(lv.get("size", "0") or "0")
         result[p] = result.get(p, 0.0) + s
     return result
+
+
+def ws_trade_to_record(data: dict) -> dict:
+    """Convert a WS last_trade_price event to the standard realtime trade format."""
+    ts_ms = data.get("timestamp", "0")
+    ts = float(ts_ms) / 1000 if ts_ms else 0
+    return {
+        "timestamp": datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if ts else "",
+        "ts": ts,
+        "token_id": data.get("asset_id", ""),
+        "side": data.get("side", "UNKNOWN"),
+        "price": round(float(data.get("price", "0")), 6),
+        "size": round(float(data.get("size", "0")), 2),
+        "inferred": False,
+        "transaction_hash": data.get("transaction_hash", ""),
+    }

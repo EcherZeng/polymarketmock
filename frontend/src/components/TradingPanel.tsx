@@ -14,13 +14,16 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
 import { estimateOrder, fetchMidpoint, placeOrder } from "@/api/client"
-import type { EstimateResult, OrderSide, OrderType } from "@/types"
+import type { EstimateResult, OrderSide, OrderType, WsBestBidAskEvent } from "@/types"
 
 interface TradingPanelProps {
   tokenId: string
   outcomes?: string[]
   tokenIds?: string[]
   onSwitchToken?: (tokenId: string) => void
+  /** WS best_bid_ask event (if provided, HTTP polling is reduced) */
+  wsBestBidAsk?: WsBestBidAskEvent | null
+  wsConnected?: boolean
 }
 
 export default function TradingPanel({
@@ -28,6 +31,8 @@ export default function TradingPanel({
   outcomes = [],
   tokenIds = [],
   onSwitchToken,
+  wsBestBidAsk,
+  wsConnected,
 }: TradingPanelProps) {
   const queryClient = useQueryClient()
   const [side, setSide] = useState<OrderSide>("BUY")
@@ -36,19 +41,28 @@ export default function TradingPanel({
   const [price, setPrice] = useState("")
   const [estimate, setEstimate] = useState<EstimateResult | null>(null)
 
-  // Real-time midpoint for probability display
+  // Real-time midpoint — prefer WS, fallback to HTTP polling
+  const hasWsBBA = !!(wsConnected && wsBestBidAsk)
   const { data: midData } = useQuery({
     queryKey: ["midpoint", tokenId],
     queryFn: () => fetchMidpoint(tokenId),
-    enabled: !!tokenId,
-    refetchInterval: 3_000,
+    enabled: !!tokenId && !hasWsBBA,
+    refetchInterval: hasWsBBA ? false : 3_000,
   })
 
-  const midPrice = midData?.mid ?? 0
+  // Derive midPrice: WS best_bid_ask → HTTP midpoint → 0
+  const wsMid = wsBestBidAsk
+    ? (parseFloat(wsBestBidAsk.best_bid) + parseFloat(wsBestBidAsk.best_ask)) / 2
+    : null
+  const midPrice = wsMid ?? midData?.mid ?? 0
   const compPrice = midPrice > 0 ? 1 - midPrice : 0
 
   // Determine current outcome index
   const currentIdx = tokenIds.indexOf(tokenId)
+
+  // Map prices to correct outcome positions (midPrice is for the selected token)
+  const price0 = currentIdx === 1 ? compPrice : midPrice
+  const price1 = currentIdx === 1 ? midPrice : compPrice
   const currentOutcome = currentIdx >= 0 && currentIdx < outcomes.length ? outcomes[currentIdx] : "Yes"
   const compIdx = currentIdx === 0 ? 1 : 0
   const compOutcome = compIdx < outcomes.length ? outcomes[compIdx] : "No"
@@ -111,7 +125,7 @@ export default function TradingPanel({
               >
                 <div className="text-xs text-muted-foreground">{outcomes[0]}</div>
                 <div className="text-lg font-bold tabular-nums">
-                  {(midPrice * 100).toFixed(1)}¢
+                  {(price0 * 100).toFixed(1)}¢
                 </div>
               </div>
               <div
@@ -123,7 +137,7 @@ export default function TradingPanel({
               >
                 <div className="text-xs text-muted-foreground">{outcomes[1]}</div>
                 <div className="text-lg font-bold tabular-nums">
-                  {(compPrice * 100).toFixed(1)}¢
+                  {(price1 * 100).toFixed(1)}¢
                 </div>
               </div>
             </div>

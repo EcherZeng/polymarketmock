@@ -1,0 +1,142 @@
+"""Core data types for the Strategy Backtest Engine."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass
+class Signal:
+    """Trading signal produced by a strategy."""
+
+    token_id: str
+    side: str  # "BUY" | "SELL"
+    amount: float  # target shares
+    order_type: str = "MARKET"  # "MARKET" | "LIMIT"
+    limit_price: float | None = None
+
+
+@dataclass
+class TokenSnapshot:
+    """Market snapshot for a single token at one tick."""
+
+    token_id: str
+    mid_price: float
+    best_bid: float
+    best_ask: float
+    spread: float
+    bid_levels: list[tuple[float, float]] = field(default_factory=list)  # [(price, size)]
+    ask_levels: list[tuple[float, float]] = field(default_factory=list)
+
+
+@dataclass
+class TickContext:
+    """Full market context pushed to the strategy at each tick."""
+
+    timestamp: str  # ISO 8601 UTC
+    index: int
+    total_ticks: int
+
+    tokens: dict[str, TokenSnapshot] = field(default_factory=dict)
+
+    balance: float = 0.0
+    positions: dict[str, float] = field(default_factory=dict)
+    equity: float = 0.0
+
+    price_history: dict[str, list[float]] = field(default_factory=dict)
+    trade_history: list[dict] = field(default_factory=list)
+
+
+@dataclass
+class FillInfo:
+    """Fill report after order execution."""
+
+    timestamp: str
+    token_id: str
+    side: str
+    requested_amount: float
+    filled_amount: float
+    avg_price: float
+    total_cost: float
+    slippage_pct: float
+    balance_after: float
+    position_after: float
+
+
+@dataclass
+class ArchiveInfo:
+    """Metadata for one archived event."""
+
+    slug: str
+    path: str
+    files: list[str] = field(default_factory=list)
+    size_bytes: int = 0
+    time_range: dict = field(default_factory=dict)
+    token_ids: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ArchiveData:
+    """All loaded data for one archived event."""
+
+    prices: list[dict] = field(default_factory=list)
+    orderbooks: list[dict] = field(default_factory=list)
+    ob_deltas: list[dict] = field(default_factory=list)
+    live_trades: list[dict] = field(default_factory=list)
+
+
+@dataclass
+class EvaluationMetrics:
+    """Computed evaluation metrics for a backtest session."""
+
+    # Returns
+    total_pnl: float = 0.0
+    total_return_pct: float = 0.0
+    annualized_return: float = 0.0
+    profit_factor: float = 0.0
+
+    # Risk
+    max_drawdown: float = 0.0
+    max_drawdown_duration: float = 0.0  # seconds
+    volatility: float = 0.0
+    downside_deviation: float = 0.0
+
+    # Risk-adjusted
+    sharpe_ratio: float = 0.0
+    sortino_ratio: float = 0.0
+    calmar_ratio: float = 0.0
+
+    # Trade stats
+    total_trades: int = 0
+    win_rate: float = 0.0
+    avg_win: float = 0.0
+    avg_loss: float = 0.0
+    best_trade: float = 0.0
+    worst_trade: float = 0.0
+    avg_holding_period: float = 0.0
+    buy_count: int = 0
+    sell_count: int = 0
+    avg_slippage: float = 0.0
+
+
+@dataclass
+class BacktestSession:
+    """Result of a single backtest run."""
+
+    session_id: str
+    strategy: str
+    slug: str
+    initial_balance: float
+    status: str = "completed"  # "running" | "completed" | "failed"
+    created_at: str = ""
+    duration_seconds: float = 0.0
+
+    trades: list[FillInfo] = field(default_factory=list)
+    equity_curve: list[dict] = field(default_factory=list)  # [{timestamp, equity}]
+    drawdown_curve: list[dict] = field(default_factory=list)
+    position_curve: list[dict] = field(default_factory=list)
+    metrics: EvaluationMetrics = field(default_factory=EvaluationMetrics)
+    strategy_summary: dict = field(default_factory=dict)
+    config: dict = field(default_factory=dict)
+    final_equity: float = 0.0
+    final_positions: dict[str, float] = field(default_factory=dict)

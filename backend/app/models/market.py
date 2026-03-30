@@ -102,3 +102,75 @@ class EventStatusResponse(BaseModel):
     ended_at: str | None = None
     seconds_remaining: float | None = None
     next_slug: str | None = None
+
+
+# ── WebSocket event models (Polymarket Market Channel) ──────────────────────
+
+
+class WsBookEvent(BaseModel):
+    event_type: str  # "book"
+    asset_id: str
+    market: str
+    bids: list[PriceLevel]
+    asks: list[PriceLevel]
+    timestamp: str
+    hash: str
+
+
+class WsPriceChangeItem(BaseModel):
+    asset_id: str
+    price: str
+    size: str
+    side: str  # BUY / SELL
+    hash: str
+    best_bid: str | None = None
+    best_ask: str | None = None
+
+
+class WsPriceChangeEvent(BaseModel):
+    event_type: str  # "price_change"
+    market: str
+    price_changes: list[WsPriceChangeItem]
+    timestamp: str
+
+
+class WsLastTradePriceEvent(BaseModel):
+    event_type: str  # "last_trade_price"
+    asset_id: str
+    market: str
+    price: str
+    size: str
+    side: str  # BUY / SELL
+    timestamp: str
+    fee_rate_bps: str | None = None
+    transaction_hash: str | None = None
+
+
+class WsBestBidAskEvent(BaseModel):
+    event_type: str  # "best_bid_ask"
+    asset_id: str
+    market: str
+    best_bid: str
+    best_ask: str
+    spread: str
+    timestamp: str
+
+
+class WsTickSizeChangeEvent(BaseModel):
+    event_type: str  # "tick_size_change"
+    asset_id: str
+    market: str
+    old_tick_size: str
+    new_tick_size: str
+    timestamp: str
+
+
+class WsMarketResolvedEvent(BaseModel):
+    event_type: str  # "market_resolved"
+    id: str
+    market: str
+    assets_ids: list[str]
+    winning_asset_id: str
+    winning_outcome: str
+    timestamp: str
+    tags: list[str] = []

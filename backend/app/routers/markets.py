@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 from app.config import settings
 from app.services import polymarket_proxy as proxy
@@ -232,46 +233,29 @@ async def list_watched():
 
 
 @router.post("/watch/event/{slug:path}")
-async def watch_event(slug: str):
+async def watch_event(slug: str, client_id: str | None = Query(None)):
     """进入事件后自动录制 — 注册所有 token 到数据采集器。
 
     幂等操作：重复调用不产生副作用。
+    传入 client_id 时尝试获取录制所有权锁（同一事件仅一个标签页显示"录制中"）。
     """
     event = await proxy.resolve_event_slug(slug)
     if not event:
         raise HTTPException(status_code=404, detail=f"Event not found: {slug}")
 
-    import json as _json
+    from app.services.event_lifecycle import watch_event_tokens
+    watched_tokens = await watch_event_tokens(slug, event)
 
-    markets = event.get("markets", [])
-    watched_tokens: list[str] = []
+    # Try to acquire recording lock for this tab
+    is_owner = False
+    if client_id:
+        is_owner = await redis_store.acquire_recording_lock(slug, client_id)
 
-    for m in markets:
-        token_ids_raw = m.get("clobTokenIds", [])
-        if isinstance(token_ids_raw, str):
-            try:
-                token_ids_raw = _json.loads(token_ids_raw)
-            except (ValueError, TypeError):
-                token_ids_raw = [token_ids_raw]
-        market_id = m.get("id", "")
-        for tid in token_ids_raw:
-            if not tid:
-                continue
-            await redis_store.add_watched_market(tid, market_id)
-            watched_tokens.append(tid)
-            # Persist full market info so archive_event can use it later
-            info = {
-                "id": market_id,
-                "question": m.get("question", ""),
-                "slug": slug,
-                "startDate": m.get("startDate", "") or m.get("eventStartTime", ""),
-                "endDate": m.get("endDate", "") or event.get("endDate", ""),
-                "clobTokenIds": token_ids_raw,
-                "outcomes": m.get("outcomes", []),
-            }
-            await redis_store.set_token_market_info(tid, _json.dumps(info))
-
-    return {"watched_tokens": watched_tokens, "recording_started": True}
+    return {
+        "watched_tokens": watched_tokens,
+        "recording_started": True,
+        "is_owner": is_owner,
+    }
 
 
 @router.delete("/watch/{token_id}")
@@ -279,6 +263,21 @@ async def unwatch_token(token_id: str):
     """取消监视某个 token。"""
     await redis_store.remove_watched_market(token_id)
     return {"removed": token_id}
+
+
+class HeartbeatRequest(BaseModel):
+    slug: str
+    client_id: str
+
+
+@router.post("/recording/heartbeat")
+async def recording_heartbeat(req: HeartbeatRequest):
+    """刷新录制锁 TTL，保持当前标签页的录制所有权。"""
+    is_owner = await redis_store.refresh_recording_lock(req.slug, req.client_id)
+    if not is_owner:
+        # Lock expired or stolen — try to re-acquire
+        is_owner = await redis_store.acquire_recording_lock(req.slug, req.client_id)
+    return {"is_owner": is_owner}
 
 
 # ── Archives ──────────────────────────────────────────────────────────────────
@@ -294,6 +293,71 @@ async def list_archives():
 async def get_archive(slug: str):
     """获取归档场次详情。"""
     meta = await redis_store.get_archive_meta(slug)
-    if not meta:
+    if not meta or meta.get("deleted"):
         raise HTTPException(status_code=404, detail=f"Archive not found: {slug}")
     return meta
+
+
+@router.delete("/archives/{slug:path}")
+async def delete_archive(slug: str):
+    """删除归档场次：硬删数据目录，软删索引元数据。"""
+    from app.storage.duckdb_store import delete_session
+
+    # 1. 获取元数据（删除前需要 market_id / token_ids 来清理 Redis）
+    meta = await redis_store.get_archive_meta(slug)
+    if not meta:
+        raise HTTPException(status_code=404, detail=f"Archive not found: {slug}")
+    market_id = meta.get("market_id", "")
+    token_ids: list[str] = meta.get("token_ids", [])
+
+    # 2. 硬删整个 session 目录（live + archive + meta.json）
+    delete_session(slug)
+
+    # 3. 硬删交易类 Redis 键
+    r = redis_store.get_redis()
+    if market_id:
+        await r.delete(f"live:trades:{market_id}")
+        await r.delete(f"live:seen:{market_id}")
+    for tid in token_ids:
+        await r.delete(f"realtime:trades:{tid}")
+        await r.delete(f"prev:book:{tid}")
+
+    # 4. 软删 Redis archive 元数据（保留 key，标记 deleted=true）
+    await redis_store.soft_delete_archive_meta(slug)
+
+    return {"deleted": slug}
+
+
+# ── Auto-record config ────────────────────────────────────────────────────────
+
+
+class AutoRecordConfigRequest(BaseModel):
+    durations: list[str]
+
+
+@router.get("/auto-record/config")
+async def get_auto_record_config():
+    """获取自动录制配置及各时长实时状态。"""
+    config = await redis_store.get_auto_record_config()
+    states: dict = {}
+    from app.services.auto_recorder import VALID_DURATIONS
+    for dur in VALID_DURATIONS:
+        st = await redis_store.get_auto_record_state(dur)
+        if st:
+            states[dur] = st
+    return {"durations": config, "states": states}
+
+
+@router.put("/auto-record/config")
+async def update_auto_record_config(req: AutoRecordConfigRequest):
+    """更新自动录制配置 — 立即生效，不中断正在进行的录制。"""
+    from app.services.auto_recorder import VALID_DURATIONS
+    durations = [d for d in req.durations if d in VALID_DURATIONS]
+    await redis_store.set_auto_record_config(durations)
+    # Return updated state
+    states: dict = {}
+    for dur in VALID_DURATIONS:
+        st = await redis_store.get_auto_record_state(dur)
+        if st:
+            states[dur] = st
+    return {"durations": durations, "states": states}

@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 
 import httpx
 
 from app.config import settings
+from app.services.log_buffer import metrics
 from app.storage.redis_store import cache_get, cache_set
+
+logger = logging.getLogger(__name__)
 
 _client: httpx.AsyncClient | None = None
 
@@ -72,6 +76,7 @@ async def get_markets(
     data = resp.json()
     data = [_normalize_market(m) for m in data] if isinstance(data, list) else data
     await cache_set(cache_key, json.dumps(data), settings.cache_ttl_markets)
+    metrics.inc("proxy.api_calls")
     return data
 
 
@@ -84,6 +89,7 @@ async def get_market(market_id: str) -> dict:
     url = f"{settings.gamma_api_url}/markets/{market_id}"
     resp = await _get_client().get(url)
     resp.raise_for_status()
+    metrics.inc("proxy.api_calls")
     data = _normalize_market(resp.json())
     await cache_set(cache_key, json.dumps(data), settings.cache_ttl_markets)
     return data
@@ -155,9 +161,16 @@ async def get_midpoint(token_id: str) -> float:
 async def get_orderbook_raw(token_id: str) -> dict:
     """Fetch orderbook without caching (for matching engine)."""
     url = f"{settings.clob_api_url}/book"
-    resp = await _get_client().get(url, params={"token_id": token_id})
-    resp.raise_for_status()
-    return resp.json()
+    try:
+        resp = await _get_client().get(url, params={"token_id": token_id})
+        resp.raise_for_status()
+        return resp.json()
+    except httpx.HTTPStatusError as e:
+        logger.error("CLOB orderbook_raw failed for %s: HTTP %d", token_id[:12], e.response.status_code)
+        raise
+    except httpx.RequestError as e:
+        logger.error("CLOB orderbook_raw request error for %s: %s", token_id[:12], e)
+        raise
 
 
 async def get_prices_history(
@@ -286,33 +299,68 @@ async def search_events(
 
 
 async def resolve_event_slug(slug: str) -> dict | None:
-    """Resolve a Polymarket event slug to its event data."""
+    """Resolve a Polymarket event slug to its event data.
+
+    Lookup chain: EventRegistry (memory) → Redis slug cache → Gamma API.
+    """
+    # 1. EventRegistry (memory, 0 ms)
+    try:
+        from app.services.event_registry import get_registry
+        reg_event = get_registry().get_event(slug)
+        if reg_event:
+            return reg_event
+    except (AssertionError, Exception):
+        pass  # Registry not started yet (e.g. during startup)
+
+    # 2. Redis slug cache (short TTL)
+    cache_key = f"resolve:slug:{slug}"
+    cached = await cache_get(cache_key)
+    if cached:
+        return json.loads(cached)
+
+    # 3. Gamma API fallback
     url = f"{settings.gamma_api_url}/events"
     resp = await _get_client().get(url, params={"limit": 1, "slug": slug})
     resp.raise_for_status()
     data = resp.json()
-    return _normalize_event(data[0]) if data else None
+    if not data:
+        return None
+    event = _normalize_event(data[0])
+    await cache_set(cache_key, json.dumps(event), 30)
+    metrics.inc("proxy.api_calls")
+    return event
 
 
 async def discover_btc_markets() -> dict[str, list[dict]]:
     """Discover BTC up/down markets around the current time, grouped by duration.
 
-    Computes slug timestamps to query Gamma API precisely, avoiding the problem
-    of current events being buried in large generic queries.  Uses cache (20s TTL)
-    to stay well under the 10 req/s rate limit.
+    Delegates to EventRegistry when available (in-memory, 0 ms).
+    Falls back to the legacy Gamma-per-slug approach during startup
+    or if the registry is not yet initialised.
     """
+    # Fast path: EventRegistry
+    try:
+        from app.services.event_registry import get_registry
+        return get_registry().get_all_windows()
+    except (AssertionError, Exception):
+        pass  # Registry not started yet
+
+    # Fallback: legacy Gamma API per-slug queries (only during cold start)
+    return await _discover_btc_markets_legacy()
+
+
+async def _discover_btc_markets_legacy() -> dict[str, list[dict]]:
+    """Legacy discovery — kept as fallback when registry is unavailable."""
     cache_key = "btc:discovery"
     cached = await cache_get(cache_key)
     if cached:
         return json.loads(cached)
 
     now_ts = int(datetime.now(timezone.utc).timestamp())
-
-    # Duration configs: (slug_prefix, interval_seconds, slots_before, slots_after)
     durations = [
-        ("btc-updown-5m", 300, 4, 6),     # 4 past + 6 upcoming = 10
-        ("btc-updown-15m", 900, 2, 4),     # 2 past + 4 upcoming = 6
-        ("btc-updown-30m", 1800, 1, 3),    # 1 past + 3 upcoming = 4
+        ("btc-updown-5m", 300, 4, 6),
+        ("btc-updown-15m", 900, 2, 4),
+        ("btc-updown-30m", 1800, 1, 3),
     ]
 
     groups: dict[str, list[dict]] = {}
@@ -333,7 +381,6 @@ async def discover_btc_markets() -> dict[str, list[dict]]:
             if not data:
                 continue
             e = _normalize_event(data[0])
-            # Compute real-time status from eventStartTime + endDate
             end_str = e.get("endDate", "")
             m0 = e["markets"][0] if e.get("markets") else {}
             start_str = m0.get("eventStartTime", e.get("startDate", ""))

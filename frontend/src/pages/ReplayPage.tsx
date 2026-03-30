@@ -15,13 +15,10 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
 import ReplayControls from "@/components/ReplayControls"
+import OrderbookView from "@/components/OrderbookView"
+import PriceChart from "@/components/PriceChart"
+import { useReplayStream } from "@/hooks/useReplayStream"
 import {
   fetchReplayTimeline,
   fetchReplaySnapshot,
@@ -34,7 +31,9 @@ import type {
   ReplaySnapshot,
   ReplaySession,
   ArchivedEvent,
+  PriceLevel,
 } from "@/types"
+import type { StaticOrderbookData } from "@/components/OrderbookView"
 
 function fmtTs(iso: string): string {
   try {
@@ -49,155 +48,97 @@ function fmtTs(iso: string): string {
   }
 }
 
-// ── Orderbook level row with depth bar (mirrors OrderbookView) ──────────────
-
-function LevelRow({
-  price,
-  size,
-  maxSize,
-  side,
-}: {
-  price: number
-  size: number
-  maxSize: number
-  side: "bid" | "ask"
-}) {
-  const pct = maxSize > 0 ? (size / maxSize) * 100 : 0
-  return (
-    <div className="relative flex items-center justify-between px-2 py-0.5 text-xs font-mono">
-      <div
-        className={cn(
-          "absolute inset-y-0 opacity-15",
-          side === "bid" ? "right-0 bg-chart-2" : "left-0 bg-chart-1",
-        )}
-        style={{ width: `${pct}%` }}
-      />
-      <span
-        className={cn(
-          "relative z-10",
-          side === "bid" ? "text-emerald-600" : "text-rose-600",
-        )}
-      >
-        {(price * 100).toFixed(1)}¢
-      </span>
-      <span className="relative z-10 text-muted-foreground">
-        {size.toFixed(0)}
-      </span>
-    </div>
-  )
-}
-
-// ── Price mini-chart (canvas, no extra deps) ────────────────────────────────
-
-interface PriceMiniChartProps {
-  timeline: ReplayTimeline
-  currentIndex: number
-  midPrice: number
-}
-
-function PriceMiniChart({ timeline, currentIndex, midPrice }: PriceMiniChartProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [priceHistory, setPriceHistory] = useState<{ idx: number; mid: number }[]>([])
-
-  useEffect(() => {
-    if (!midPrice || midPrice === 0) return
-    setPriceHistory((prev) => {
-      if (prev.length > 0 && prev[prev.length - 1].idx === currentIndex) return prev
-      const trimmed = prev.filter((p) => p.idx <= currentIndex)
-      return [...trimmed, { idx: currentIndex, mid: midPrice }]
-    })
-  }, [currentIndex, midPrice])
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas || priceHistory.length < 2) return
-    const ctx = canvas.getContext("2d")
-    if (!ctx) return
-
-    const dpr = window.devicePixelRatio || 1
-    const w = canvas.clientWidth
-    const h = canvas.clientHeight
-    canvas.width = w * dpr
-    canvas.height = h * dpr
-    ctx.scale(dpr, dpr)
-    ctx.clearRect(0, 0, w, h)
-
-    const prices = priceHistory.map((p) => p.mid)
-    const minP = Math.min(...prices)
-    const maxP = Math.max(...prices)
-    const range = maxP - minP || 0.001
-    const total = timeline.timestamps.length
-
-    ctx.beginPath()
-    ctx.strokeStyle = "#3b82f6"
-    ctx.lineWidth = 1.5
-    priceHistory.forEach((point, i) => {
-      const x = (point.idx / Math.max(total - 1, 1)) * w
-      const y = h - ((point.mid - minP) / range) * (h - 8) - 4
-      if (i === 0) ctx.moveTo(x, y)
-      else ctx.lineTo(x, y)
-    })
-    ctx.stroke()
-
-    // Current position marker
-    const cx = (currentIndex / Math.max(total - 1, 1)) * w
-    ctx.beginPath()
-    ctx.strokeStyle = "#ef4444"
-    ctx.lineWidth = 1
-    ctx.setLineDash([3, 3])
-    ctx.moveTo(cx, 0)
-    ctx.lineTo(cx, h)
-    ctx.stroke()
-    ctx.setLineDash([])
-
-    // Labels
-    ctx.fillStyle = "#888"
-    ctx.font = "10px monospace"
-    ctx.textAlign = "left"
-    ctx.fillText(`${(maxP * 100).toFixed(1)}¢`, 2, 12)
-    ctx.fillText(`${(minP * 100).toFixed(1)}¢`, 2, h - 2)
-  }, [priceHistory, currentIndex, timeline.timestamps.length])
-
-  return (
-    <canvas
-      ref={canvasRef}
-      className="h-32 w-full"
-      style={{ display: "block" }}
-    />
-  )
-}
-
 // ── Main page ───────────────────────────────────────────────────────────────
 
 export default function ReplayPage() {
   const { slug } = useParams<{ slug: string }>()
   const [currentIndex, setCurrentIndex] = useState(0)
+  const [playing, setPlaying] = useState(false)
+  const [speed, setSpeed] = useState("1")
+  const [playStartIndex, setPlayStartIndex] = useState(0)
   const [session, setSession] = useState<ReplaySession | null>(null)
   const [tradeAmount, setTradeAmount] = useState("")
+  const currentIndexRef = useRef(currentIndex)
+  currentIndexRef.current = currentIndex
 
-  // Load archive meta
+  // Load archive meta (retry every 3s if not ready — archival may still be in progress)
   const { data: archive } = useQuery<ArchivedEvent>({
     queryKey: ["archive", slug],
     queryFn: () => fetchArchive(slug!),
     enabled: !!slug,
+    retry: 10,
+    retryDelay: 3_000,
   })
 
-  // Load timeline
+  // Load timeline (retry similarly)
   const { data: timeline, isLoading: timelineLoading } = useQuery<ReplayTimeline>({
     queryKey: ["replayTimeline", slug],
     queryFn: () => fetchReplayTimeline(slug!),
     enabled: !!slug,
+    retry: 10,
+    retryDelay: 3_000,
   })
 
-  // Load snapshot — keepPreviousData prevents flickering on index change
+  // ── SSE stream (active during playback) ──────────────────
+  const {
+    snapshot: streamSnapshot,
+    streamIndex,
+    connected,
+  } = useReplayStream({
+    slug,
+    startIndex: playStartIndex,
+    speed: parseFloat(speed),
+    playing,
+  })
+
+  // Update currentIndex from stream
+  useEffect(() => {
+    if (playing && streamIndex !== currentIndex) {
+      setCurrentIndex(streamIndex)
+    }
+  }, [playing, streamIndex])
+
+  // Auto-stop at end
+  useEffect(() => {
+    if (playing && timeline && streamIndex >= timeline.timestamps.length - 1) {
+      setPlaying(false)
+    }
+  }, [playing, streamIndex, timeline])
+
+  // ── Single snapshot (when paused / seeking) ──────────────
   const currentTs = timeline?.timestamps[currentIndex] ?? ""
-  const { data: snapshot } = useQuery<ReplaySnapshot>({
+  const { data: fetchedSnapshot } = useQuery<ReplaySnapshot>({
     queryKey: ["replaySnapshot", slug, currentTs],
     queryFn: () => fetchReplaySnapshot(slug!, currentTs),
-    enabled: !!slug && !!currentTs,
+    enabled: !!slug && !!currentTs && !playing,
     staleTime: Infinity,
     placeholderData: keepPreviousData,
   })
+
+  // Use stream snapshot when playing, fetched when paused
+  const snapshot = playing ? (streamSnapshot ?? fetchedSnapshot) : fetchedSnapshot
+
+  // ── Playback controls ────────────────────────────────────
+  const handlePlayingChange = useCallback(
+    (play: boolean) => {
+      if (play) {
+        setPlayStartIndex(currentIndexRef.current)
+      }
+      setPlaying(play)
+    },
+    [],
+  )
+
+  const handleSpeedChange = useCallback(
+    (newSpeed: string) => {
+      setSpeed(newSpeed)
+      if (playing) {
+        // Reconnect from current position with new speed
+        setPlayStartIndex(currentIndexRef.current)
+      }
+    },
+    [playing],
+  )
 
   // Create replay session
   const createSessionMutation = useMutation({
@@ -233,30 +174,66 @@ export default function ReplayPage() {
   })
 
   const handleSeek = useCallback((index: number) => {
+    setPlaying(false)
     setCurrentIndex(index)
   }, [])
 
-  // ── Derived orderbook data ───────────────────────────────
-  const { asks, bids, maxSize } = useMemo(() => {
-    const bidPrices = snapshot?.bid_prices ?? []
-    const bidSizes = snapshot?.bid_sizes ?? []
-    const askPrices = snapshot?.ask_prices ?? []
-    const askSizes = snapshot?.ask_sizes ?? []
+  // ── Derived values ───────────────────────────────────────
+  // Token IDs: prefer from snapshot (per-token data), fallback to archive/timeline
+  const tokenIds = snapshot?.token_ids ?? timeline?.token_ids ?? archive?.token_ids ?? []
+  const replayTokens = tokenIds.length >= 2 ? [tokenIds[0], tokenIds[1]] : tokenIds.length === 1 ? [tokenIds[0]] : []
+  // Use real outcome labels from archive meta, fallback to UP/DOWN
+  const archiveOutcomes = archive?.outcomes ?? []
+  const replayOutcomes = replayTokens.map((_, i) =>
+    i < archiveOutcomes.length ? archiveOutcomes[i] : (i === 0 ? "Up" : "Down")
+  )
 
-    // Bids: highest price first (already sorted from API)
-    const b = bidPrices.slice(0, 15).map((p, i) => ({
-      price: parseFloat(String(p)),
-      size: parseFloat(String(bidSizes[i] ?? "0")),
-    }))
-    // Asks: lowest price first (already sorted from API)
-    const a = askPrices.slice(0, 15).map((p, i) => ({
-      price: parseFloat(String(p)),
-      size: parseFloat(String(askSizes[i] ?? "0")),
-    }))
+  // Per-token data from snapshot
+  const tokensData = snapshot?.tokens ?? {}
 
-    const allSizes = [...a.map((l) => l.size), ...b.map((l) => l.size)]
-    return { asks: a, bids: b, maxSize: Math.max(...allSizes, 1) }
-  }, [snapshot?.bid_prices, snapshot?.bid_sizes, snapshot?.ask_prices, snapshot?.ask_sizes])
+  // Per-token mid prices for outcome probability display
+  const token0Data = tokensData[replayTokens[0] ?? ""] ?? {}
+  const token1Data = tokensData[replayTokens[1] ?? ""] ?? {}
+  const mid0 = token0Data.mid_price ?? 0
+  const mid1 = token1Data.mid_price ?? 0
+  // First token's data for the price indicator row
+  const mid = mid0
+  const bestBid = token0Data.best_bid ?? 0
+  const bestAsk = token0Data.best_ask ?? 0
+  const spread = token0Data.spread ?? 0
+
+  // Build staticBooks for OrderbookView (per-token)
+  const staticBooks = useMemo<Record<string, StaticOrderbookData>>(() => {
+    const result: Record<string, StaticOrderbookData> = {}
+    for (const tid of replayTokens) {
+      const td = tokensData[tid]
+      if (!td) continue
+      const bids: PriceLevel[] = (td.bid_prices ?? []).map((p: string, i: number) => ({
+        price: String(p),
+        size: String((td.bid_sizes ?? [])[i] ?? "0"),
+      }))
+      const asks: PriceLevel[] = (td.ask_prices ?? []).map((p: string, i: number) => ({
+        price: String(p),
+        size: String((td.ask_sizes ?? [])[i] ?? "0"),
+      }))
+      result[tid] = {
+        bids,
+        asks,
+        lastTradePrice: td.mid_price ? String(td.mid_price) : undefined,
+      }
+    }
+    return result
+  }, [tokensData, replayTokens.join(",")])
+
+  // Build replayMid for PriceChart (per-token)
+  const replayMid = useMemo<Record<string, number>>(() => {
+    const result: Record<string, number> = {}
+    for (const tid of replayTokens) {
+      const m = tokensData[tid]?.mid_price
+      if (m && m > 0) result[tid] = m
+    }
+    return result
+  }, [tokensData, replayTokens.join(",")])
 
   const trades = snapshot?.trades ?? []
   const recentTrades = useMemo(
@@ -264,16 +241,14 @@ export default function ReplayPage() {
     [trades],
   )
 
-  // Map token_id to outcome label (UP/DOWN or Yes/No)
-  const tokenIds = archive?.token_ids ?? []
+  // Map token_id to outcome label using real outcome names
   const outcomeLabel = useCallback(
     (tokenId: string) => {
       const idx = tokenIds.indexOf(tokenId)
-      if (idx === 0) return "UP"
-      if (idx === 1) return "DOWN"
+      if (idx >= 0 && idx < replayOutcomes.length) return replayOutcomes[idx]
       return tokenId.slice(0, 6) + "…"
     },
-    [tokenIds],
+    [tokenIds, replayOutcomes],
   )
   const outcomeBadgeClass = useCallback(
     (tokenId: string) => {
@@ -307,11 +282,6 @@ export default function ReplayPage() {
     )
   }
 
-  const mid = snapshot?.mid_price ?? 0
-  const bestBid = snapshot?.best_bid ?? 0
-  const bestAsk = snapshot?.best_ask ?? 0
-  const spread = snapshot?.spread ?? 0
-
   return (
     <div className="flex flex-col gap-4">
       {/* ── Header ──────────────────────────────────────────── */}
@@ -327,11 +297,37 @@ export default function ReplayPage() {
         </Badge>
       </div>
 
+      {/* ── Data availability info ──────────────────────────── */}
+      {timeline.data_summary && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-muted-foreground">数据:</span>
+          <Badge variant={timeline.data_summary.prices.count > 0 ? "default" : "secondary"} className="text-xs font-mono">
+            价格 {timeline.data_summary.prices.count}
+          </Badge>
+          <Badge variant={timeline.data_summary.orderbooks.count > 0 ? "default" : "secondary"} className="text-xs font-mono">
+            盘口 {timeline.data_summary.orderbooks.count}
+          </Badge>
+          <Badge variant={timeline.data_summary.live_trades.count > 0 ? "default" : "secondary"} className="text-xs font-mono">
+            成交 {timeline.data_summary.live_trades.count}
+          </Badge>
+          {timeline.data_summary.prices.start && (
+            <span className="text-muted-foreground font-mono">
+              · 数据自 {fmtTs(timeline.data_summary.prices.start)} 开始
+            </span>
+          )}
+        </div>
+      )}
+
       {/* ── Replay Controls ─────────────────────────────────── */}
       <ReplayControls
         timeline={timeline}
         currentIndex={currentIndex}
+        playing={playing}
+        speed={speed}
+        connected={connected}
         onSeek={handleSeek}
+        onPlayingChange={handlePlayingChange}
+        onSpeedChange={handleSpeedChange}
       />
 
       {/* ── Main layout ─────────────────────────────────────── */}
@@ -339,12 +335,29 @@ export default function ReplayPage() {
         {/* ─── Left column (8/12) ─────────────────────────────── */}
         <div className="flex flex-col gap-4 lg:col-span-8">
 
-          {/* 1) Price indicators — single compact card */}
+          {/* 1) Outcome probabilities + price indicators */}
           <Card>
             <CardContent className="p-4">
+              {/* Outcome probability overview */}
+              {replayOutcomes.length >= 2 && (mid0 > 0 || mid1 > 0) && (
+                <div className="mb-3 grid grid-cols-2 gap-2 text-center">
+                  <div className="rounded-md px-2 py-1.5 bg-emerald-500/10">
+                    <div className="text-xs text-muted-foreground">{replayOutcomes[0]}</div>
+                    <div className="text-lg font-bold tabular-nums">
+                      {mid0 ? `${(mid0 * 100).toFixed(1)}¢` : "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-md px-2 py-1.5 bg-rose-500/10">
+                    <div className="text-xs text-muted-foreground">{replayOutcomes[1]}</div>
+                    <div className="text-lg font-bold tabular-nums">
+                      {mid1 ? `${(mid1 * 100).toFixed(1)}¢` : "—"}
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-4 gap-4 text-center">
                 <div>
-                  <div className="text-xs text-muted-foreground">Mid</div>
+                  <div className="text-xs text-muted-foreground">{replayOutcomes[0] ?? "Token 1"} Mid</div>
                   <div className="text-xl font-bold font-mono tabular-nums">
                     {mid ? `${(mid * 100).toFixed(1)}¢` : "—"}
                   </div>
@@ -371,142 +384,26 @@ export default function ReplayPage() {
             </CardContent>
           </Card>
 
-          {/* 2) Price mini-chart */}
-          <Card>
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm">价格走势</CardTitle>
-                {mid > 0 && (
-                  <span className="text-xs font-mono text-muted-foreground tabular-nums">
-                    当前 {(mid * 100).toFixed(1)}¢
-                  </span>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent className="p-3 pt-0">
-              <PriceMiniChart
-                timeline={timeline}
-                currentIndex={currentIndex}
-                midPrice={mid}
-              />
-            </CardContent>
-          </Card>
+          {/* 2) Price chart (TradingView Lightweight Charts) */}
+          <PriceChart
+            tokens={replayTokens}
+            outcomes={replayOutcomes}
+            replayMid={replayMid}
+            replayTimestamp={currentTs}
+          />
 
-          {/* 3) Orderbook — side-by-side Bids | Asks */}
-          <Card>
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <CardTitle className="text-sm">挂单深度</CardTitle>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border text-[10px] text-muted-foreground">?</span>
-                      </TooltipTrigger>
-                      <TooltipContent side="right" className="max-w-md text-left">
-                        <p className="font-medium">Orderbook 挂单深度</p>
-                        <p className="mt-1">显示当前时间点市场上<b>尚未成交</b>的挂单。</p>
-                        <p className="mt-1"><span className="text-emerald-400">Bids (买单)</span>：其他用户愿意以该价格买入的挂单量。</p>
-                        <p><span className="text-rose-400">Asks (卖单)</span>：其他用户愿意以该价格卖出的挂单量。</p>
-                        <p className="mt-1 text-muted">深度条宽度 = 该档位挂单量 ÷ 最大档位挂单量 × 100%</p>
-                        <p className="mt-1 text-muted">Spread = Best Ask - Best Bid（买卖价差）</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </div>
-                <span className="text-xs text-muted-foreground tabular-nums">
-                  Spread: {spread ? `${(spread * 100).toFixed(1)}¢` : "—"}
-                </span>
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="grid grid-cols-2 divide-x">
-                {/* Bids (left) */}
-                <div>
-                  <div className="flex items-center justify-between border-b bg-muted/30 px-2 py-1">
-                    <span className="text-[10px] font-medium text-emerald-600">Bids (买单)</span>
-                    <div className="flex gap-6 text-[10px] text-muted-foreground">
-                      <span>Price</span>
-                      <span>Size</span>
-                    </div>
-                  </div>
-                  <ScrollArea className="h-64">
-                    {bids.length > 0 ? (
-                      bids.map((level, i) => (
-                        <LevelRow
-                          key={`b-${i}`}
-                          price={level.price}
-                          size={level.size}
-                          maxSize={maxSize}
-                          side="bid"
-                        />
-                      ))
-                    ) : (
-                      <div className="py-8 text-center text-xs text-muted-foreground">
-                        暂无买单
-                      </div>
-                    )}
-                  </ScrollArea>
-                </div>
-                {/* Asks (right) */}
-                <div>
-                  <div className="flex items-center justify-between border-b bg-muted/30 px-2 py-1">
-                    <span className="text-[10px] font-medium text-rose-600">Asks (卖单)</span>
-                    <div className="flex gap-6 text-[10px] text-muted-foreground">
-                      <span>Price</span>
-                      <span>Size</span>
-                    </div>
-                  </div>
-                  <ScrollArea className="h-64">
-                    {asks.length > 0 ? (
-                      asks.map((level, i) => (
-                        <LevelRow
-                          key={`a-${i}`}
-                          price={level.price}
-                          size={level.size}
-                          maxSize={maxSize}
-                          side="ask"
-                        />
-                      ))
-                    ) : (
-                      <div className="py-8 text-center text-xs text-muted-foreground">
-                        暂无卖单
-                      </div>
-                    )}
-                  </ScrollArea>
-                </div>
-              </div>
-              {/* Mid price bar */}
-              <div className="border-t bg-muted/50 px-2 py-1 text-center text-xs font-medium tabular-nums">
-                Mid: {mid ? `${(mid * 100).toFixed(1)}¢` : "—"}
-              </div>
-            </CardContent>
-          </Card>
+          {/* 3) Orderbook (shared component) */}
+          <OrderbookView
+            tokens={replayTokens}
+            outcomes={replayOutcomes}
+            staticBooks={staticBooks}
+          />
 
-          {/* 4) Trades activity — with outcome (UP/DOWN) */}
+          {/* 4) Trades activity — real on-chain trades */}
           <Card>
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <CardTitle className="text-sm">推断成交</CardTitle>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border text-[10px] text-muted-foreground">?</span>
-                      </TooltipTrigger>
-                      <TooltipContent side="right" className="max-w-md text-left">
-                        <p className="font-medium">推断成交 (Inferred Trades)</p>
-                        <p className="mt-1">通过对比相邻两次 Orderbook 快照（间隔 ~1秒）的差异推断出的真实成交。</p>
-                        <p className="mt-1 font-medium">计算规则：</p>
-                        <p>• Ask 侧挂单量减少 → 有人买入 (BUY)</p>
-                        <p>• Bid 侧挂单量减少 → 有人卖出 (SELL)</p>
-                        <p className="mt-1"><b>均价</b> = Σ(消耗量 × 该档价格) ÷ Σ消耗量</p>
-                        <p><b>数量</b> = 被消耗的总份额（跨多个价位累计）</p>
-                        <p className="mt-1 text-muted">注意：数量可能远大于当前 Orderbook 单档挂单量，因为成交发生在上一秒快照中存在而当前已被消耗的挂单上。</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </div>
+                <CardTitle className="text-sm">成交记录</CardTitle>
                 <Badge variant="outline" className="text-xs font-mono">
                   {trades.length}
                 </Badge>
@@ -516,8 +413,9 @@ export default function ReplayPage() {
                 <span className="w-14 shrink-0">时间</span>
                 <span className="w-12 shrink-0 text-center">标的</span>
                 <span className="w-12 shrink-0 text-center">方向</span>
-                <span className="flex-1 text-right">均价</span>
+                <span className="flex-1 text-right">价格</span>
                 <span className="w-12 shrink-0 text-right">数量</span>
+                <span className="w-20 shrink-0 text-right">TxHash</span>
               </div>
             </CardHeader>
             <CardContent className="p-0">
@@ -557,6 +455,9 @@ export default function ReplayPage() {
                         </span>
                         <span className="font-mono text-right text-muted-foreground w-12 shrink-0">
                           {t.size.toFixed(0)}
+                        </span>
+                        <span className="font-mono text-right text-muted-foreground w-20 shrink-0 truncate" title={t.transaction_hash}>
+                          {t.transaction_hash ? t.transaction_hash.slice(0, 8) + "…" : "—"}
                         </span>
                       </div>
                     ))}
@@ -598,6 +499,27 @@ export default function ReplayPage() {
               </CardHeader>
               <CardContent>
                 <div className="flex flex-col gap-3">
+                  {/* Outcome probability overview */}
+                  {replayOutcomes.length >= 2 && (mid0 > 0 || mid1 > 0) && (
+                    <>
+                      <div className="grid grid-cols-2 gap-2 text-center">
+                        <div className="rounded-md px-2 py-1.5 bg-emerald-500/10 ring-1 ring-emerald-500/30">
+                          <div className="text-xs text-muted-foreground">{replayOutcomes[0]}</div>
+                          <div className="text-lg font-bold tabular-nums">
+                            {mid0 ? `${(mid0 * 100).toFixed(1)}¢` : "—"}
+                          </div>
+                        </div>
+                        <div className="rounded-md px-2 py-1.5 bg-rose-500/10 ring-1 ring-rose-500/30">
+                          <div className="text-xs text-muted-foreground">{replayOutcomes[1]}</div>
+                          <div className="text-lg font-bold tabular-nums">
+                            {mid1 ? `${(mid1 * 100).toFixed(1)}¢` : "—"}
+                          </div>
+                        </div>
+                      </div>
+                      <Separator />
+                    </>
+                  )}
+
                   {/* Balance */}
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">余额</span>
@@ -663,9 +585,15 @@ export default function ReplayPage() {
                       <div className="text-xs font-medium">持仓</div>
                       {Object.entries(session.positions).map(([tid, pos]) => (
                         <div key={tid} className="flex justify-between text-xs">
-                          <span className="truncate text-muted-foreground">
-                            {tid.slice(0, 8)}…
-                          </span>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-[10px] px-1 py-0",
+                              outcomeBadgeClass(tid),
+                            )}
+                          >
+                            {outcomeLabel(tid)}
+                          </Badge>
                           <span className="font-mono">
                             {pos.shares.toFixed(2)} @ {(pos.avg_cost * 100).toFixed(1)}¢
                           </span>

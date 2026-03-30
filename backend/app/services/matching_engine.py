@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -14,8 +15,11 @@ from app.models.trading import (
     OrderType,
 )
 from app.services.polymarket_proxy import get_midpoint, get_orderbook_raw
+from app.services.log_buffer import metrics
 from app.storage import redis_store
 from app.utils.price_impact import calculate_slippage, calculate_vwap_from_levels
+
+logger = logging.getLogger(__name__)
 
 
 async def estimate_order(req: EstimateResult | OrderRequest, token_id: str | None = None) -> EstimateResult:
@@ -92,6 +96,7 @@ async def execute_market_order(req: OrderRequest) -> OrderResult:
     slippage = calculate_slippage(mid, avg_price, req.side.value) if avg_price > 0 else 0.0
 
     if filled_amount <= 0:
+        logger.warning("Market order %s CANCELLED — no depth on %s side for %.2f shares", order_id[:8], req.side.value, req.amount)
         result = OrderResult(
             order_id=order_id,
             token_id=req.token_id,
@@ -112,6 +117,7 @@ async def execute_market_order(req: OrderRequest) -> OrderResult:
     if req.side == OrderSide.BUY:
         balance = await redis_store.get_balance()
         if balance < total_cost:
+            logger.warning("Market BUY %s CANCELLED — insufficient balance (%.2f < %.2f)", order_id[:8], balance, total_cost)
             result = OrderResult(
                 order_id=order_id,
                 token_id=req.token_id,
@@ -132,6 +138,7 @@ async def execute_market_order(req: OrderRequest) -> OrderResult:
     else:
         pos = await redis_store.get_position(req.token_id)
         if not pos or float(pos.get("shares", 0)) < filled_amount:
+            logger.warning("Market SELL %s CANCELLED — insufficient position for token %s", order_id[:8], req.token_id[:12])
             result = OrderResult(
                 order_id=order_id,
                 token_id=req.token_id,
@@ -168,6 +175,11 @@ async def execute_market_order(req: OrderRequest) -> OrderResult:
     )
 
     await redis_store.save_order(order_id, result.model_dump(mode="json"))
+    logger.info(
+        "Market %s %s — filled=%.4f @ avg=%.6f cost=%.4f slip=%.4f%% [%s]",
+        req.side.value, status.value, filled_amount, avg_price, total_cost, slippage, order_id[:8],
+    )
+    metrics.inc("orders.market_filled")
     # Record trade
     ts = datetime.now(timezone.utc).timestamp()
     trade = {
@@ -194,6 +206,8 @@ async def place_limit_order(req: OrderRequest) -> OrderResult:
 
     if req.price is None:
         raise ValueError("Limit order requires a price")
+
+    logger.info("Limit %s placed — %.4f shares @ %.6f [%s]", req.side.value, req.amount, req.price, order_id[:8])
 
     # For buy limit: reserve funds
     if req.side == OrderSide.BUY:
@@ -244,6 +258,7 @@ async def cancel_limit_order(order_id: str) -> OrderResult | None:
         return None
 
     order["status"] = OrderStatus.CANCELLED.value
+    logger.info("Limit order %s cancelled", order_id[:8])
 
     # Refund reserved balance for buy limit
     if order.get("side") == OrderSide.BUY.value and order.get("limit_price"):
@@ -297,6 +312,11 @@ async def check_and_fill_limit_orders() -> None:
             await redis_store.adjust_balance(total_cost)
             await _update_position_sell(token_id, amount, limit_price)
 
+        logger.info(
+            "Limit %s FILLED — %.4f @ %.6f (mid=%.6f) [%s]",
+            side, amount, limit_price, mid, order_id[:8],
+        )
+        metrics.inc("orders.limit_filled")
         order_data["status"] = OrderStatus.FILLED.value
         order_data["filled_amount"] = amount
         order_data["avg_price"] = limit_price
