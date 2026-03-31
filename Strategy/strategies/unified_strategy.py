@@ -1,10 +1,12 @@
 """统一策略 — 所有预设策略共用的参数化入场逻辑。
 
 通过 strategy_presets.json 中的特性开关控制检查项:
-  use_momentum_check  — 10 分钟动量检查 (solid_core, main_force)
+  use_momentum_check   — 10 分钟动量检查 (solid_core, main_force)
   use_direction_check  — 10 分钟方向一致性检查 (high_freq_coverage)
   use_std_check        — 波动率标准差检查 (solid_core, main_force)
   use_drawdown_check   — 窗口最大回撤检查 (solid_core, main_force)
+  use_amplitude_check  — 振幅范围检查
+  use_reverse_check    — 反转检测检查
 
 统一规则 (TP/SL/强制平仓/降仓) 由 UnifiedBaseStrategy 基类处理。
 """
@@ -32,6 +34,8 @@ class UnifiedStrategy(UnifiedBaseStrategy):
         self.use_direction: bool = config.get("use_direction_check", False)
         self.use_std: bool = config.get("use_std_check", True)
         self.use_drawdown: bool = config.get("use_drawdown_check", True)
+        self.use_amplitude: bool = config.get("use_amplitude_check", True)
+        self.use_reverse: bool = config.get("use_reverse_check", True)
 
         # ── Momentum params ──
         self.momentum_window: int = int(config.get("momentum_window", 600))
@@ -69,13 +73,11 @@ class UnifiedStrategy(UnifiedBaseStrategy):
         if remaining_ratio > self.time_remaining_ratio:
             return []
 
-        # Determine the minimum history length needed
-        min_history = max(
-            self.momentum_window if self.use_momentum else 0,
-            self.direction_window if self.use_direction else 0,
-            self.volatility_window,
-            self.reverse_tick_window,
-        )
+        # Minimum history: only require reverse_tick_window (30) as hard floor.
+        # Individual checks (momentum, volatility, etc.) use slicing that
+        # naturally adapts to shorter histories — no need to gate on the
+        # largest window which may exceed the market's total duration.
+        min_history = self.reverse_tick_window
 
         for token_id, snapshot in ctx.tokens.items():
             mid = snapshot.mid_price
@@ -103,15 +105,19 @@ class UnifiedStrategy(UnifiedBaseStrategy):
                 if up_count + down_count == 0 or up_count <= down_count:
                     continue
 
-            # 4. Amplitude check (always)
-            vol_window = min(self.volatility_window, len(history))
-            vol_slice = history[-vol_window:]
-            high, low = max(vol_slice), min(vol_slice)
-            if low == 0:
-                continue
-            amplitude = (high - low) / low
-            if amplitude < self.amplitude_min or amplitude > self.amplitude_max:
-                continue
+            # 4. Amplitude check (optional)
+            if self.use_amplitude:
+                vol_window = min(self.volatility_window, len(history))
+                vol_slice = history[-vol_window:]
+                high, low = max(vol_slice), min(vol_slice)
+                if low == 0:
+                    continue
+                amplitude = (high - low) / low
+                if amplitude < self.amplitude_min or amplitude > self.amplitude_max:
+                    continue
+            else:
+                vol_window = min(self.volatility_window, len(history))
+                vol_slice = history[-vol_window:]
 
             # 5. Std check (optional)
             if self.use_std:
@@ -136,15 +142,16 @@ class UnifiedStrategy(UnifiedBaseStrategy):
                 if max_dd > self.max_drawdown_limit:
                     continue
 
-            # 7. Reverse movement check (always)
-            reverse_window = min(self.reverse_tick_window, len(history))
-            recent = history[-reverse_window:]
-            has_reverse = any(
-                recent[i - 1] > 0 and (recent[i] - recent[i - 1]) / recent[i - 1] < -self.reverse_threshold
-                for i in range(1, len(recent))
-            )
-            if has_reverse:
-                continue
+            # 7. Reverse movement check (optional)
+            if self.use_reverse:
+                reverse_window = min(self.reverse_tick_window, len(history))
+                recent = history[-reverse_window:]
+                has_reverse = any(
+                    recent[i - 1] > 0 and (recent[i] - recent[i - 1]) / recent[i - 1] < -self.reverse_threshold
+                    for i in range(1, len(recent))
+                )
+                if has_reverse:
+                    continue
 
             # 8. Position sizing
             target_pct = (self.position_min_pct + self.position_max_pct) / 2

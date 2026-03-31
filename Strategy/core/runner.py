@@ -287,10 +287,6 @@ def run_backtest(
                 mid = float(p.get("mid_price", 0))
                 if mid > 0:
                     last_mid[tid] = mid
-                    price_history[tid].append(mid)
-                    # Keep window size
-                    if len(price_history[tid]) > config.price_history_window:
-                        price_history[tid] = price_history[tid][-config.price_history_window:]
 
         # 3) Advance live trades
         for tid in token_ids:
@@ -319,6 +315,15 @@ def run_backtest(
             elif snap.mid_price > 0:
                 last_mid[tid] = snap.mid_price
             token_snapshots[tid] = snap
+
+        # 4.5) Forward-fill price_history: exactly 1 entry per tick per token
+        #       This ensures window params (momentum_window, volatility_window)
+        #       operate on second-aligned data, not sparse price events.
+        for tid in token_ids:
+            if last_mid[tid] > 0:
+                price_history[tid].append(last_mid[tid])
+                if len(price_history[tid]) > config.price_history_window:
+                    price_history[tid] = price_history[tid][-config.price_history_window:]
 
         # 5) Compute equity
         positions_value = sum(
