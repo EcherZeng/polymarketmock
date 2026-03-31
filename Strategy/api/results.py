@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 
 import api.state as state
+from api.result_store import sanitize_floats
 
 router = APIRouter()
 
@@ -20,7 +22,7 @@ def _get_store():
 async def list_results():
     """List all backtest results (summary only)."""
     store = _get_store()
-    return [
+    return sanitize_floats([
         {
             "session_id": r["session_id"],
             "strategy": r["strategy"],
@@ -33,7 +35,7 @@ async def list_results():
             "metrics": r.get("metrics", {}),
         }
         for r in store.values()
-    ]
+    ])
 
 
 @router.get("/results/{session_id}")
@@ -43,7 +45,7 @@ async def get_result(session_id: str):
     result = store.get(session_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Result not found")
-    return result
+    return sanitize_floats(result)
 
 
 @router.get("/results/{session_id}/metrics")

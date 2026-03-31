@@ -55,7 +55,7 @@ def evaluate(session: BacktestSession) -> EvaluationMetrics:
     total_wins = sum(winners)
     total_losses = abs(sum(losers))
     m.profit_factor = round(total_wins / total_losses, 4) if total_losses > 0 else (
-        float("inf") if total_wins > 0 else 0.0
+        9999.0 if total_wins > 0 else 0.0
     )
 
     # Average slippage

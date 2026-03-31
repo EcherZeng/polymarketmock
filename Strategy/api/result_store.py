@@ -3,10 +3,26 @@
 from __future__ import annotations
 
 import json
+import math
 import logging
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def sanitize_floats(obj):
+    """Recursively replace inf/nan floats with JSON-safe values."""
+    if isinstance(obj, float):
+        if math.isnan(obj):
+            return None
+        if math.isinf(obj):
+            return 9999.0 if obj > 0 else -9999.0
+        return obj
+    if isinstance(obj, dict):
+        return {k: sanitize_floats(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [sanitize_floats(v) for v in obj]
+    return obj
 
 
 class ResultStore:
@@ -44,6 +60,7 @@ class ResultStore:
 
     def put(self, session_id: str, result: dict) -> None:
         """Store in memory and persist to disk."""
+        result = sanitize_floats(result)
         self._data[session_id] = result
         try:
             path = self._dir / f"{session_id}.json"
