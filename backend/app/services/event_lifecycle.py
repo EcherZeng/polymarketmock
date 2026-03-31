@@ -12,7 +12,9 @@ from app.storage import redis_store
 from app.storage.duckdb_store import (
     archive_event_data,
     get_archive_data_range,
+    list_archives,
     list_available_markets,
+    read_session_meta,
 )
 
 # Lazy import to avoid circular dependency at module level
@@ -106,7 +108,24 @@ async def _trigger_archive_if_needed(slug: str) -> None:
 
 
 def _compute_status(slug: str, event: dict, now_utc: datetime) -> dict:
-    """Compute event status from event data and current time."""
+    """Compute event status from event data and current time.
+
+    For BTC series events (slug contains ``Xm-epoch``), the slug-derived
+    start/end timestamps are treated as the authoritative source.  The
+    Gamma API ``endDate`` sometimes returns a shorter window (e.g. 5 min
+    for a 15 min event), which would prematurely trigger archival.
+    """
+    # ── Slug-derived authoritative window (BTC series) ────────
+    slug_start_dt: datetime | None = None
+    slug_end_dt: datetime | None = None
+    slug_m = re.search(r"(\d+)m-(\d{10})$", slug)
+    if slug_m:
+        interval_min = int(slug_m.group(1))
+        epoch = int(slug_m.group(2))
+        slug_start_dt = datetime.fromtimestamp(epoch, tz=timezone.utc)
+        slug_end_dt = datetime.fromtimestamp(epoch + interval_min * 60, tz=timezone.utc)
+
+    # ── API-provided times (fallback for non-BTC events) ──────
     end_str = event.get("endDate", "") or event.get("end_date", "")
     start_str = ""
     markets = event.get("markets", [])
@@ -120,7 +139,34 @@ def _compute_status(slug: str, event: dict, now_utc: datetime) -> dict:
     ended_at = None
     seconds_remaining = None
 
-    if end_str:
+    # Prefer slug-derived times when available
+    if slug_end_dt:
+        start_dt = slug_start_dt or slug_end_dt
+        end_dt = slug_end_dt
+
+        # Warn if API endDate disagrees significantly (> 60s difference)
+        if end_str:
+            try:
+                api_end = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+                diff = abs((end_dt - api_end).total_seconds())
+                if diff > 60:
+                    logger.warning(
+                        "Slug vs API endDate mismatch for %s: slug=%s, api=%s (diff=%.0fs)",
+                        slug, end_dt.isoformat(), api_end.isoformat(), diff,
+                    )
+            except (ValueError, TypeError):
+                pass
+
+        if end_dt <= now_utc:
+            status = "ended"
+            ended_at = end_dt.isoformat()
+        elif start_dt <= now_utc:
+            status = "live"
+            seconds_remaining = (end_dt - now_utc).total_seconds()
+        else:
+            status = "upcoming"
+            seconds_remaining = (start_dt - now_utc).total_seconds()
+    elif end_str:
         try:
             end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
             start_dt = (
@@ -209,28 +255,38 @@ async def get_next_live_event(current_slug: str) -> dict | None:
     if m:
         prefix = m.group(1)
         curr_ts = int(m.group(2))
-        # Determine interval from prefix
         interval = _interval_from_prefix(prefix)
+        if interval is None:
+            logger.warning("Cannot determine interval for slug: %s", current_slug)
+            return None
         return await _find_next_btc(prefix, curr_ts, interval)
 
     m = _GENERIC_TS_RE.match(current_slug)
     if m:
         prefix = m.group(1)
         curr_ts = int(m.group(2))
-        interval = 300  # default 5m
+        interval = _interval_from_prefix(prefix)
+        if interval is None:
+            logger.warning("Cannot determine interval for slug: %s", current_slug)
+            return None
         return await _find_next_btc(prefix, curr_ts, interval)
 
     return None
 
 
-def _interval_from_prefix(prefix: str) -> int:
-    if "30m" in prefix:
-        return 1800
-    if "15m" in prefix:
-        return 900
-    if "5m" in prefix:
-        return 300
-    return 300
+# Regex: extract Xm duration suffix from prefix string
+_INTERVAL_RE = re.compile(r"(\d+)m")
+
+
+def _interval_from_prefix(prefix: str) -> int | None:
+    """Extract interval in seconds from a slug prefix.
+
+    Returns ``None`` if no Xm token is found (caller should decide fallback).
+    """
+    m = _INTERVAL_RE.search(prefix)
+    if m:
+        return int(m.group(1)) * 60
+    return None
 
 
 async def _find_next_btc(prefix: str, curr_ts: int, interval: int) -> dict | None:
@@ -466,15 +522,70 @@ async def archive_event(slug: str, market_info: dict) -> dict:
 
 
 async def list_archived_events() -> list[dict]:
-    """List all archived event slugs with metadata (excluding soft-deleted)."""
-    slugs = await redis_store.list_archive_slugs()
+    """List all archived event slugs with metadata (excluding soft-deleted).
+
+    Self-healing: scans filesystem for sessions that have archive/ data
+    but are missing from Redis, and backfills their metadata automatically.
+    """
+    # 1. Fast path — load known archives from Redis
+    redis_slugs = await redis_store.list_archive_slugs()
+    seen: set[str] = set()
     result: list[dict] = []
-    for slug in slugs:
+    for slug in redis_slugs:
         meta = await redis_store.get_archive_meta(slug)
         if meta and not meta.get("deleted"):
             meta = await _ensure_archive_meta_fields(slug, meta)
             result.append(meta)
+            seen.add(slug)
+
+    # 2. Scan filesystem for sessions with archive/ that Redis doesn't know about
+    disk_slugs = list_archives()
+    for slug in disk_slugs:
+        if slug in seen:
+            continue
+        # Read meta.json from disk
+        disk_meta = read_session_meta(slug)
+        if disk_meta and disk_meta.get("deleted"):
+            continue
+        # Build minimal meta from disk or parquet data
+        meta = await _recover_archive_meta(slug, disk_meta)
+        if meta is None:
+            continue
+        # Backfill into Redis so next call is fast
+        await redis_store.set_archive_meta(slug, json.dumps(meta))
+        logger.info("Self-healed archive meta for %s into Redis", slug)
+        result.append(meta)
+
     return result
+
+
+async def _recover_archive_meta(slug: str, disk_meta: dict | None) -> dict | None:
+    """Build archive metadata from disk meta.json or by inspecting parquet files."""
+    data_range = get_archive_data_range(slug)
+    if not data_range.get("data_start") and not data_range.get("data_end"):
+        # No actual data in archive — skip
+        return None
+
+    if disk_meta:
+        meta = dict(disk_meta)
+    else:
+        meta = {"slug": slug, "title": slug, "market_id": "", "token_ids": []}
+
+    meta.setdefault("slug", slug)
+    meta.setdefault("title", slug)
+    meta["data_start"] = data_range.get("data_start", "")
+    meta["data_end"] = data_range.get("data_end", "")
+    meta.setdefault("archived_at", meta.get("end_time", data_range.get("data_end", "")))
+
+    # Derive start_time / end_time from slug if possible
+    m = re.search(r"(\d+)m-(\d{10})$", slug)
+    if m:
+        interval_min = int(m.group(1))
+        epoch = int(m.group(2))
+        meta["start_time"] = datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
+        meta["end_time"] = datetime.fromtimestamp(epoch + interval_min * 60, tz=timezone.utc).isoformat()
+
+    return await _ensure_archive_meta_fields(slug, meta)
 
 
 async def _ensure_archive_meta_fields(slug: str, meta: dict) -> dict:
