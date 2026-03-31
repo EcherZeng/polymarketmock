@@ -148,3 +148,10 @@ Registry │ upcoming │ ────────→ │ waiting  │ ───
          (Parquet)                    (触发归档)                     (session状态)
 
          
+
+## 回测工作流
+
+每个 slug 的生命周期:
+  pending → running → [data_load] → [tick_loop] → [evaluate] → [done] = completed
+                         ↓              ↓              ↓
+                       fail → failed  fail → failed  fail → failed

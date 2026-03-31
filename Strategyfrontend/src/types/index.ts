@@ -135,6 +135,14 @@ export interface RunRequest {
   settlement_result?: Record<string, number>
 }
 
+export interface BatchRequest {
+  strategy: string
+  slugs: string[]
+  initial_balance: number
+  config: Record<string, unknown>
+  settlement_result?: Record<string, number>
+}
+
 export interface BatchTask {
   batch_id: string
   strategy: string
@@ -143,4 +151,40 @@ export interface BatchTask {
   total: number
   completed: number
   created_at: string
+}
+
+export interface BatchResultSummary {
+  session_id: string
+  status: string
+  initial_balance: number
+  final_equity: number
+  total_return_pct: number
+  sharpe_ratio: number
+  total_trades: number
+  win_rate: number
+  max_drawdown: number
+  avg_slippage: number
+  profit_factor: number
+}
+
+export interface StepLog {
+  timestamp: string
+  step: string // "data_load" | "strategy_init" | "tick_loop" | "evaluate" | "done" | "error" | "cancelled"
+  status: string // "ok" | "fail" | "skip"
+  message: string
+  detail: string
+  duration_ms: number
+}
+
+export interface SlugWorkflow {
+  slug: string
+  status: string // "pending" | "running" | "completed" | "failed" | "skipped"
+  error: string
+  steps: StepLog[]
+}
+
+export interface BatchTaskDetail extends BatchTask {
+  results: Record<string, BatchResultSummary>
+  errors: Record<string, string>
+  workflows: Record<string, SlugWorkflow>
 }

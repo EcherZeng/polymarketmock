@@ -5,9 +5,12 @@ import StrategyPage from "@/pages/StrategyPage"
 import ResultsListPage from "@/pages/ResultsListPage"
 import ResultDetailPage from "@/pages/ResultDetailPage"
 import DashboardPage from "@/pages/DashboardPage"
+import BatchDashboardPage from "@/pages/BatchDashboardPage"
+import BatchDetailPage from "@/pages/BatchDetailPage"
 
 const navItems = [
   { to: "/", label: "策略回测" },
+  { to: "/batch", label: "批量回测" },
   { to: "/results", label: "回测结果" },
   { to: "/dashboard", label: "仪表盘" },
 ]
@@ -31,6 +34,7 @@ export default function App() {
                 className={cn(
                   "text-sm transition-colors hover:text-foreground",
                   location.pathname === item.to
+                    || (item.to === "/batch" && location.pathname.startsWith("/batch"))
                     ? "text-foreground font-medium"
                     : "text-muted-foreground",
                 )}
@@ -44,6 +48,8 @@ export default function App() {
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-4">
         <Routes>
           <Route path="/" element={<StrategyPage />} />
+          <Route path="/batch" element={<BatchDashboardPage />} />
+          <Route path="/batch/:batchId" element={<BatchDetailPage />} />
           <Route path="/results" element={<ResultsListPage />} />
           <Route path="/results/:sessionId" element={<ResultDetailPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />

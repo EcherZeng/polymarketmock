@@ -50,19 +50,21 @@ async def run_single(req: RunRequest):
         raise HTTPException(status_code=404, detail=f"Strategy '{req.strategy}' not found")
 
     # Run in thread pool (DuckDB is sync)
-    session = await asyncio.to_thread(
-        run_backtest,
-        registry,
-        req.strategy,
-        req.slug,
-        req.config,
-        req.initial_balance,
-        None,  # data
-        req.settlement_result,
-    )
-
-    if session.status == "failed":
-        raise HTTPException(status_code=400, detail="Backtest failed — check data or strategy")
+    try:
+        session = await asyncio.to_thread(
+            run_backtest,
+            registry,
+            req.strategy,
+            req.slug,
+            req.config,
+            req.initial_balance,
+            None,  # data
+            req.settlement_result,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Backtest execution error: {e}")
 
     # Compute metrics and drawdown
     metrics = evaluate(session)
@@ -88,7 +90,7 @@ async def run_batch(req: BatchRequest):
         raise HTTPException(status_code=503, detail="Batch runner not initialized")
 
     batch_id = await state.batch_runner.submit(
-        req.strategy, req.slugs, req.config, req.initial_balance,
+        req.strategy, req.slugs, req.config, req.initial_balance, req.settlement_result,
     )
     return {"batch_id": batch_id, "total": len(req.slugs)}
 
@@ -114,28 +116,51 @@ async def list_tasks():
 
 @router.get("/tasks/{batch_id}")
 async def get_task(batch_id: str):
-    """Get batch task progress and results."""
+    """Get batch task progress and results with workflow step logs."""
     if state.batch_runner is None:
         raise HTTPException(status_code=503, detail="Batch runner not initialized")
     task = state.batch_runner.get_task(batch_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Batch not found")
 
-    # Evaluate and store completed results
+    # Evaluate and store completed results (metrics computed in batch_runner now,
+    # but still need to serialize into _results for /results/ endpoints)
     results_summary: dict[str, dict] = {}
     for slug, session in task.results.items():
         if session.session_id not in _results:
-            metrics = evaluate(session)
-            session.metrics = metrics
-            session.drawdown_curve = compute_drawdown_curve(session.equity_curve)
-            session.drawdown_events = compute_drawdown_events(session.equity_curve)
             _results[session.session_id] = _serialize_session(session)
         results_summary[slug] = {
             "session_id": session.session_id,
             "status": session.status,
+            "initial_balance": session.initial_balance,
+            "final_equity": session.final_equity,
             "total_return_pct": session.metrics.total_return_pct,
             "sharpe_ratio": session.metrics.sharpe_ratio,
             "total_trades": session.metrics.total_trades,
+            "win_rate": session.metrics.win_rate,
+            "max_drawdown": session.metrics.max_drawdown,
+            "avg_slippage": session.metrics.avg_slippage,
+            "profit_factor": session.metrics.profit_factor,
+        }
+
+    # Serialize workflow step logs
+    workflows: dict[str, dict] = {}
+    for slug, wf in task.workflows.items():
+        workflows[slug] = {
+            "slug": wf.slug,
+            "status": wf.status,
+            "error": wf.error,
+            "steps": [
+                {
+                    "timestamp": s.timestamp,
+                    "step": s.step,
+                    "status": s.status,
+                    "message": s.message,
+                    "detail": s.detail,
+                    "duration_ms": s.duration_ms,
+                }
+                for s in wf.steps
+            ],
         }
 
     return {
@@ -148,6 +173,7 @@ async def get_task(batch_id: str):
         "created_at": task.created_at,
         "results": results_summary,
         "errors": task.errors,
+        "workflows": workflows,
     }
 
 

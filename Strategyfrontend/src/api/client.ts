@@ -10,6 +10,9 @@ import type {
   TradeRecord,
   PositionPoint,
   RunRequest,
+  BatchRequest,
+  BatchTask,
+  BatchTaskDetail,
 } from "@/types"
 
 const api = axios.create({ baseURL: "/strategy" })
@@ -43,6 +46,29 @@ export async function fetchArchiveDetail(slug: string): Promise<ArchiveInfo> {
 export async function runBacktest(req: RunRequest): Promise<BacktestResult> {
   const { data } = await api.post<BacktestResult>("/run", req)
   return data
+}
+
+// ── Batch Execution ─────────────────────────────────────────────────────────
+
+export async function submitBatch(
+  req: BatchRequest,
+): Promise<{ batch_id: string; total: number }> {
+  const { data } = await api.post<{ batch_id: string; total: number }>("/batch", req)
+  return data
+}
+
+export async function fetchBatchTasks(): Promise<BatchTask[]> {
+  const { data } = await api.get<BatchTask[]>("/tasks")
+  return data
+}
+
+export async function fetchBatchTask(batchId: string): Promise<BatchTaskDetail> {
+  const { data } = await api.get<BatchTaskDetail>(`/tasks/${batchId}`)
+  return data
+}
+
+export async function cancelBatch(batchId: string): Promise<void> {
+  await api.post(`/tasks/${batchId}/cancel`)
 }
 
 // ── Results ─────────────────────────────────────────────────────────────────

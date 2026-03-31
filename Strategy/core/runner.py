@@ -187,14 +187,8 @@ def run_backtest(
     # Resolve strategy
     strategy_cls = registry.get(strategy_name)
     if strategy_cls is None:
-        return BacktestSession(
-            session_id=session_id,
-            strategy=strategy_name,
-            slug=slug,
-            initial_balance=initial_balance,
-            status="failed",
-            created_at=datetime.now(timezone.utc).isoformat(),
-        )
+        logger.error("Strategy '%s' not found in registry", strategy_name)
+        raise ValueError(f"Strategy '{strategy_name}' not found in registry")
 
     strategy: BaseStrategy = strategy_cls()
 
@@ -203,22 +197,28 @@ def run_backtest(
         data = load_archive(config.data_dir, slug)
 
     if not data.prices and not data.orderbooks:
-        return BacktestSession(
-            session_id=session_id,
-            strategy=strategy_name,
-            slug=slug,
-            initial_balance=initial_balance,
-            status="failed",
-            created_at=datetime.now(timezone.utc).isoformat(),
-        )
+        logger.error("Slug '%s' has no prices and no orderbooks", slug)
+        raise ValueError(f"Slug '{slug}' archive is empty — no prices and no orderbooks")
 
     # Token IDs
     token_ids = _collect_token_ids(data)
+    if not token_ids:
+        raise ValueError(f"Slug '{slug}' has no token_ids in data")
+
+    logger.info(
+        "Backtest %s [%s/%s]: %d tokens, data=%d prices + %d orderbooks + %d deltas",
+        session_id, strategy_name, slug, len(token_ids),
+        len(data.prices), len(data.orderbooks), len(data.ob_deltas),
+    )
 
     # Build time grid
     all_ts = _collect_timestamps(data)
     time_grid = _build_time_grid(all_ts)
     total_ticks = len(time_grid)
+    if total_ticks == 0:
+        raise ValueError(f"Slug '{slug}' produced an empty time grid (no timestamps)")
+
+    logger.info("Backtest %s: time grid %d ticks (%s → %s)", session_id, total_ticks, time_grid[0], time_grid[-1])
 
     # Build indexed data per token for efficient lookup
     ob_by_token = _build_index(data.orderbooks)
@@ -262,7 +262,10 @@ def run_backtest(
 
     # Init strategy
     merged_config = {**strategy_cls.default_config, **user_config}
-    strategy.on_init(merged_config)
+    try:
+        strategy.on_init(merged_config)
+    except Exception as e:
+        raise ValueError(f"Strategy '{strategy_name}' on_init failed: {e}") from e
 
     # ── Tick loop ────────────────────────────────────────────────────────────
 
