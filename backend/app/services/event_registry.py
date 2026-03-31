@@ -95,14 +95,41 @@ def _extract_epoch(slug: str) -> int:
         return 0
 
 
-def _compute_status(event: dict, now_utc: datetime) -> str:
-    """Return 'ended' | 'live' | 'upcoming' | 'unknown'."""
+# Regex for extracting Xm duration from slug
+_INTERVAL_RE = re.compile(r"(\d+)m")
+
+
+def _compute_status(event: dict, now_utc: datetime, slug: str = "") -> str:
+    """Return 'ended' | 'live' | 'upcoming' | 'unknown'.
+
+    When *slug* matches an ``Xm-epoch`` pattern the slug-derived end time
+    is used as the authoritative source instead of the Gamma API ``endDate``.
+    """
+    # Slug-derived authoritative window
+    slug_start_dt: datetime | None = None
+    slug_end_dt: datetime | None = None
+    slug_m = re.search(r"(\d+)m-(\d{10})$", slug)
+    if slug_m:
+        interval_min = int(slug_m.group(1))
+        epoch = int(slug_m.group(2))
+        slug_start_dt = datetime.fromtimestamp(epoch, tz=timezone.utc)
+        slug_end_dt = datetime.fromtimestamp(epoch + interval_min * 60, tz=timezone.utc)
+
     end_str = event.get("endDate", "") or event.get("end_date", "")
     markets = event.get("markets", [])
     m0 = markets[0] if markets else {}
     start_str = m0.get("eventStartTime", m0.get("startDate", "")) or ""
     if not start_str:
         start_str = event.get("startDate", "") or event.get("start_date", "")
+
+    # Prefer slug-derived times for BTC series
+    if slug_end_dt:
+        start_dt = slug_start_dt or slug_end_dt
+        if slug_end_dt <= now_utc:
+            return "ended"
+        if start_dt <= now_utc:
+            return "live"
+        return "upcoming"
 
     if end_str:
         try:
@@ -233,7 +260,7 @@ class EventRegistry:
         event = await self._fetch_slug(slug)
         if event:
             now_utc = datetime.now(timezone.utc)
-            status = _compute_status(event, now_utc)
+            status = _compute_status(event, now_utc, slug)
             slim = _slim_event(event)
             await redis_store.registry_set_event(
                 slug, json.dumps(slim), _status_ttl(status),
@@ -249,7 +276,7 @@ class EventRegistry:
         result: list[dict] = []
         for entry in dq:
             e = dict(entry.event)
-            e["_status"] = _compute_status(entry.event, now_utc)
+            e["_status"] = _compute_status(entry.event, now_utc, entry.slug)
             result.append(e)
         return result
 
@@ -268,9 +295,9 @@ class EventRegistry:
         for entry in dq:
             if not entry.slug.startswith(prefix):
                 continue
-            status = _compute_status(entry.event, now_utc)
+            status = _compute_status(entry.event, now_utc, entry.slug)
             if status in ("live", "upcoming"):
-                secs = self._seconds_remaining(entry.event, status, now_utc)
+                secs = self._seconds_remaining(entry.event, status, now_utc, entry.slug)
                 return {
                     "slug": entry.slug,
                     "event": entry.event,
@@ -296,7 +323,7 @@ class EventRegistry:
             entry_ts = _extract_epoch(entry.slug)
             if entry_ts <= curr_ts:
                 continue
-            status = _compute_status(entry.event, now_utc)
+            status = _compute_status(entry.event, now_utc, entry.slug)
             if status in ("live", "upcoming"):
                 return {
                     "slug": entry.slug,
@@ -312,7 +339,7 @@ class EventRegistry:
         now_utc = datetime.now(timezone.utc)
         for dur_key, dq in self._windows.items():
             upcoming_count = sum(
-                1 for e in dq if _compute_status(e.event, now_utc) == "upcoming"
+                1 for e in dq if _compute_status(e.event, now_utc, e.slug) == "upcoming"
             )
             if upcoming_count <= _UPCOMING_THRESHOLD:
                 asyncio.create_task(self._safe_refresh(dur_key))
@@ -354,7 +381,7 @@ class EventRegistry:
             event = await self._fetch_slug(slug)
             if not event:
                 continue
-            status = _compute_status(event, now_utc)
+            status = _compute_status(event, now_utc, slug)
             slim = _slim_event(event)
             entry = _Entry(slug, slim, status)
             dq.append(entry)
@@ -379,7 +406,7 @@ class EventRegistry:
         # Count ended events on the left
         ended_count = 0
         for entry in dq:
-            if _compute_status(entry.event, now_utc) == "ended":
+            if _compute_status(entry.event, now_utc, entry.slug) == "ended":
                 ended_count += 1
             else:
                 break  # sorted by time, so first non-ended means rest are live/upcoming
@@ -411,7 +438,7 @@ class EventRegistry:
             cached = await redis_store.registry_get_event(slug)
             if not cached:
                 continue
-            status = _compute_status(cached, now_utc)
+            status = _compute_status(cached, now_utc, slug)
             entry = _Entry(slug, cached, status)
             dq.append(entry)
             self._index[slug] = entry
@@ -451,7 +478,7 @@ class EventRegistry:
             event = await self._fetch_slug(slug)
             if not event:
                 continue
-            status = _compute_status(event, now_utc)
+            status = _compute_status(event, now_utc, slug)
             slim = _slim_event(event)
             entry = _Entry(slug, slim, status)
             dq.append(entry)
@@ -495,7 +522,7 @@ class EventRegistry:
                 # Recompute statuses for all entries
                 for dq in self._windows.values():
                     for entry in dq:
-                        entry.status = _compute_status(entry.event, now_utc)
+                        entry.status = _compute_status(entry.event, now_utc, entry.slug)
                 # Check thresholds
                 self._maybe_trigger_refresh()
             except Exception as e:
@@ -505,16 +532,26 @@ class EventRegistry:
 
     @staticmethod
     def _interval_from_prefix(prefix: str) -> int:
-        if "30m" in prefix:
-            return 1800
-        if "15m" in prefix:
-            return 900
-        if "5m" in prefix:
-            return 300
+        m = _INTERVAL_RE.search(prefix)
+        if m:
+            return int(m.group(1)) * 60
         return 300
 
     @staticmethod
-    def _seconds_remaining(event: dict, status: str, now_utc: datetime) -> float | None:
+    def _seconds_remaining(event: dict, status: str, now_utc: datetime, slug: str = "") -> float | None:
+        # Prefer slug-derived times
+        slug_m = re.search(r"(\d+)m-(\d{10})$", slug)
+        if slug_m:
+            interval_min = int(slug_m.group(1))
+            epoch = int(slug_m.group(2))
+            slug_start = datetime.fromtimestamp(epoch, tz=timezone.utc)
+            slug_end = datetime.fromtimestamp(epoch + interval_min * 60, tz=timezone.utc)
+            if status == "live":
+                return round((slug_end - now_utc).total_seconds(), 1)
+            if status == "upcoming":
+                return round((slug_start - now_utc).total_seconds(), 1)
+            return None
+
         end_str = event.get("endDate", "") or event.get("end_date", "")
         markets = event.get("markets", [])
         m0 = markets[0] if markets else {}

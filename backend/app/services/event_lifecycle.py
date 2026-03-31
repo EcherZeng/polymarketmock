@@ -377,13 +377,25 @@ async def auto_archive_if_ended() -> None:
         if not market_info:
             continue
 
-        end_str = market_info.get("endDate", "") or market_info.get("end_date", "")
-        if not end_str:
-            continue
+        slug = market_info.get("slug", market_id)
 
-        try:
-            end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
-        except (ValueError, TypeError):
+        # Derive authoritative end time from slug when possible
+        end_dt = None
+        slug_m = re.search(r"(\d+)m-(\d{10})$", slug)
+        if slug_m:
+            interval_min = int(slug_m.group(1))
+            epoch = int(slug_m.group(2))
+            end_dt = datetime.fromtimestamp(epoch + interval_min * 60, tz=timezone.utc)
+        else:
+            end_str = market_info.get("endDate", "") or market_info.get("end_date", "")
+            if not end_str:
+                continue
+            try:
+                end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                continue
+
+        if end_dt is None:
             continue
 
         now_utc = datetime.now(timezone.utc)
@@ -391,7 +403,6 @@ async def auto_archive_if_ended() -> None:
             continue
 
         # Event has ended — archive
-        slug = market_info.get("slug", market_id)
         existing = await redis_store.get_archive_meta(slug)
         if existing and not existing.get("deleted"):
             continue  # Already archived
