@@ -51,6 +51,13 @@ backend/data/prices/*
 !backend/data/orderbooks/.gitkeep
 !backend/data/prices/.gitkeep
 
+# Session data (Parquet, logs, etc.)
+backend/data/sessions/
+backend/data/logs/
+
+# Parquet files anywhere
+*.parquet
+
 # DuckDB
 *.duckdb
 *.duckdb.wal

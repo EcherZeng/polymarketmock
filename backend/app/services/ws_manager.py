@@ -70,6 +70,9 @@ class PolymarketWSManager:
         # Lazy-connect signal: set when _subscribed is non-empty
         self._has_subscriptions = asyncio.Event()
 
+        # Track whether the initial subscription has been sent on current connection
+        self._initial_sub_sent: bool = False
+
         # Subscribed asset_ids on the upstream connection
         self._subscribed: set[str] = set()
 
@@ -166,8 +169,9 @@ class PolymarketWSManager:
             logger.info("Polymarket WS connected")
 
             # Re-subscribe to any previously tracked assets
+            self._initial_sub_sent = False
             if self._subscribed:
-                await self._send_subscribe(list(self._subscribed))
+                await self._send_subscribe_initial(list(self._subscribed))
 
             # Start ping task
             self._ping_task = asyncio.create_task(self._ping_loop(ws))
@@ -203,7 +207,12 @@ class PolymarketWSManager:
         self._subscribed.update(new)
         self._has_subscriptions.set()  # wake _run_loop if sleeping
         if self._ws and self.connected:
-            await self._send_subscribe(new)
+            if self._initial_sub_sent:
+                # Connection already has a subscription — use update protocol
+                await self._send_subscribe_update(new)
+            else:
+                # First subscription on this connection — use initial protocol
+                await self._send_subscribe_initial(list(self._subscribed))
 
     async def unsubscribe(self, asset_ids: list[str]) -> None:
         removing = [a for a in asset_ids if a in self._subscribed]
@@ -239,7 +248,11 @@ class PolymarketWSManager:
         if to_unsub:
             await self.unsubscribe(to_unsub)
 
-    async def _send_subscribe(self, asset_ids: list[str]) -> None:
+    async def _send_subscribe_initial(self, asset_ids: list[str]) -> None:
+        """Send initial subscription (sets the full subscription list).
+
+        Used only once per connection — on connect/reconnect.
+        """
         if not self._ws:
             return
         msg = {
@@ -249,7 +262,24 @@ class PolymarketWSManager:
             "custom_feature_enabled": True,
         }
         await self._ws.send(json.dumps(msg))
-        logger.info("WS subscribed to %d assets", len(asset_ids))
+        self._initial_sub_sent = True
+        logger.info("WS initial subscribe: %d assets", len(asset_ids))
+        metrics.set("ws.subscribed_assets", len(self._subscribed))
+
+    async def _send_subscribe_update(self, asset_ids: list[str]) -> None:
+        """Incrementally add assets to the existing subscription.
+
+        Uses the update protocol so existing subscriptions are preserved.
+        """
+        if not self._ws:
+            return
+        msg = {
+            "operation": "subscribe",
+            "assets_ids": asset_ids,
+            "custom_feature_enabled": True,
+        }
+        await self._ws.send(json.dumps(msg))
+        logger.info("WS update subscribe: +%d assets (total %d)", len(asset_ids), len(self._subscribed))
         metrics.set("ws.subscribed_assets", len(self._subscribed))
 
     async def _send_unsubscribe(self, asset_ids: list[str]) -> None:
@@ -275,6 +305,7 @@ class PolymarketWSManager:
                 pass
             self._ws = None
         self.connected = False
+        self._initial_sub_sent = False
         logger.info("WS upstream closed — no active subscribers")
 
     # ── Message dispatch ──────────────────────────────────────

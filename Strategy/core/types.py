@@ -73,6 +73,10 @@ class ArchiveInfo:
     size_bytes: int = 0
     time_range: dict = field(default_factory=dict)
     token_ids: list[str] = field(default_factory=list)
+    prices_count: int = 0
+    orderbooks_count: int = 0
+    live_trades_count: int = 0
+    source: str = "archive"  # "archive" | "live"
 
 
 @dataclass
@@ -83,6 +87,20 @@ class ArchiveData:
     orderbooks: list[dict] = field(default_factory=list)
     ob_deltas: list[dict] = field(default_factory=list)
     live_trades: list[dict] = field(default_factory=list)
+
+
+@dataclass
+class DrawdownEvent:
+    """A single drawdown episode (peak → trough → recovery)."""
+
+    start_time: str
+    trough_time: str
+    recovery_time: str | None = None
+    peak_equity: float = 0.0
+    trough_equity: float = 0.0
+    drawdown_pct: float = 0.0
+    duration_seconds: float = 0.0
+    recovery_seconds: float | None = None
 
 
 @dataclass
@@ -118,6 +136,13 @@ class EvaluationMetrics:
     sell_count: int = 0
     avg_slippage: float = 0.0
 
+    # BTC prediction market metrics
+    settlement_pnl: float = 0.0
+    trade_pnl: float = 0.0
+    hold_to_settlement_ratio: float = 0.0
+    avg_entry_price: float = 0.0
+    expected_value: float = 0.0
+
 
 @dataclass
 class BacktestSession:
@@ -135,8 +160,14 @@ class BacktestSession:
     equity_curve: list[dict] = field(default_factory=list)  # [{timestamp, equity}]
     drawdown_curve: list[dict] = field(default_factory=list)
     position_curve: list[dict] = field(default_factory=list)
+    price_curve: list[dict] = field(default_factory=list)  # [{timestamp, token_id, mid_price}]
+    drawdown_events: list[DrawdownEvent] = field(default_factory=list)
     metrics: EvaluationMetrics = field(default_factory=EvaluationMetrics)
     strategy_summary: dict = field(default_factory=dict)
     config: dict = field(default_factory=dict)
     final_equity: float = 0.0
     final_positions: dict[str, float] = field(default_factory=dict)
+
+    # Settlement
+    settlement_mode: str = "binary"
+    settlement_result: dict[str, float] = field(default_factory=dict)

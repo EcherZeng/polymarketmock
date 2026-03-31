@@ -18,7 +18,20 @@ interface EquityCurveChartProps {
 
 export default function EquityCurveChart({ equityCurve, drawdownCurve }: EquityCurveChartProps) {
   const merged = useMemo(() => {
-    const ddMap = new Map(drawdownCurve.map((d) => [d.timestamp, d.drawdown_pct]))
+    // Build drawdown map from server data; fall back to client-side computation
+    let ddMap: Map<string, number>
+    if (drawdownCurve.length > 0) {
+      ddMap = new Map(drawdownCurve.map((d) => [d.timestamp, d.drawdown_pct]))
+    } else {
+      // Compute drawdown client-side from equity curve
+      ddMap = new Map()
+      let peak = 0
+      for (const pt of equityCurve) {
+        if (pt.equity > peak) peak = pt.equity
+        const dd = peak > 0 ? ((peak - pt.equity) / peak) * 100 : 0
+        ddMap.set(pt.timestamp, Math.round(dd * 10000) / 10000)
+      }
+    }
     return equityCurve.map((pt) => ({
       timestamp: pt.timestamp,
       equity: pt.equity,
@@ -26,6 +39,8 @@ export default function EquityCurveChart({ equityCurve, drawdownCurve }: EquityC
       drawdown: ddMap.get(pt.timestamp) ?? 0,
     }))
   }, [equityCurve, drawdownCurve])
+
+  const hasDrawdown = merged.some((d) => d.drawdown > 0)
 
   if (merged.length === 0) return null
 
@@ -72,8 +87,8 @@ export default function EquityCurveChart({ equityCurve, drawdownCurve }: EquityC
         </ResponsiveContainer>
       </div>
 
-      {/* Drawdown chart */}
-      {drawdownCurve.length > 0 && (
+      {/* Drawdown chart — show whenever there are non-zero drawdown values */}
+      {hasDrawdown && (
         <div className="h-32">
           <div className="mb-1 text-xs text-muted-foreground">回撤曲线</div>
           <ResponsiveContainer width="100%" height="100%">

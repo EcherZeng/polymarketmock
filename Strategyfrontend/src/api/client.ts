@@ -6,6 +6,7 @@ import type {
   BacktestResultSummary,
   EquityPoint,
   DrawdownPoint,
+  DrawdownEvent,
   TradeRecord,
   PositionPoint,
   RunRequest,
@@ -63,6 +64,11 @@ export async function fetchEquityCurve(sessionId: string): Promise<EquityPoint[]
 
 export async function fetchDrawdownCurve(sessionId: string): Promise<DrawdownPoint[]> {
   const { data } = await api.get<DrawdownPoint[]>(`/results/${sessionId}/drawdown`)
+  return data
+}
+
+export async function fetchDrawdownEvents(sessionId: string): Promise<DrawdownEvent[]> {
+  const { data } = await api.get<DrawdownEvent[]>(`/results/${sessionId}/drawdown-events`)
   return data
 }
 

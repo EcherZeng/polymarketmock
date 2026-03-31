@@ -4,6 +4,8 @@ import { fetchResult } from "@/api/client"
 import type { BacktestResult } from "@/types"
 import MetricsPanel from "@/components/MetricsPanel"
 import EquityCurveChart from "@/components/EquityCurveChart"
+import PriceChart from "@/components/PriceChart"
+import DrawdownTable from "@/components/DrawdownTable"
 import TradesTable from "@/components/TradesTable"
 
 export default function ResultDetailPage() {
@@ -21,6 +23,8 @@ export default function ResultDetailPage() {
   if (error || !result) {
     return <div className="py-12 text-center text-destructive">加载失败</div>
   }
+
+  const hasSettlement = result.settlement_result && Object.keys(result.settlement_result).length > 0
 
   return (
     <div className="flex flex-col gap-6">
@@ -61,6 +65,47 @@ export default function ResultDetailPage() {
       {/* Metrics panel */}
       <MetricsPanel metrics={result.metrics} />
 
+      {/* Settlement info */}
+      {hasSettlement && (
+        <div className="rounded-lg border p-4">
+          <h2 className="mb-3 text-sm font-medium text-muted-foreground">结算信息</h2>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {Object.entries(result.settlement_result).map(([tokenId, price]) => (
+              <div key={tokenId} className="rounded-md border p-3">
+                <div className="truncate text-xs text-muted-foreground font-mono" title={tokenId}>
+                  {tokenId.slice(0, 12)}...
+                </div>
+                <div className="mt-1 flex items-center gap-2">
+                  <span className={
+                    price >= 0.95
+                      ? "text-sm font-bold text-emerald-600"
+                      : price <= 0.05
+                        ? "text-sm font-bold text-red-500"
+                        : "text-sm font-bold text-muted-foreground"
+                  }>
+                    ${price.toFixed(2)}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {price >= 0.95 ? "YES" : price <= 0.05 ? "NO" : "未定"}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Price chart with entry/exit points */}
+      {result.price_curve && result.price_curve.length > 0 && (
+        <div className="rounded-lg border p-4">
+          <h2 className="mb-3 text-sm font-medium text-muted-foreground">价格走势与交易点位</h2>
+          <PriceChart
+            priceCurve={result.price_curve}
+            trades={result.trades}
+          />
+        </div>
+      )}
+
       {/* Equity curve */}
       {result.equity_curve.length > 0 && (
         <div className="rounded-lg border p-4">
@@ -69,6 +114,16 @@ export default function ResultDetailPage() {
             equityCurve={result.equity_curve}
             drawdownCurve={result.drawdown_curve}
           />
+        </div>
+      )}
+
+      {/* Drawdown events table */}
+      {result.drawdown_events && result.drawdown_events.length > 0 && (
+        <div className="rounded-lg border p-4">
+          <h2 className="mb-3 text-sm font-medium text-muted-foreground">
+            回撤事件 ({result.drawdown_events.length} 次)
+          </h2>
+          <DrawdownTable events={result.drawdown_events} />
         </div>
       )}
 

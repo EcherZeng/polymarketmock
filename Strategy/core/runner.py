@@ -175,6 +175,7 @@ def run_backtest(
     user_config: dict,
     initial_balance: float,
     data: ArchiveData | None = None,
+    settlement_result: dict[str, float] | None = None,
 ) -> BacktestSession:
     """Execute a single backtest synchronously.
 
@@ -254,6 +255,7 @@ def run_backtest(
     trades: list[FillInfo] = []
     equity_curve: list[dict] = []
     position_curve: list[dict] = []
+    price_curve: list[dict] = []
 
     # Last known prices per token
     last_mid: dict[str, float] = {tid: 0.0 for tid in token_ids}
@@ -370,6 +372,15 @@ def run_backtest(
                 "positions_value": round(positions_value, 6),
             })
 
+            # Record price curve at same sampling rate
+            for tid in token_ids:
+                if last_mid.get(tid, 0) > 0:
+                    price_curve.append({
+                        "timestamp": grid_ts,
+                        "token_id": tid,
+                        "mid_price": round(last_mid[tid], 6),
+                    })
+
         # 10) Record position curve (on trade or periodically)
         if trades and trades[-1].timestamp == grid_ts:
             for tid in token_ids:
@@ -383,8 +394,26 @@ def run_backtest(
 
     strategy_summary = strategy.on_end()
 
+    # ── Settlement inference ─────────────────────────────────────────────────
+    # Binary prediction markets settle at 1.0 (YES) or 0.0 (NO).
+    # User-specified result takes priority; otherwise infer from final price.
+    resolved_settlement: dict[str, float] = {}
+    if settlement_result:
+        resolved_settlement = dict(settlement_result)
+    else:
+        for tid in token_ids:
+            price = last_mid.get(tid, 0.0)
+            if price >= 0.95:
+                resolved_settlement[tid] = 1.0
+            elif price <= 0.05:
+                resolved_settlement[tid] = 0.0
+            else:
+                resolved_settlement[tid] = round(price, 6)
+
+    # Final equity uses settlement prices instead of last mid
     final_positions_value = sum(
-        positions.get(tid, 0) * last_mid.get(tid, 0) for tid in token_ids
+        positions.get(tid, 0) * resolved_settlement.get(tid, last_mid.get(tid, 0))
+        for tid in token_ids
     )
     final_equity = balance + final_positions_value
 
@@ -401,9 +430,11 @@ def run_backtest(
         trades=trades,
         equity_curve=equity_curve,
         position_curve=position_curve,
+        price_curve=price_curve,
         strategy_summary=strategy_summary,
         config=merged_config,
         final_equity=round(final_equity, 6),
         final_positions=dict(positions),
+        settlement_result=resolved_settlement,
     )
     return session

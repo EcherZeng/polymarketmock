@@ -22,6 +22,10 @@ async def list_archives():
             "size_mb": round(a.size_bytes / 1_048_576, 2),
             "time_range": a.time_range,
             "token_ids": a.token_ids,
+            "prices_count": a.prices_count,
+            "orderbooks_count": a.orderbooks_count,
+            "live_trades_count": a.live_trades_count,
+            "source": a.source,
         }
         for a in archives
     ]
@@ -40,6 +44,10 @@ async def get_archive_detail(slug: str):
                 "size_mb": round(a.size_bytes / 1_048_576, 2),
                 "time_range": a.time_range,
                 "token_ids": a.token_ids,
+                "prices_count": a.prices_count,
+                "orderbooks_count": a.orderbooks_count,
+                "live_trades_count": a.live_trades_count,
+                "source": a.source,
             }
     raise HTTPException(status_code=404, detail=f"Archive '{slug}' not found")
 

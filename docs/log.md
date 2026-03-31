@@ -1,35 +1,32 @@
-index-BmiyPltb.js:61 [ErrorBoundary] TypeError: crypto.randomUUID is not a function
-    at index-BmiyPltb.js:66:210320
-    at Object.useMemo (index-BmiyPltb.js:8:59918)
-    at e.useMemo (index-BmiyPltb.js:1:8422)
-    at WD (index-BmiyPltb.js:66:210249)
-    at wo (index-BmiyPltb.js:8:47535)
-    at _c (index-BmiyPltb.js:8:70086)
-    at Pc (index-BmiyPltb.js:8:80364)
-    at zu (index-BmiyPltb.js:8:115883)
-    at Iu (index-BmiyPltb.js:8:114944)
-    at Fu (index-BmiyPltb.js:8:114780)
- 
-    at WD (http://5.104.82.125:3021/assets/index-BmiyPltb.js:66:209839)
-    at mt (http://5.104.82.125:3021/assets/index-BmiyPltb.js:11:4105)
-    at jt (http://5.104.82.125:3021/assets/index-BmiyPltb.js:11:8343)
-    at O_ (http://5.104.82.125:3021/assets/index-BmiyPltb.js:61:107692)
-    at main (<anonymous>)
-    at div (<anonymous>)
-    at UO (http://5.104.82.125:3021/assets/index-BmiyPltb.js:66:266361)
-    at o (http://5.104.82.125:3021/assets/index-BmiyPltb.js:11:64429)
-    at Oh (http://5.104.82.125:3021/assets/index-BmiyPltb.js:61:73690)
-    at D_ (http://5.104.82.125:3021/assets/index-BmiyPltb.js:61:107600)
-    at At (http://5.104.82.125:3021/assets/index-BmiyPltb.js:11:7421)
-    at vn (http://5.104.82.125:3021/assets/index-BmiyPltb.js:11:16976)
-    at Qr (http://5.104.82.125:3021/assets/index-BmiyPltb.js:11:59008)
-
-
-
-
-
-    Request URL
-http://5.104.82.125:3021/api/backtest/markets
-
-response
-[]
+03/31 14:20:00	
+Bitcoin Up or Down - March 31, 2:20AM-2:25AM ET
+btc-updown-5m-1774938000
+5 分钟	
+133 价格
+267 盘口
+1730 成交
+5分钟	5分钟	
+03/31 14:15:00	
+Bitcoin Up or Down - March 31, 2:15AM-2:20AM ET
+btc-updown-5m-1774937700
+5 分钟	
+118 价格
+266 盘口
+2220 成交
+5分钟	4分钟	
+03/30 16:10:00	
+Bitcoin Up or Down - March 30, 4:10AM-4:15AM ET
+btc-updown-5m-1774858200
+5 分钟	
+134 价格
+262 盘口
+1522 成交
+5分钟	5分钟	
+03/30 16:05:00	
+Bitcoin Up or Down - March 30, 4:05AM-4:10AM ET
+btc-updown-5m-1774857900
+5 分钟	
+114 价格
+249 盘口
+2325 成交
+5分钟	5分钟	

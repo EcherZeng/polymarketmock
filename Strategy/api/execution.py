@@ -11,7 +11,7 @@ from api.state import registry
 import api.state as state
 from config import config
 from core.data_loader import load_archive
-from core.evaluator import compute_drawdown_curve, evaluate
+from core.evaluator import compute_drawdown_curve, compute_drawdown_events, evaluate
 from core.runner import run_backtest
 
 router = APIRouter()
@@ -29,6 +29,7 @@ class RunRequest(BaseModel):
     slug: str
     initial_balance: float = Field(default=10000, gt=0)
     config: dict = Field(default_factory=dict)
+    settlement_result: dict[str, float] | None = None
 
 
 class BatchRequest(BaseModel):
@@ -36,6 +37,7 @@ class BatchRequest(BaseModel):
     slugs: list[str]
     initial_balance: float = Field(default=10000, gt=0)
     config: dict = Field(default_factory=dict)
+    settlement_result: dict[str, float] | None = None
 
 
 # ── Single run ───────────────────────────────────────────────────────────────
@@ -55,6 +57,8 @@ async def run_single(req: RunRequest):
         req.slug,
         req.config,
         req.initial_balance,
+        None,  # data
+        req.settlement_result,
     )
 
     if session.status == "failed":
@@ -64,6 +68,7 @@ async def run_single(req: RunRequest):
     metrics = evaluate(session)
     session.metrics = metrics
     session.drawdown_curve = compute_drawdown_curve(session.equity_curve)
+    session.drawdown_events = compute_drawdown_events(session.equity_curve)
 
     # Store result
     result = _serialize_session(session)
@@ -123,6 +128,7 @@ async def get_task(batch_id: str):
             metrics = evaluate(session)
             session.metrics = metrics
             session.drawdown_curve = compute_drawdown_curve(session.equity_curve)
+            session.drawdown_events = compute_drawdown_events(session.equity_curve)
             _results[session.session_id] = _serialize_session(session)
         results_summary[slug] = {
             "session_id": session.session_id,
@@ -202,6 +208,9 @@ def _serialize_session(session) -> dict:
         ],
         "equity_curve": session.equity_curve,
         "drawdown_curve": session.drawdown_curve,
+        "drawdown_events": session.drawdown_events if session.drawdown_events else [],
         "position_curve": session.position_curve,
+        "price_curve": session.price_curve,
         "strategy_summary": session.strategy_summary,
+        "settlement_result": session.settlement_result,
     }

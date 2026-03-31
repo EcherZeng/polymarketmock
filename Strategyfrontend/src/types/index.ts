@@ -14,6 +14,10 @@ export interface ArchiveInfo {
   size_mb: number
   time_range: { start: string; end: string }
   token_ids: string[]
+  prices_count: number
+  orderbooks_count: number
+  live_trades_count: number
+  source: "archive" | "live"
 }
 
 export interface EvaluationMetrics {
@@ -38,6 +42,12 @@ export interface EvaluationMetrics {
   buy_count: number
   sell_count: number
   avg_slippage: number
+  // BTC prediction market metrics
+  settlement_pnl: number
+  trade_pnl: number
+  hold_to_settlement_ratio: number
+  avg_entry_price: number
+  expected_value: number
 }
 
 export interface TradeRecord {
@@ -65,6 +75,17 @@ export interface DrawdownPoint {
   drawdown_pct: number
 }
 
+export interface DrawdownEvent {
+  start_time: string
+  trough_time: string
+  recovery_time: string | null
+  peak_equity: number
+  trough_equity: number
+  drawdown_pct: number
+  duration_seconds: number
+  recovery_seconds: number | null
+}
+
 export interface PositionPoint {
   timestamp: string
   token_id: string
@@ -83,6 +104,12 @@ export interface BacktestResultSummary {
   metrics: EvaluationMetrics
 }
 
+export interface PricePoint {
+  timestamp: string
+  token_id: string
+  mid_price: number
+}
+
 export interface BacktestResult extends BacktestResultSummary {
   config: Record<string, unknown>
   summary: {
@@ -93,8 +120,11 @@ export interface BacktestResult extends BacktestResultSummary {
   trades: TradeRecord[]
   equity_curve: EquityPoint[]
   drawdown_curve: DrawdownPoint[]
+  drawdown_events: DrawdownEvent[]
   position_curve: PositionPoint[]
+  price_curve: PricePoint[]
   strategy_summary: Record<string, unknown>
+  settlement_result: Record<string, number>
 }
 
 export interface RunRequest {
@@ -102,6 +132,7 @@ export interface RunRequest {
   slug: string
   initial_balance: number
   config: Record<string, unknown>
+  settlement_result?: Record<string, number>
 }
 
 export interface BatchTask {

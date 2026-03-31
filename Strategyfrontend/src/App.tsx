@@ -1,18 +1,22 @@
 import { Routes, Route, Link, useLocation } from "react-router-dom"
 import { cn } from "@/lib/utils"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import StrategyPage from "@/pages/StrategyPage"
 import ResultsListPage from "@/pages/ResultsListPage"
 import ResultDetailPage from "@/pages/ResultDetailPage"
+import DashboardPage from "@/pages/DashboardPage"
 
 const navItems = [
   { to: "/", label: "策略回测" },
   { to: "/results", label: "回测结果" },
+  { to: "/dashboard", label: "仪表盘" },
 ]
 
 export default function App() {
   const location = useLocation()
 
   return (
+    <TooltipProvider>
     <div className="flex min-h-screen flex-col bg-background text-foreground">
       <header className="border-b">
         <div className="mx-auto flex h-14 max-w-7xl items-center gap-6 px-4">
@@ -42,8 +46,10 @@ export default function App() {
           <Route path="/" element={<StrategyPage />} />
           <Route path="/results" element={<ResultsListPage />} />
           <Route path="/results/:sessionId" element={<ResultDetailPage />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
         </Routes>
       </main>
     </div>
+    </TooltipProvider>
   )
 }

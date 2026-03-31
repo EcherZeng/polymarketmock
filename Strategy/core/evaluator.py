@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from datetime import datetime
 
-from core.types import BacktestSession, EvaluationMetrics, FillInfo
+from core.types import BacktestSession, DrawdownEvent, EvaluationMetrics, FillInfo
 
 
 def evaluate(session: BacktestSession) -> EvaluationMetrics:
@@ -101,6 +101,59 @@ def evaluate(session: BacktestSession) -> EvaluationMetrics:
         else:
             m.calmar_ratio = 0.0
 
+    # ── BTC prediction market metrics ─────────────────────────────────────────
+
+    settlement_result = session.settlement_result
+    if settlement_result:
+        # Settlement PnL: (settlement_price - avg_cost) * held_amount for positions still held
+        cost_basis_map, held_map = _compute_cost_basis(trades)
+        settlement_pnl = 0.0
+        total_bought = 0.0
+        total_held_at_end = 0.0
+
+        for tid, qty in session.final_positions.items():
+            if qty > 0:
+                settle_price = settlement_result.get(tid, 0.0)
+                avg_cost = cost_basis_map.get(tid, 0.0)
+                settlement_pnl += (settle_price - avg_cost) * qty
+                total_held_at_end += qty
+
+        # Trade PnL: sum of realised PnL from sells during backtest
+        m.trade_pnl = round(sum(trade_pnls), 6) if trade_pnls else 0.0
+        m.settlement_pnl = round(settlement_pnl, 6)
+
+        # Total bought across all trades
+        for t in trades:
+            if t.side == "BUY":
+                total_bought += t.filled_amount
+
+        # Hold-to-settlement ratio
+        if total_bought > 0:
+            m.hold_to_settlement_ratio = round(total_held_at_end / total_bought * 100, 2)
+        else:
+            m.hold_to_settlement_ratio = 0.0
+
+        # Average entry price (weighted across all BUY trades)
+        total_cost_all = sum(t.avg_price * t.filled_amount for t in trades if t.side == "BUY")
+        total_qty_all = sum(t.filled_amount for t in trades if t.side == "BUY")
+        m.avg_entry_price = round(total_cost_all / total_qty_all, 6) if total_qty_all > 0 else 0.0
+
+        # Expected value per share: P(win) * (1 - entry_price) - P(lose) * entry_price
+        # In binary market: if entry_price < 1.0, EV = settle_price - entry_price (per share)
+        if m.avg_entry_price > 0:
+            # Weighted average settlement price across held tokens
+            if total_held_at_end > 0:
+                w_settle = sum(
+                    settlement_result.get(tid, 0.0) * qty
+                    for tid, qty in session.final_positions.items()
+                    if qty > 0
+                ) / total_held_at_end
+            else:
+                w_settle = 0.0
+            m.expected_value = round(w_settle - m.avg_entry_price, 6)
+        else:
+            m.expected_value = 0.0
+
     return m
 
 
@@ -118,6 +171,30 @@ def compute_drawdown_curve(equity_curve: list[dict]) -> list[dict]:
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _compute_cost_basis(trades: list[FillInfo]) -> tuple[dict[str, float], dict[str, float]]:
+    """Compute cost basis and held quantity per token from trade history.
+
+    Returns (cost_basis_map, held_map).
+    """
+    cost_basis: dict[str, float] = {}
+    held: dict[str, float] = {}
+
+    for t in trades:
+        tid = t.token_id
+        if t.side == "BUY":
+            prev_held = held.get(tid, 0)
+            prev_cost = cost_basis.get(tid, 0)
+            total_held = prev_held + t.filled_amount
+            if total_held > 0:
+                cost_basis[tid] = (prev_cost * prev_held + t.avg_price * t.filled_amount) / total_held
+            held[tid] = total_held
+        elif t.side == "SELL":
+            prev_held = held.get(tid, 0)
+            held[tid] = max(0, prev_held - t.filled_amount)
+
+    return cost_basis, held
 
 
 def _duration_seconds(equity_curve: list[dict]) -> float:
@@ -202,3 +279,73 @@ def _std(values: list[float]) -> float:
     mean = sum(values) / len(values)
     variance = sum((v - mean) ** 2 for v in values) / (len(values) - 1)
     return math.sqrt(variance)
+
+
+def compute_drawdown_events(equity_curve: list[dict]) -> list[dict]:
+    """Extract individual drawdown episodes from equity curve.
+
+    Each event captures: peak → trough → recovery.
+    Returns list of dicts (JSON-serialisable).
+    """
+    if len(equity_curve) < 2:
+        return []
+
+    events: list[dict] = []
+    peak = equity_curve[0]["equity"]
+    peak_ts = equity_curve[0]["timestamp"]
+    trough = peak
+    trough_ts = peak_ts
+    in_drawdown = False
+
+    for pt in equity_curve[1:]:
+        eq = pt["equity"]
+        ts = pt["timestamp"]
+
+        if eq >= peak:
+            # Recovery or new high
+            if in_drawdown and trough < peak:
+                dd_pct = round((peak - trough) / peak * 100, 4) if peak > 0 else 0.0
+                start_dt = datetime.fromisoformat(peak_ts)
+                trough_dt = datetime.fromisoformat(trough_ts)
+                recovery_dt = datetime.fromisoformat(ts)
+                events.append({
+                    "start_time": peak_ts,
+                    "trough_time": trough_ts,
+                    "recovery_time": ts,
+                    "peak_equity": round(peak, 6),
+                    "trough_equity": round(trough, 6),
+                    "drawdown_pct": dd_pct,
+                    "duration_seconds": (recovery_dt - start_dt).total_seconds(),
+                    "recovery_seconds": (recovery_dt - trough_dt).total_seconds(),
+                })
+            peak = eq
+            peak_ts = ts
+            trough = eq
+            trough_ts = ts
+            in_drawdown = False
+        else:
+            in_drawdown = True
+            if eq < trough:
+                trough = eq
+                trough_ts = ts
+
+    # Handle unrecovered drawdown at end
+    if in_drawdown and trough < peak:
+        dd_pct = round((peak - trough) / peak * 100, 4) if peak > 0 else 0.0
+        start_dt = datetime.fromisoformat(peak_ts)
+        trough_dt = datetime.fromisoformat(trough_ts)
+        end_dt = datetime.fromisoformat(equity_curve[-1]["timestamp"])
+        events.append({
+            "start_time": peak_ts,
+            "trough_time": trough_ts,
+            "recovery_time": None,
+            "peak_equity": round(peak, 6),
+            "trough_equity": round(trough, 6),
+            "drawdown_pct": dd_pct,
+            "duration_seconds": (end_dt - start_dt).total_seconds(),
+            "recovery_seconds": None,
+        })
+
+    # Sort by drawdown magnitude descending
+    events.sort(key=lambda e: e["drawdown_pct"], reverse=True)
+    return events

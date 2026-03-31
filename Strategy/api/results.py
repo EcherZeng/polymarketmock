@@ -69,6 +69,16 @@ async def get_drawdown(session_id: str):
     return result.get("drawdown_curve", [])
 
 
+@router.get("/results/{session_id}/drawdown-events")
+async def get_drawdown_events(session_id: str):
+    """Get drawdown events (peak → trough → recovery episodes)."""
+    store = get_results_store()
+    result = store.get(session_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Result not found")
+    return result.get("drawdown_events", [])
+
+
 @router.get("/results/{session_id}/trades")
 async def get_trades(session_id: str):
     """Get trade details."""
