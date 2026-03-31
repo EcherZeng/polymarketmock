@@ -27,6 +27,7 @@ COPY --from=builder /opt/venv /opt/venv
 
 COPY config.py .
 COPY main.py .
+COPY strategy_presets.json .
 COPY core/ core/
 COPY api/ api/
 COPY strategies/ strategies/
