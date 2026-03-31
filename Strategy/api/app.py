@@ -8,11 +8,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.state import registry, batch_runner as _batch_runner_ref
 import api.state as state
+from api.result_store import BatchStore, ResultStore
 from config import config
 from core.data_scanner import load_token_map
-from core.batch_runner import BatchRunner
+from core.batch_runner import BatchRunner, BatchTask
+from core.types import BacktestSession
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +29,48 @@ async def lifespan(app: FastAPI):
     state.registry.scan(config.strategies_dir)
     logger.info("Loaded %d strategies", len(state.registry.list_strategies()))
 
-    # Init batch runner
-    state.batch_runner = BatchRunner(state.registry)
+    # ── Init persistent stores ───────────────────────────────────────────
+    state.result_store = ResultStore(config.results_dir)
+    state.result_store.load()
+
+    state.batch_store = BatchStore(config.results_dir / "batches")
+    state.batch_store.load()
+
+    # ── Init batch runner with persistence callbacks ─────────────────────
+    from api.execution import store_session, _serialize_workflow, _build_result_summary
+
+    def _on_result(session: BacktestSession) -> None:
+        """Persist individual results immediately when a slug completes."""
+        store_session(session)
+
+    def _on_batch_complete(task: BatchTask) -> None:
+        """Persist batch summary when the entire batch finishes."""
+        if state.batch_store is None:
+            return
+        results_summary: dict[str, dict] = {}
+        for slug, session in task.results.items():
+            results_summary[slug] = _build_result_summary(session)
+        workflows: dict[str, dict] = {}
+        for slug, wf in task.workflows.items():
+            workflows[slug] = _serialize_workflow(wf)
+        state.batch_store.put(task.batch_id, {
+            "batch_id": task.batch_id,
+            "strategy": task.strategy,
+            "slugs": task.slugs,
+            "status": task.status,
+            "total": task.total,
+            "completed": task.completed_count,
+            "created_at": task.created_at,
+            "results": results_summary,
+            "errors": task.errors,
+            "workflows": workflows,
+        })
+
+    state.batch_runner = BatchRunner(
+        state.registry,
+        on_result=_on_result,
+        on_batch_complete=_on_batch_complete,
+    )
 
     yield
 

@@ -13,6 +13,9 @@ class StrategyEngineConfig(BaseSettings):
     # Data directory — points to backend/data (read-only via filesystem)
     data_dir: Path = _STRATEGY_DIR.parent / "backend" / "data"
 
+    # Results persistence
+    results_dir: Path = _STRATEGY_DIR / "results"
+
     # Parallel backtest
     max_concurrency: int = 4
     tick_batch_size: int = 1000

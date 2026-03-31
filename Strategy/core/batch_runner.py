@@ -6,6 +6,7 @@ import asyncio
 import logging
 import traceback
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -85,11 +86,19 @@ class BatchTask:
 class BatchRunner:
     """Manages parallel backtest execution with concurrency control and step logging."""
 
-    def __init__(self, registry: StrategyRegistry, max_concurrency: int | None = None) -> None:
+    def __init__(
+        self,
+        registry: StrategyRegistry,
+        max_concurrency: int | None = None,
+        on_result: Callable[[BacktestSession], None] | None = None,
+        on_batch_complete: Callable[[BatchTask], None] | None = None,
+    ) -> None:
         self._registry = registry
         self._semaphore = asyncio.Semaphore(max_concurrency or config.max_concurrency)
         self._tasks: dict[str, BatchTask] = {}
         self._running: dict[str, asyncio.Task] = {}
+        self._on_result = on_result
+        self._on_batch_complete = on_batch_complete
 
     async def submit(
         self,
@@ -275,6 +284,13 @@ class BatchRunner:
                     metrics.total_return_pct, session.duration_seconds,
                 )
 
+                # Immediately store result for /results + Dashboard visibility
+                if self._on_result:
+                    try:
+                        self._on_result(session)
+                    except Exception as e:
+                        logger.error("on_result callback failed for %s: %s", slug, e)
+
                 async with _lock:
                     task.completed_count += 1
 
@@ -283,6 +299,13 @@ class BatchRunner:
         if task.status != "cancelled":
             task.status = "completed"
         self._running.pop(batch_id, None)
+
+        # Notify batch completion for persistence
+        if self._on_batch_complete:
+            try:
+                self._on_batch_complete(task)
+            except Exception as e:
+                logger.error("on_batch_complete callback failed for %s: %s", batch_id, e)
 
         # Summary log
         ok_count = sum(1 for w in task.workflows.values() if w.status == "completed")
