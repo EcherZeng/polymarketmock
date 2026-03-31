@@ -470,15 +470,20 @@ export default function StrategyPage() {
                         <span>{a.orderbooks_count} 盘口</span>
                         <span>·</span>
                         <span>{a.live_trades_count} 成交</span>
-                        {a.slug.includes("5m") ? (
+                        {a.slug.includes("-5m-") ? (
                           <>
                             <span>·</span>
                             <span className="text-blue-500">5 分钟</span>
                           </>
-                        ) : a.slug.includes("15m") ? (
+                        ) : a.slug.includes("-15m-") ? (
                           <>
                             <span>·</span>
                             <span className="text-blue-500">15 分钟</span>
+                          </>
+                        ) : a.slug.includes("-30m-") ? (
+                          <>
+                            <span>·</span>
+                            <span className="text-blue-500">30 分钟</span>
                           </>
                         ) : null}
                         {a.time_range.start && (
