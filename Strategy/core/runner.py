@@ -261,7 +261,7 @@ def run_backtest(
     last_mid: dict[str, float] = {tid: 0.0 for tid in token_ids}
 
     # Init strategy
-    merged_config = {**strategy_cls.default_config, **user_config}
+    merged_config = {**registry.get_default_config(strategy_name), **user_config}
     try:
         strategy.on_init(merged_config)
     except Exception as e:

@@ -1,0 +1,422 @@
+{
+  "unified_rules": {
+    "take_profit_price": 0.99,
+    "stop_loss_price": 0.65,
+    "force_close_remaining_seconds": 30,
+    "consecutive_loss_threshold": 3,
+    "loss_position_reduction_pct": 0.5
+  },
+  "param_schema": {
+    "take_profit_price": {
+      "group": "risk",
+      "label": {
+        "zh": "止盈价格",
+        "en": "Take Profit Price"
+      },
+      "type": "float",
+      "min": 0.5,
+      "max": 1.0,
+      "step": 0.01,
+      "unit": "",
+      "scope": "unified"
+    },
+    "stop_loss_price": {
+      "group": "risk",
+      "label": {
+        "zh": "止损价格",
+        "en": "Stop Loss Price"
+      },
+      "type": "float",
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.01,
+      "unit": "",
+      "scope": "unified"
+    },
+    "force_close_remaining_seconds": {
+      "group": "risk",
+      "label": {
+        "zh": "强制平仓剩余秒数",
+        "en": "Force Close Remaining (s)"
+      },
+      "type": "int",
+      "min": 0,
+      "max": 300,
+      "step": 1,
+      "unit": "秒",
+      "scope": "unified"
+    },
+    "consecutive_loss_threshold": {
+      "group": "risk",
+      "label": {
+        "zh": "连续亏损降仓阈值",
+        "en": "Consecutive Loss Threshold"
+      },
+      "type": "int",
+      "min": 1,
+      "max": 20,
+      "step": 1,
+      "unit": "次",
+      "scope": "unified"
+    },
+    "loss_position_reduction_pct": {
+      "group": "risk",
+      "label": {
+        "zh": "亏损降仓比例",
+        "en": "Loss Position Reduction (%)"
+      },
+      "type": "float",
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.05,
+      "unit": "",
+      "scope": "unified"
+    },
+    "min_price": {
+      "group": "entry",
+      "label": {
+        "zh": "入场最低价格",
+        "en": "Entry Min Price"
+      },
+      "type": "float",
+      "min": 0.5,
+      "max": 1.0,
+      "step": 0.01,
+      "unit": "",
+      "scope": "strategy"
+    },
+    "time_remaining_ratio": {
+      "group": "entry",
+      "label": {
+        "zh": "剩余时间比例阈值",
+        "en": "Time Remaining Ratio"
+      },
+      "type": "float",
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.01,
+      "unit": "",
+      "scope": "strategy"
+    },
+    "momentum_window": {
+      "group": "entry",
+      "label": {
+        "zh": "动量检测窗口",
+        "en": "Momentum Window"
+      },
+      "type": "int",
+      "min": 60,
+      "max": 3600,
+      "step": 60,
+      "unit": "秒",
+      "scope": "strategy",
+      "depends_on": "use_momentum_check"
+    },
+    "momentum_min": {
+      "group": "entry",
+      "label": {
+        "zh": "最小涨幅",
+        "en": "Min Momentum"
+      },
+      "type": "float",
+      "min": 0.0,
+      "max": 0.1,
+      "step": 0.0005,
+      "unit": "",
+      "scope": "strategy",
+      "depends_on": "use_momentum_check"
+    },
+    "direction_window": {
+      "group": "entry",
+      "label": {
+        "zh": "方向一致性检测窗口",
+        "en": "Direction Window"
+      },
+      "type": "int",
+      "min": 60,
+      "max": 3600,
+      "step": 60,
+      "unit": "秒",
+      "scope": "strategy",
+      "depends_on": "use_direction_check"
+    },
+    "volatility_window": {
+      "group": "volatility",
+      "label": {
+        "zh": "波动检测窗口",
+        "en": "Volatility Window"
+      },
+      "type": "int",
+      "min": 60,
+      "max": 3600,
+      "step": 60,
+      "unit": "秒",
+      "scope": "strategy"
+    },
+    "amplitude_min": {
+      "group": "volatility",
+      "label": {
+        "zh": "振幅下限",
+        "en": "Min Amplitude"
+      },
+      "type": "float",
+      "min": 0.0,
+      "max": 0.05,
+      "step": 0.0001,
+      "unit": "",
+      "scope": "strategy"
+    },
+    "amplitude_max": {
+      "group": "volatility",
+      "label": {
+        "zh": "振幅上限",
+        "en": "Max Amplitude"
+      },
+      "type": "float",
+      "min": 0.0,
+      "max": 0.05,
+      "step": 0.0001,
+      "unit": "",
+      "scope": "strategy"
+    },
+    "max_std": {
+      "group": "volatility",
+      "label": {
+        "zh": "最大标准差",
+        "en": "Max Std Dev"
+      },
+      "type": "float",
+      "min": 0.0,
+      "max": 0.05,
+      "step": 0.0001,
+      "unit": "",
+      "scope": "strategy",
+      "depends_on": "use_std_check"
+    },
+    "max_drawdown": {
+      "group": "volatility",
+      "label": {
+        "zh": "窗口最大回撤",
+        "en": "Max Drawdown"
+      },
+      "type": "float",
+      "min": 0.0,
+      "max": 0.05,
+      "step": 0.0001,
+      "unit": "",
+      "scope": "strategy",
+      "depends_on": "use_drawdown_check"
+    },
+    "reverse_tick_window": {
+      "group": "volatility",
+      "label": {
+        "zh": "反向检测窗口",
+        "en": "Reverse Tick Window"
+      },
+      "type": "int",
+      "min": 5,
+      "max": 300,
+      "step": 5,
+      "unit": "秒",
+      "scope": "strategy"
+    },
+    "reverse_threshold": {
+      "group": "volatility",
+      "label": {
+        "zh": "反向波动阈值",
+        "en": "Reverse Threshold"
+      },
+      "type": "float",
+      "min": 0.0,
+      "max": 0.05,
+      "step": 0.0005,
+      "unit": "",
+      "scope": "strategy"
+    },
+    "position_min_pct": {
+      "group": "position",
+      "label": {
+        "zh": "最小仓位比例",
+        "en": "Min Position (%)"
+      },
+      "type": "float",
+      "min": 0.01,
+      "max": 1.0,
+      "step": 0.01,
+      "unit": "",
+      "scope": "strategy"
+    },
+    "position_max_pct": {
+      "group": "position",
+      "label": {
+        "zh": "最大仓位比例",
+        "en": "Max Position (%)"
+      },
+      "type": "float",
+      "min": 0.01,
+      "max": 1.0,
+      "step": 0.01,
+      "unit": "",
+      "scope": "strategy"
+    },
+    "use_momentum_check": {
+      "group": "toggles",
+      "label": {
+        "zh": "启用动量检测",
+        "en": "Enable Momentum Check"
+      },
+      "type": "bool",
+      "scope": "strategy"
+    },
+    "use_direction_check": {
+      "group": "toggles",
+      "label": {
+        "zh": "启用方向一致性检测",
+        "en": "Enable Direction Check"
+      },
+      "type": "bool",
+      "scope": "strategy"
+    },
+    "use_std_check": {
+      "group": "toggles",
+      "label": {
+        "zh": "启用标准差检测",
+        "en": "Enable Std Dev Check"
+      },
+      "type": "bool",
+      "scope": "strategy"
+    },
+    "use_drawdown_check": {
+      "group": "toggles",
+      "label": {
+        "zh": "启用回撤检测",
+        "en": "Enable Drawdown Check"
+      },
+      "type": "bool",
+      "scope": "strategy"
+    }
+  },
+  "param_groups": {
+    "risk": {
+      "zh": "风控规则",
+      "en": "Risk Management",
+      "order": 1
+    },
+    "entry": {
+      "zh": "入场条件",
+      "en": "Entry Conditions",
+      "order": 2
+    },
+    "volatility": {
+      "zh": "波动过滤",
+      "en": "Volatility Filters",
+      "order": 3
+    },
+    "position": {
+      "zh": "仓位管理",
+      "en": "Position Sizing",
+      "order": 4
+    },
+    "toggles": {
+      "zh": "特性开关",
+      "en": "Feature Toggles",
+      "order": 5
+    }
+  },
+  "strategies": {
+    "solid_core": {
+      "take_profit_price": 0.85,
+      "stop_loss_price": 0.5,
+      "force_close_remaining_seconds": 30,
+      "consecutive_loss_threshold": 3,
+      "loss_position_reduction_pct": 0.5,
+      "min_price": 0.65,
+      "time_remaining_ratio": 0.333,
+      "momentum_window": 600,
+      "momentum_min": 0.0025,
+      "volatility_window": 900,
+      "amplitude_min": 0.0015,
+      "amplitude_max": 0.002,
+      "max_std": 0.0012,
+      "max_drawdown": 0.0008,
+      "position_min_pct": 0.2,
+      "position_max_pct": 0.3,
+      "reverse_tick_window": 30,
+      "reverse_threshold": 0.002,
+      "use_momentum_check": true,
+      "use_direction_check": false,
+      "use_std_check": true,
+      "use_drawdown_check": true,
+      "builtin": true
+    },
+    "main_force": {
+      "builtin": true,
+      "description": {
+        "zh": "主力策略 — 中高概率市场临近到期时中等波动顺势建仓",
+        "en": "Main Force — Moderate volatility trend position near expiry"
+      },
+      "min_price": 0.85,
+      "time_remaining_ratio": 0.333,
+      "momentum_window": 600,
+      "momentum_min": 0.002,
+      "volatility_window": 900,
+      "amplitude_min": 0.0012,
+      "amplitude_max": 0.0022,
+      "max_std": 0.0015,
+      "max_drawdown": 0.001,
+      "position_min_pct": 0.1,
+      "position_max_pct": 0.3,
+      "reverse_tick_window": 30,
+      "reverse_threshold": 0.002,
+      "use_momentum_check": true,
+      "use_direction_check": false,
+      "use_std_check": true,
+      "use_drawdown_check": true
+    },
+    "high_freq_coverage": {
+      "builtin": true,
+      "description": {
+        "zh": "高频覆盖策略 — 宽松条件下方向一致时快速入场覆盖",
+        "en": "High Freq Coverage — Quick entry on consistent direction with relaxed conditions"
+      },
+      "min_price": 0.82,
+      "time_remaining_ratio": 0.333,
+      "direction_window": 600,
+      "volatility_window": 900,
+      "amplitude_min": 0.001,
+      "amplitude_max": 0.0025,
+      "position_min_pct": 0.05,
+      "position_max_pct": 0.2,
+      "reverse_tick_window": 30,
+      "reverse_threshold": 0.002,
+      "use_momentum_check": false,
+      "use_direction_check": true,
+      "use_std_check": false,
+      "use_drawdown_check": false
+    },
+    "Test预设": {
+      "take_profit_price": 0.85,
+      "stop_loss_price": 0.5,
+      "force_close_remaining_seconds": 30,
+      "consecutive_loss_threshold": 3,
+      "loss_position_reduction_pct": 0.5,
+      "min_price": 0.65,
+      "time_remaining_ratio": 0.333,
+      "momentum_window": 600,
+      "momentum_min": 0.0025,
+      "volatility_window": 900,
+      "amplitude_min": 0.0015,
+      "amplitude_max": 0.002,
+      "max_std": 0.0012,
+      "max_drawdown": 0.0008,
+      "position_min_pct": 0.2,
+      "position_max_pct": 0.3,
+      "reverse_tick_window": 30,
+      "reverse_threshold": 0.002,
+      "use_momentum_check": true,
+      "use_direction_check": false,
+      "use_std_check": true,
+      "use_drawdown_check": true
+    }
+  }
+}

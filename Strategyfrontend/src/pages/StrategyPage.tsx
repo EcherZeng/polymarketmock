@@ -2,8 +2,23 @@ import { useState, useMemo, useCallback } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
-import { fetchStrategies, fetchArchives, runBacktest, submitBatch } from "@/api/client"
-import type { StrategyInfo, ArchiveInfo, RunRequest, BatchRequest } from "@/types"
+import {
+  fetchStrategies,
+  fetchArchives,
+  fetchPresets,
+  savePreset,
+  deletePreset,
+  runBacktest,
+  submitBatch,
+} from "@/api/client"
+import type {
+  StrategyInfo,
+  ArchiveInfo,
+  RunRequest,
+  BatchRequest,
+  PresetsResponse,
+  I18nLabel,
+} from "@/types"
 import StrategyConfigForm from "@/components/StrategyConfigForm"
 import {
   Dialog,
@@ -19,6 +34,13 @@ function extractCategory(slug: string): string {
   return match ? match[1] : slug
 }
 
+/** Get localised text from i18n label */
+function t(label: I18nLabel | string | undefined): string {
+  if (!label) return ""
+  if (typeof label === "string") return label
+  return label.zh || label.en
+}
+
 export default function StrategyPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -32,6 +54,8 @@ export default function StrategyPage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [activeCategory, setActiveCategory] = useState<string>("")
   const [batchSize, setBatchSize] = useState<number>(0) // 0 = all
+  const [savePresetName, setSavePresetName] = useState("")
+  const [savePresetDesc, setSavePresetDesc] = useState("")
 
   const { data: strategies = [], isLoading: loadingStrategies } = useQuery<StrategyInfo[]>({
     queryKey: ["strategies"],
@@ -43,10 +67,45 @@ export default function StrategyPage() {
     queryFn: fetchArchives,
   })
 
+  const { data: presetsData } = useQuery<PresetsResponse>({
+    queryKey: ["presets"],
+    queryFn: fetchPresets,
+  })
+
+  const paramSchema = presetsData?.param_schema ?? {}
+  const paramGroups = presetsData?.param_groups ?? {}
+
   const activeStrategy = useMemo(
     () => strategies.find((s) => s.name === selectedStrategy),
     [strategies, selectedStrategy],
   )
+
+  /** Set of config keys relevant for the selected strategy */
+  const visibleKeys = useMemo(() => {
+    if (!activeStrategy) return new Set<string>()
+    return new Set(Object.keys(activeStrategy.default_config))
+  }, [activeStrategy])
+
+  // ── Save preset mutation ──────────────────────────────────────────────────
+
+  const savePresetMutation = useMutation({
+    mutationFn: (args: { name: string; desc: string; params: Record<string, unknown> }) =>
+      savePreset(args.name, { description: args.desc, params: args.params }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["strategies"] })
+      queryClient.invalidateQueries({ queryKey: ["presets"] })
+      setSavePresetName("")
+      setSavePresetDesc("")
+    },
+  })
+
+  const deletePresetMutation = useMutation({
+    mutationFn: (name: string) => deletePreset(name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["strategies"] })
+      queryClient.invalidateQueries({ queryKey: ["presets"] })
+    },
+  })
 
   // ── Category & filtered archives ──────────────────────────────────────────
 
@@ -199,9 +258,29 @@ export default function StrategyPage() {
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-medium">{s.name}</span>
-                    <span className="text-xs text-muted-foreground">v{s.version}</span>
+                    <div className="flex items-center gap-2">
+                      {s.builtin && (
+                        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                          内置
+                        </span>
+                      )}
+                      <span className="text-xs text-muted-foreground">v{s.version}</span>
+                    </div>
                   </div>
-                  <p className="mt-1 text-sm text-muted-foreground">{s.description}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{t(s.description)}</p>
+                  {!s.builtin && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (confirm(`确定删除自定义预设 "${s.name}"？`)) {
+                          deletePresetMutation.mutate(s.name)
+                        }
+                      }}
+                      className="mt-1 text-xs text-destructive hover:underline"
+                    >
+                      删除
+                    </button>
+                  )}
                 </button>
               ))}
             </div>
@@ -437,20 +516,80 @@ export default function StrategyPage() {
 
       {/* Strategy config dialog */}
       <Dialog open={configDialogOpen} onOpenChange={setConfigDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>策略参数 — {activeStrategy?.name}</DialogTitle>
             <DialogDescription>
-              {activeStrategy?.description}
+              {t(activeStrategy?.description)}
             </DialogDescription>
           </DialogHeader>
           {activeStrategy && (
-            <div className="py-2">
+            <div className="flex flex-col gap-4 py-2">
               <StrategyConfigForm
-                defaultConfig={activeStrategy.default_config}
                 values={configValues}
                 onChange={setConfigValues}
+                paramSchema={paramSchema}
+                paramGroups={paramGroups}
+                visibleKeys={visibleKeys}
               />
+
+              {/* Save as preset */}
+              <div className="border-t pt-4">
+                <h3 className="mb-2 text-sm font-medium text-muted-foreground">
+                  保存为自定义预设
+                </h3>
+                <div className="flex flex-col gap-2">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="预设名称"
+                      value={savePresetName}
+                      onChange={(e) => setSavePresetName(e.target.value)}
+                      className="h-8 flex-1 rounded-md border bg-background px-3 text-sm"
+                    />
+                    <input
+                      type="text"
+                      placeholder="描述（可选）"
+                      value={savePresetDesc}
+                      onChange={(e) => setSavePresetDesc(e.target.value)}
+                      className="h-8 flex-1 rounded-md border bg-background px-3 text-sm"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        const name = savePresetName.trim() || selectedStrategy
+                        // Strip unified rule keys out — only save strategy-specific params
+                        const params: Record<string, unknown> = {}
+                        for (const [k, v] of Object.entries(configValues)) {
+                          params[k] = v
+                        }
+                        savePresetMutation.mutate({
+                          name,
+                          desc: savePresetDesc.trim(),
+                          params,
+                        })
+                      }}
+                      disabled={savePresetMutation.isPending}
+                      className={cn(
+                        "h-8 rounded-md px-4 text-sm font-medium transition-colors",
+                        "bg-primary text-primary-foreground hover:bg-primary/90",
+                        "disabled:pointer-events-none disabled:opacity-50",
+                      )}
+                    >
+                      {savePresetMutation.isPending ? "保存中..." : "保存预设"}
+                    </button>
+                    {savePresetMutation.isSuccess && (
+                      <span className="text-xs text-emerald-600">已保存</span>
+                    )}
+                    {savePresetMutation.isError && (
+                      <span className="text-xs text-destructive">
+                        保存失败: {(savePresetMutation.error as Error).message}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </DialogContent>

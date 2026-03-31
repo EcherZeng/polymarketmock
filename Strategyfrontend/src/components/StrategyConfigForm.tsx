@@ -1,87 +1,145 @@
+import { useMemo } from "react"
 import { InfoIcon } from "lucide-react"
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import type { ParamSchemaItem, ParamGroupDef } from "@/types"
 
-/** Strategy parameter → { Chinese label, tooltip description } */
-const PARAM_I18N: Record<string, { label: string; tip: string }> = {
-  // ── solid_core ──
-  min_price:            { label: "最低价格",     tip: "入场所需的最低市场价格，低于此不开仓" },
-  time_remaining_ratio: { label: "剩余时间比",   tip: "进入窗口所需的剩余时间 / 总时长比值（如 0.333 = 最后 1/3 时间）" },
-  momentum_window:      { label: "动量窗口",     tip: "计算价格动量的回看秒数" },
-  momentum_min:         { label: "最小动量",     tip: "窗口内价格涨幅必须达到此比例才视为有上行动量" },
-  volatility_window:    { label: "波动窗口",     tip: "计算振幅和标准差所用的回看秒数" },
-  amplitude_min:        { label: "最小振幅",     tip: "窗口内价格振幅（最高-最低）的下限" },
-  amplitude_max:        { label: "最大振幅",     tip: "窗口内价格振幅的上限，超出则波动过大" },
-  max_std:              { label: "最大标准差",   tip: "窗口内价格标准差上限，控制噪声水平" },
-  max_drawdown:         { label: "最大回撤",     tip: "窗口内允许的最大回撤比例" },
-  position_min_pct:     { label: "最小仓位%",    tip: "单次买入占可用余额的最小比例" },
-  position_max_pct:     { label: "最大仓位%",    tip: "单次买入占可用余额的最大比例" },
-  reverse_tick_window:  { label: "反转检测窗口", tip: "检测最近 N 秒内是否出现大幅反向波动" },
-  reverse_threshold:    { label: "反转阈值",     tip: "单次跌幅超过此值视为反向信号，阻止入场" },
-  // ── mean_reversion ──
-  window:               { label: "均线窗口",     tip: "移动平均线的回看 tick 数" },
-  entry_std:            { label: "入场标准差",   tip: "价格偏离均线超过 N 个标准差时入场" },
-  exit_std:             { label: "出场标准差",   tip: "价格回归到偏离均线 N 个标准差内时平仓" },
-  // ── momentum ──
-  lookback:             { label: "回看周期",     tip: "计算动量信号的回看 tick 数" },
-  // ── common ──
-  position_size:        { label: "仓位大小",     tip: "每笔交易的目标数量（股/份）" },
+// ── helpers ─────────────────────────────────────────────────────────────────
+
+/** Get localised text — always zh for now, fallback to en */
+function t(label: { zh: string; en: string } | string): string {
+  if (typeof label === "string") return label
+  return label.zh || label.en
 }
 
-function getParamInfo(key: string) {
-  return PARAM_I18N[key] ?? { label: key, tip: "" }
+interface GroupedParam {
+  key: string
+  schema: ParamSchemaItem
 }
+
+// ── props ───────────────────────────────────────────────────────────────────
 
 interface StrategyConfigFormProps {
-  defaultConfig: Record<string, number | string | boolean>
   values: Record<string, unknown>
   onChange: (values: Record<string, unknown>) => void
+  paramSchema: Record<string, ParamSchemaItem>
+  paramGroups: Record<string, ParamGroupDef>
+  /** Keys that exist in the current strategy default_config (to filter relevant params) */
+  visibleKeys: Set<string>
 }
 
-export default function StrategyConfigForm({ defaultConfig, values, onChange }: StrategyConfigFormProps) {
-  const entries = Object.entries(defaultConfig)
+export default function StrategyConfigForm({
+  values,
+  onChange,
+  paramSchema,
+  paramGroups,
+  visibleKeys,
+}: StrategyConfigFormProps) {
+  // Group params by group, sorted by group order, filtered to visible keys
+  const grouped = useMemo(() => {
+    const map = new Map<string, GroupedParam[]>()
 
-  if (entries.length === 0) {
+    for (const [key, schema] of Object.entries(paramSchema)) {
+      if (!visibleKeys.has(key)) continue
+      // If param depends on a toggle, check if toggle is off → skip
+      if (schema.depends_on && !values[schema.depends_on]) continue
+
+      const group = schema.group
+      if (!map.has(group)) map.set(group, [])
+      map.get(group)!.push({ key, schema })
+    }
+
+    // Sort groups by order
+    const sorted = [...map.entries()].sort((a, b) => {
+      const orderA = paramGroups[a[0]]?.order ?? 99
+      const orderB = paramGroups[b[0]]?.order ?? 99
+      return orderA - orderB
+    })
+
+    return sorted
+  }, [paramSchema, paramGroups, visibleKeys, values])
+
+  if (grouped.length === 0) {
     return <p className="text-sm text-muted-foreground">该策略无可配置参数</p>
   }
 
-  function handleChange(key: string, raw: string, type: string) {
-    const val = type === "number" ? Number(raw) : raw
-    onChange({ ...values, [key]: val })
+  function handleChange(key: string, raw: string | boolean, schema: ParamSchemaItem) {
+    if (schema.type === "bool") {
+      onChange({ ...values, [key]: raw as boolean })
+    } else {
+      onChange({ ...values, [key]: Number(raw) })
+    }
   }
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-      {entries.map(([key, defaultVal]) => {
-        const type = typeof defaultVal
-        const currentVal = values[key] ?? defaultVal
-        const info = getParamInfo(key)
+    <div className="flex flex-col gap-5">
+      {grouped.map(([groupKey, params]) => {
+        const groupDef = paramGroups[groupKey]
+        const groupLabel = groupDef ? t(groupDef) : groupKey
 
         return (
-          <div key={key} className="flex flex-col gap-1">
-            <label className="flex items-center gap-1 text-xs text-muted-foreground">
-              <span>{info.label}</span>
-              {info.tip && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <InfoIcon className="size-3 shrink-0 cursor-help text-muted-foreground/60" />
-                  </TooltipTrigger>
-                  <TooltipContent side="top">
-                    <p>{info.tip}</p>
-                  </TooltipContent>
-                </Tooltip>
-              )}
-            </label>
-            <input
-              type={type === "number" ? "number" : "text"}
-              value={String(currentVal)}
-              onChange={(e) => handleChange(key, e.target.value, type)}
-              step={type === "number" && Number(defaultVal) < 1 ? "0.1" : "1"}
-              className="h-8 rounded-md border bg-background px-2 text-sm"
-            />
+          <div key={groupKey}>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {groupLabel}
+            </h3>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {params.map(({ key, schema }) => {
+                const currentVal = values[key]
+                const label = t(schema.label)
+
+                if (schema.type === "bool") {
+                  return (
+                    <label
+                      key={key}
+                      className="col-span-1 flex items-center gap-2 rounded-md border px-3 py-2"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!!currentVal}
+                        onChange={(e) => handleChange(key, e.target.checked, schema)}
+                        className="h-4 w-4 rounded accent-primary"
+                      />
+                      <span className="text-sm">{label}</span>
+                    </label>
+                  )
+                }
+
+                return (
+                  <div key={key} className="flex flex-col gap-1">
+                    <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <span>{label}</span>
+                      {schema.unit && (
+                        <span className="text-muted-foreground/50">({schema.unit})</span>
+                      )}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <InfoIcon className="size-3 shrink-0 cursor-help text-muted-foreground/50" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs">
+                          <p className="text-xs">
+                            {schema.min !== undefined && schema.max !== undefined
+                              ? `范围: ${schema.min} ~ ${schema.max}`
+                              : key}
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </label>
+                    <input
+                      type="number"
+                      value={currentVal !== undefined ? String(currentVal) : ""}
+                      onChange={(e) => handleChange(key, e.target.value, schema)}
+                      min={schema.min}
+                      max={schema.max}
+                      step={schema.step ?? (schema.type === "int" ? 1 : 0.01)}
+                      className="h-8 rounded-md border bg-background px-2 text-sm"
+                    />
+                  </div>
+                )
+              })}
+            </div>
           </div>
         )
       })}

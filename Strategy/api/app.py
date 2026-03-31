@@ -97,11 +97,13 @@ from api.strategies import router as strategies_router
 from api.data import router as data_router
 from api.execution import router as execution_router
 from api.results import router as results_router
+from api.presets import router as presets_router
 
 app.include_router(strategies_router, tags=["Strategies"])
 app.include_router(data_router, tags=["Data"])
 app.include_router(execution_router, tags=["Execution"])
 app.include_router(results_router, tags=["Results"])
+app.include_router(presets_router, tags=["Presets"])
 
 
 @app.get("/health")

@@ -13,6 +13,7 @@ import type {
   BatchRequest,
   BatchTask,
   BatchTaskDetail,
+  PresetsResponse,
 } from "@/types"
 
 const api = axios.create({ baseURL: "/strategy" })
@@ -27,6 +28,25 @@ export async function fetchStrategies(): Promise<StrategyInfo[]> {
 export async function fetchStrategy(name: string): Promise<StrategyInfo> {
   const { data } = await api.get<StrategyInfo>(`/strategies/${name}`)
   return data
+}
+
+// ── Presets ──────────────────────────────────────────────────────────────────
+
+export async function fetchPresets(): Promise<PresetsResponse> {
+  const { data } = await api.get<PresetsResponse>("/presets")
+  return data
+}
+
+export async function savePreset(
+  name: string,
+  body: { description?: string; params: Record<string, unknown> },
+): Promise<{ name: string; config: Record<string, unknown> }> {
+  const { data } = await api.put(`/presets/${name}`, body)
+  return data
+}
+
+export async function deletePreset(name: string): Promise<void> {
+  await api.delete(`/presets/${name}`)
 }
 
 // ── Data Archives ───────────────────────────────────────────────────────────

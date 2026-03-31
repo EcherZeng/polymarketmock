@@ -1,8 +1,10 @@
-"""Strategy registry — scans and loads strategy classes at startup."""
+"""Strategy registry — loads presets and registers strategy classes."""
 
 from __future__ import annotations
 
 import importlib.util
+import inspect
+import json
 import logging
 from pathlib import Path
 
@@ -10,15 +12,36 @@ from core.base_strategy import BaseStrategy
 
 logger = logging.getLogger(__name__)
 
+_PRESETS_PATH = Path(__file__).resolve().parent.parent / "strategy_presets.json"
+
+
+def _load_presets_file() -> dict:
+    if _PRESETS_PATH.exists():
+        with open(_PRESETS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def _save_presets_file(data: dict) -> None:
+    with open(_PRESETS_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
 
 class StrategyRegistry:
-    """Discovers and registers all BaseStrategy subclasses from a directory."""
+    """Loads UnifiedStrategy class, then registers one entry per preset config."""
 
     def __init__(self) -> None:
-        self._strategies: dict[str, type[BaseStrategy]] = {}
+        self._strategy_cls: type[BaseStrategy] | None = None
+        self._presets: dict = {}  # full presets file content
+        self._configs: dict[str, dict] = {}  # name → merged default_config
 
     def scan(self, directory: Path) -> None:
-        """Scan a directory for .py files containing BaseStrategy subclasses."""
+        """Scan strategies/ for the concrete strategy class, then register presets."""
+        self._presets = _load_presets_file()
+        unified_rules = self._presets.get("unified_rules", {})
+        strategies_map = self._presets.get("strategies", {})
+
+        # Find the concrete strategy class
         if not directory.exists():
             logger.warning("Strategies directory not found: %s", directory)
             return
@@ -39,27 +62,105 @@ class StrategyRegistry:
                         isinstance(cls, type)
                         and issubclass(cls, BaseStrategy)
                         and cls is not BaseStrategy
+                        and not inspect.isabstract(cls)
                     ):
-                        self._strategies[cls.name] = cls
-                        logger.info("Registered strategy: %s (%s)", cls.name, py_file.name)
+                        self._strategy_cls = cls
+                        logger.info("Loaded strategy class: %s (%s)", cls.name, py_file.name)
             except Exception as e:
                 logger.warning("Failed to load strategy from %s: %s", py_file.name, e)
 
+        if self._strategy_cls is None:
+            logger.error("No concrete strategy class found in %s", directory)
+            return
+
+        # Non-value keys to exclude when merging config
+        self._meta_keys = ("builtin", "description")
+
+        # Register one entry per preset
+        for preset_name, preset_params in strategies_map.items():
+            params = {k: v for k, v in preset_params.items() if k not in self._meta_keys}
+            merged = {**unified_rules, **params}
+            self._configs[preset_name] = merged
+            logger.info("Registered preset: %s", preset_name)
+
+    # ── Query ────────────────────────────────────────────────────────────────
+
     def list_strategies(self) -> list[dict]:
-        """Return metadata for all registered strategies."""
-        return [
-            {
-                "name": cls.name,
-                "description": cls.description,
-                "version": cls.version,
-                "default_config": cls.default_config,
-            }
-            for cls in self._strategies.values()
-        ]
+        strategies_map = self._presets.get("strategies", {})
+        result = []
+        for name, cfg in self._configs.items():
+            raw_desc = strategies_map.get(name, {}).get("description", "")
+            # description can be i18n dict or plain string
+            desc = raw_desc if isinstance(raw_desc, dict) else {"zh": raw_desc, "en": raw_desc}
+            builtin = strategies_map.get(name, {}).get("builtin", False)
+            result.append({
+                "name": name,
+                "description": desc,
+                "version": self._strategy_cls.version if self._strategy_cls else "0.0.0",
+                "default_config": cfg,
+                "builtin": builtin,
+            })
+        return result
+
+    def get_param_schema(self) -> dict:
+        """Return parameter schema for frontend form rendering."""
+        return self._presets.get("param_schema", {})
+
+    def get_param_groups(self) -> dict:
+        """Return parameter group definitions for frontend."""
+        return self._presets.get("param_groups", {})
 
     def get(self, name: str) -> type[BaseStrategy] | None:
-        """Get a strategy class by name."""
-        return self._strategies.get(name)
+        if name in self._configs:
+            return self._strategy_cls
+        return None
+
+    def get_default_config(self, name: str) -> dict:
+        return dict(self._configs.get(name, {}))
 
     def has(self, name: str) -> bool:
-        return name in self._strategies
+        return name in self._configs
+
+    # ── Preset CRUD ──────────────────────────────────────────────────────────
+
+    def get_presets_data(self) -> dict:
+        return dict(self._presets)
+
+    def get_preset(self, name: str) -> dict | None:
+        strategies = self._presets.get("strategies", {})
+        return strategies.get(name)
+
+    def save_preset(self, name: str, params: dict) -> None:
+        """Create or update a preset. Rebuilds merged config."""
+        strategies = self._presets.setdefault("strategies", {})
+        strategies[name] = params
+        # Rebuild merged config
+        unified_rules = self._presets.get("unified_rules", {})
+        clean = {k: v for k, v in params.items() if k not in self._meta_keys}
+        self._configs[name] = {**unified_rules, **clean}
+        _save_presets_file(self._presets)
+        logger.info("Saved preset: %s", name)
+
+    def delete_preset(self, name: str) -> bool:
+        """Delete a user-defined preset. Returns False if builtin or not found."""
+        strategies = self._presets.get("strategies", {})
+        preset = strategies.get(name)
+        if preset is None:
+            return False
+        if preset.get("builtin", False):
+            return False
+        del strategies[name]
+        self._configs.pop(name, None)
+        _save_presets_file(self._presets)
+        logger.info("Deleted preset: %s", name)
+        return True
+
+    def update_unified_rules(self, rules: dict) -> None:
+        """Update the unified rules and rebuild all merged configs."""
+        self._presets["unified_rules"] = rules
+        unified_rules = rules
+        strategies = self._presets.get("strategies", {})
+        for preset_name, preset_params in strategies.items():
+            clean = {k: v for k, v in preset_params.items() if k not in self._meta_keys}
+            self._configs[preset_name] = {**unified_rules, **clean}
+        _save_presets_file(self._presets)

@@ -1,10 +1,53 @@
 /* Strategy Backtest Engine — TypeScript types aligned with backend */
 
+// ── i18n label ──────────────────────────────────────────────────────────────
+
+export interface I18nLabel {
+  zh: string
+  en: string
+}
+
+// ── Param Schema (from strategy_presets.json) ───────────────────────────────
+
+export interface ParamSchemaItem {
+  group: string
+  label: I18nLabel
+  type: "float" | "int" | "bool"
+  min?: number
+  max?: number
+  step?: number
+  unit?: string
+  scope: "unified" | "strategy"
+  depends_on?: string
+}
+
+export interface ParamGroupDef {
+  zh: string
+  en: string
+  order: number
+}
+
+export interface PresetsResponse {
+  unified_rules: Record<string, number>
+  strategies: Record<string, StrategyPreset>
+  param_schema: Record<string, ParamSchemaItem>
+  param_groups: Record<string, ParamGroupDef>
+}
+
+export interface StrategyPreset {
+  builtin?: boolean
+  description?: I18nLabel | string
+  [key: string]: unknown
+}
+
+// ── Strategy ────────────────────────────────────────────────────────────────
+
 export interface StrategyInfo {
   name: string
-  description: string
+  description: I18nLabel | string
   version: string
   default_config: Record<string, number | string | boolean>
+  builtin?: boolean
 }
 
 export interface ArchiveInfo {
