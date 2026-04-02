@@ -7,12 +7,14 @@ import ResultDetailPage from "@/pages/ResultDetailPage"
 import DashboardPage from "@/pages/DashboardPage"
 import BatchDashboardPage from "@/pages/BatchDashboardPage"
 import BatchDetailPage from "@/pages/BatchDetailPage"
+import DataCleanupPage from "@/pages/DataCleanupPage"
 
 const navItems = [
   { to: "/", label: "策略回测" },
   { to: "/batch", label: "批量回测" },
   { to: "/results", label: "回测结果" },
   { to: "/dashboard", label: "仪表盘" },
+  { to: "/cleanup", label: "数据清理" },
 ]
 
 export default function App() {
@@ -53,6 +55,7 @@ export default function App() {
           <Route path="/results" element={<ResultsListPage />} />
           <Route path="/results/:sessionId" element={<ResultDetailPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/cleanup" element={<DataCleanupPage />} />
         </Routes>
       </main>
     </div>

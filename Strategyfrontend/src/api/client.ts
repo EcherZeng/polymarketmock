@@ -135,3 +135,50 @@ export async function deleteResult(sessionId: string): Promise<void> {
 export async function clearResults(): Promise<void> {
   await api.delete("/results")
 }
+
+// ── Data Cleanup ────────────────────────────────────────────────────────────
+
+export interface IncompleteItem {
+  slug: string
+  source: "archive" | "live"
+  duration_min: number
+  prices_count: number
+  orderbooks_count: number
+  live_trades_count: number
+  size_mb: number
+  time_range: { start: string; end: string }
+  threshold: number
+}
+
+export interface IncompleteResponse {
+  total_archives: number
+  incomplete_count: number
+  thresholds: Record<number, number>
+  items: IncompleteItem[]
+}
+
+export interface CleanupResponse {
+  deleted: string[]
+  not_found: string[]
+  deleted_count: number
+}
+
+export async function fetchIncomplete(
+  min5m?: number,
+  min15m?: number,
+): Promise<IncompleteResponse> {
+  const params: Record<string, number> = {}
+  if (min5m !== undefined) params.min_prices_5m = min5m
+  if (min15m !== undefined) params.min_prices_15m = min15m
+  const { data } = await api.get<IncompleteResponse>("/data/incomplete", { params })
+  return data
+}
+
+export async function cleanupSlugs(slugs: string[]): Promise<CleanupResponse> {
+  const { data } = await api.post<CleanupResponse>("/data/cleanup", { slugs })
+  return data
+}
+
+export async function deleteArchive(slug: string): Promise<void> {
+  await api.delete(`/data/archives/${slug}`)
+}
