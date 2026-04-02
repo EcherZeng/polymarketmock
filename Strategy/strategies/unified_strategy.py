@@ -59,13 +59,14 @@ class UnifiedStrategy(UnifiedBaseStrategy):
         self.reverse_tick_window: int = int(config.get("reverse_tick_window", 30))
         self.reverse_threshold: float = config.get("reverse_threshold", 0.002)
 
-        self._entered: bool = False
+        self._entered_tokens: set[str] = set()
         self._entry_count: int = 0
 
     # ── Entry logic ──────────────────────────────────────────────────────────
 
     def compute_entry_signals(self, ctx: TickContext) -> list[Signal]:
-        if self._entered:
+        # Skip if all tokens already entered
+        if len(self._entered_tokens) >= len(ctx.tokens):
             return []
 
         # 1. Time gate
@@ -80,13 +81,30 @@ class UnifiedStrategy(UnifiedBaseStrategy):
         min_history = self.reverse_tick_window
 
         for token_id, snapshot in ctx.tokens.items():
+            if token_id in self._entered_tokens:
+                continue
+
             mid = snapshot.mid_price
-            if mid <= 0 or mid < self.min_price:
+            if mid <= 0:
+                continue
+
+            # Price filter: for UP tokens (>= 0.5) use mid directly;
+            # for DOWN tokens (< 0.5) use mirrored price (1 - mid),
+            # so min_price filters on underlying event probability.
+            effective_price = mid if mid >= 0.5 else 1.0 - mid
+            if effective_price < self.min_price:
                 continue
 
             history = ctx.price_history.get(token_id, [])
             if len(history) < min_history:
                 continue
+
+            # Price-level normalization for DOWN tokens (< 0.5).
+            # Relative metrics (amplitude, std, drawdown, momentum) are
+            # inflated at low price levels. Multiply by price_norm to bring
+            # them to UP-equivalent scale so thresholds work across sides.
+            is_down = mid < 0.5
+            price_norm = (mid / (1.0 - mid)) if is_down else 1.0
 
             # 2. Momentum check (optional)
             if self.use_momentum:
@@ -94,10 +112,10 @@ class UnifiedStrategy(UnifiedBaseStrategy):
                 if momentum_slice[0] == 0:
                     continue
                 momentum = (momentum_slice[-1] - momentum_slice[0]) / momentum_slice[0]
-                if momentum < self.momentum_min:
+                if momentum * price_norm < self.momentum_min:
                     continue
 
-            # 3. Direction consistency check (optional)
+            # 3. Direction consistency check (optional) — no normalization needed
             if self.use_direction:
                 dir_slice = history[-self.direction_window:]
                 up_count = sum(1 for i in range(1, len(dir_slice)) if dir_slice[i] > dir_slice[i - 1])
@@ -113,7 +131,8 @@ class UnifiedStrategy(UnifiedBaseStrategy):
                 if low == 0:
                     continue
                 amplitude = (high - low) / low
-                if amplitude < self.amplitude_min or amplitude > self.amplitude_max:
+                norm_amplitude = amplitude * price_norm
+                if norm_amplitude < self.amplitude_min or norm_amplitude > self.amplitude_max:
                     continue
             else:
                 vol_window = min(self.volatility_window, len(history))
@@ -126,7 +145,7 @@ class UnifiedStrategy(UnifiedBaseStrategy):
                     continue
                 variance = sum((p - mean_price) ** 2 for p in vol_slice) / len(vol_slice)
                 std_pct = math.sqrt(variance) / mean_price
-                if std_pct > self.max_std:
+                if std_pct * price_norm > self.max_std:
                     continue
 
             # 6. Max drawdown check (optional)
@@ -139,7 +158,7 @@ class UnifiedStrategy(UnifiedBaseStrategy):
                     dd = (peak - p) / peak if peak > 0 else 0.0
                     if dd > max_dd:
                         max_dd = dd
-                if max_dd > self.max_drawdown_limit:
+                if max_dd * price_norm > self.max_drawdown_limit:
                     continue
 
             # 7. Reverse movement check (optional)
@@ -147,7 +166,8 @@ class UnifiedStrategy(UnifiedBaseStrategy):
                 reverse_window = min(self.reverse_tick_window, len(history))
                 recent = history[-reverse_window:]
                 has_reverse = any(
-                    recent[i - 1] > 0 and (recent[i] - recent[i - 1]) / recent[i - 1] < -self.reverse_threshold
+                    recent[i - 1] > 0
+                    and (recent[i] - recent[i - 1]) / recent[i - 1] * price_norm < -self.reverse_threshold
                     for i in range(1, len(recent))
                 )
                 if has_reverse:
@@ -163,7 +183,7 @@ class UnifiedStrategy(UnifiedBaseStrategy):
             if amount <= 0:
                 continue
 
-            self._entered = True
+            self._entered_tokens.add(token_id)
             self._entry_count += 1
             return [Signal(token_id=token_id, side="BUY", amount=float(amount))]
 
@@ -171,7 +191,8 @@ class UnifiedStrategy(UnifiedBaseStrategy):
 
     def end_strategy(self) -> dict:
         return {
-            "entered": self._entered,
+            "entered": len(self._entered_tokens) > 0,
+            "entered_tokens": sorted(self._entered_tokens),
             "entry_count": self._entry_count,
             "strategy_type": "hold_to_settlement",
         }

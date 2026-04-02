@@ -22,9 +22,12 @@ class UnifiedBaseStrategy(BaseStrategy):
     # ── BaseStrategy interface ───────────────────────────────────────────────
 
     def on_init(self, config: dict) -> None:
-        # Unified rule parameters
+        # Unified rule parameters — absolute price mode
         self._tp_price: float = config.get("take_profit_price", 0.99)
         self._sl_price: float = config.get("stop_loss_price", 0.65)
+        # Relative pct mode — anchored to per-token entry price
+        self._tp_pct: float = config.get("take_profit_pct", 0) or 0
+        self._sl_pct: float = config.get("stop_loss_pct", 0) or 0
         self._force_close_seconds: int = int(config.get("force_close_remaining_seconds", 30))
         self._consec_loss_threshold: int = int(config.get("consecutive_loss_threshold", 3))
         self._loss_reduction_pct: float = config.get("loss_position_reduction_pct", 0.5)
@@ -48,13 +51,29 @@ class UnifiedBaseStrategy(BaseStrategy):
                     signals.append(Signal(token_id=token_id, side="SELL", amount=qty))
             return signals
 
-        # ── 2. Take profit / Stop loss ──────────────────────────────────────
+        # ── 2. Take profit / Stop loss (per-token, pct + absolute) ────────
         for token_id, snapshot in ctx.tokens.items():
             qty = ctx.positions.get(token_id, 0)
             if qty <= 0:
                 continue
             mid = snapshot.mid_price
-            if mid >= self._tp_price or mid <= self._sl_price:
+            entry = self._entry_prices.get(token_id)
+            should_close = False
+
+            # Relative pct mode — anchored to entry price per token
+            if entry is not None and entry > 0:
+                if self._tp_pct > 0 and mid >= entry * (1 + self._tp_pct):
+                    should_close = True
+                if self._sl_pct > 0 and mid <= entry * (1 - self._sl_pct):
+                    should_close = True
+
+            # Absolute price mode
+            if mid >= self._tp_price:
+                should_close = True
+            if self._sl_price > 0 and mid <= self._sl_price:
+                should_close = True
+
+            if should_close:
                 signals.append(Signal(token_id=token_id, side="SELL", amount=qty))
 
         if signals:
