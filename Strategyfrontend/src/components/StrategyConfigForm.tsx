@@ -1,10 +1,5 @@
-import { useMemo } from "react"
-import { InfoIcon } from "lucide-react"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
+import { useMemo, useState, useRef, useCallback } from "react"
+import { InfoIcon, XIcon } from "lucide-react"
 import type { ParamSchemaItem, ParamGroupDef } from "@/types"
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -13,6 +8,110 @@ import type { ParamSchemaItem, ParamGroupDef } from "@/types"
 function t(label: { zh: string; en: string } | string): string {
   if (typeof label === "string") return label
   return label.zh || label.en
+}
+
+// ── ParamInfoPopup ─────────────────────────────────────────────────────────
+
+interface ParamInfoPopupProps {
+  schema: ParamSchemaItem
+}
+
+function ParamInfoPopup({ schema }: ParamInfoPopupProps) {
+  const [open, setOpen] = useState(false)
+  // position relative to viewport center offset
+  const [pos, setPos] = useState({ x: 0, y: 0 })
+  const dragging = useRef(false)
+  const dragStart = useRef({ mx: 0, my: 0, px: 0, py: 0 })
+
+  const onDragMouseDown = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    dragging.current = true
+    dragStart.current = { mx: e.clientX, my: e.clientY, px: pos.x, py: pos.y }
+
+    function onMouseMove(ev: MouseEvent) {
+      if (!dragging.current) return
+      setPos({
+        x: dragStart.current.px + (ev.clientX - dragStart.current.mx),
+        y: dragStart.current.py + (ev.clientY - dragStart.current.my),
+      })
+    }
+    function onMouseUp() {
+      dragging.current = false
+      document.removeEventListener("mousemove", onMouseMove)
+      document.removeEventListener("mouseup", onMouseUp)
+    }
+    document.addEventListener("mousemove", onMouseMove)
+    document.addEventListener("mouseup", onMouseUp)
+  }, [pos])
+
+  return (
+    <div className="relative inline-flex">
+      <button
+        type="button"
+        onClick={() => { setPos({ x: 0, y: 0 }); setOpen(true) }}
+        className="flex items-center text-muted-foreground/50 hover:text-muted-foreground"
+        aria-label="参数说明"
+      >
+        <InfoIcon className="size-3 shrink-0" />
+      </button>
+
+      {open && (
+        <div
+          className="fixed z-50 w-80 rounded-md border bg-popover text-popover-foreground shadow-lg"
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            resize: "both",
+            overflow: "auto",
+            minWidth: "18rem",
+            minHeight: "6rem",
+            maxHeight: "24rem",
+            top: "50%",
+            left: "50%",
+            transform: `translate(calc(-50% + ${pos.x}px), calc(-50% + ${pos.y}px))`,
+          }}
+        >
+          {/* Drag handle */}
+          <div
+            onMouseDown={onDragMouseDown}
+            onClick={(e) => e.stopPropagation()}
+            className="flex cursor-grab items-center justify-between border-b px-3 py-1.5 active:cursor-grabbing"
+          >
+            <span className="text-xs font-medium text-muted-foreground select-none">参数说明</span>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setOpen(false) }}
+              className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+              aria-label="关闭"
+            >
+              <XIcon className="size-3" />
+            </button>
+          </div>
+
+          <div className="space-y-1.5 p-3">
+            {schema.desc && (
+              <p className="text-xs">{t(schema.desc)}</p>
+            )}
+            {schema.min !== undefined && schema.max !== undefined && (
+              <p className="text-xs text-muted-foreground">
+                范围：{schema.min} ~ {schema.max}
+              </p>
+            )}
+            {schema.disable_value !== undefined && schema.disable_value !== null ? (
+              <p className="text-xs text-muted-foreground">
+                禁用值：<span className="font-mono text-foreground">{schema.disable_value}</span>
+                {schema.disable_note && <span>（{t(schema.disable_note)}）</span>}
+              </p>
+            ) : schema.disable_note ? (
+              <p className="text-xs text-muted-foreground">
+                禁用：{t(schema.disable_note)}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 interface GroupedParam {
@@ -92,18 +191,23 @@ export default function StrategyConfigForm({
 
                 if (schema.type === "bool") {
                   return (
-                    <label
+                    <div
                       key={key}
                       className="col-span-1 flex items-center gap-2 rounded-md border px-3 py-2"
                     >
-                      <input
-                        type="checkbox"
-                        checked={!!currentVal}
-                        onChange={(e) => handleChange(key, e.target.checked, schema)}
-                        className="h-4 w-4 rounded accent-primary"
-                      />
-                      <span className="text-sm">{label}</span>
-                    </label>
+                      <label className="flex flex-1 cursor-pointer items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={!!currentVal}
+                          onChange={(e) => handleChange(key, e.target.checked, schema)}
+                          className="h-4 w-4 rounded accent-primary"
+                        />
+                        <span className="text-sm">{label}</span>
+                      </label>
+                      {schema.desc && (
+                        <ParamInfoPopup schema={schema} />
+                      )}
+                    </div>
                   )
                 }
 
@@ -114,18 +218,7 @@ export default function StrategyConfigForm({
                       {schema.unit && (
                         <span className="text-muted-foreground/50">({schema.unit})</span>
                       )}
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <InfoIcon className="size-3 shrink-0 cursor-help text-muted-foreground/50" />
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="max-w-xs">
-                          <p className="text-xs">
-                            {schema.min !== undefined && schema.max !== undefined
-                              ? `范围: ${schema.min} ~ ${schema.max}`
-                              : key}
-                          </p>
-                        </TooltipContent>
-                      </Tooltip>
+                      <ParamInfoPopup schema={schema} />
                     </label>
                     <input
                       type="number"

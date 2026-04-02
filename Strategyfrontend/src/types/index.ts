@@ -12,6 +12,8 @@ export interface I18nLabel {
 export interface ParamSchemaItem {
   group: string
   label: I18nLabel
+  /** What this parameter does and how it affects the strategy */
+  desc?: I18nLabel
   type: "float" | "int" | "bool"
   min?: number
   max?: number
@@ -19,6 +21,10 @@ export interface ParamSchemaItem {
   unit?: string
   scope: "unified" | "strategy"
   depends_on?: string
+  /** The value to set when you want this parameter to have no effect on calculations. null means use the corresponding toggle instead. */
+  disable_value?: number | null
+  /** Human-readable explanation of what disable_value achieves */
+  disable_note?: I18nLabel
 }
 
 export interface ParamGroupDef {
