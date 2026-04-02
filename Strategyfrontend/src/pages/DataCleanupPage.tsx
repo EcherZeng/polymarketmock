@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState, useMemo } from "react"
 import { cn } from "@/lib/utils"
 import { fetchIncomplete, cleanupSlugs, deleteArchive } from "@/api/client"
-import type { IncompleteItem, IncompleteResponse } from "@/api/client"
+import type { IncompleteResponse } from "@/api/client"
 
 function fmtSize(mb: number) {
   return mb >= 1 ? `${mb.toFixed(1)} MB` : `${(mb * 1024).toFixed(0)} KB`
