@@ -22,6 +22,7 @@ import type {
   I18nLabel,
 } from "@/types"
 import StrategyConfigForm from "@/components/StrategyConfigForm"
+import MechanismExplainer from "@/components/MechanismExplainer"
 import {
   Dialog,
   DialogContent,
@@ -257,6 +258,8 @@ export default function StrategyPage() {
         <h1 className="text-2xl font-bold tracking-tight">策略回测</h1>
         <p className="text-muted-foreground">选择策略和数据源，配置参数后运行回测</p>
       </div>
+
+      <MechanismExplainer />
 
       <div className="grid gap-6 lg:grid-cols-12">
         {/* Left: Strategy selection + run controls */}

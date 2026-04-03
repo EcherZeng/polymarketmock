@@ -88,26 +88,28 @@ class UnifiedBaseStrategy(BaseStrategy):
             if qty <= 0:
                 continue
             mid = snapshot.mid_price
+            # Use anchor_price for TP/SL when available (more reliable than raw mid)
+            ref_price = snapshot.anchor_price if snapshot.anchor_price > 0 else mid
             entry_side = self._entry_price_sides.get(token_id)
-            if entry_side is not None and self._price_side(mid) != entry_side:
+            if entry_side is not None and self._price_side(ref_price) != entry_side:
                 continue
 
-            price_side = entry_side or self._price_side(mid)
-            effective_mid = self._effective_price(mid, price_side)
+            price_side = entry_side or self._price_side(ref_price)
+            effective_ref = self._effective_price(ref_price, price_side)
             entry = self._entry_effective_prices.get(token_id)
             should_close = False
 
             # Relative pct mode — anchored to entry price per token
             if entry is not None and entry > 0:
-                if self._tp_pct > 0 and effective_mid >= entry * (1 + self._tp_pct):
+                if self._tp_pct > 0 and effective_ref >= entry * (1 + self._tp_pct):
                     should_close = True
-                if self._sl_pct > 0 and effective_mid <= entry * (1 - self._sl_pct):
+                if self._sl_pct > 0 and effective_ref <= entry * (1 - self._sl_pct):
                     should_close = True
 
             # Absolute price mode
-            if effective_mid >= self._tp_price:
+            if effective_ref >= self._tp_price:
                 should_close = True
-            if self._sl_price > 0 and effective_mid <= self._sl_price:
+            if self._sl_price > 0 and effective_ref <= self._sl_price:
                 should_close = True
 
             if should_close:

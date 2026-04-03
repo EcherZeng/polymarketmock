@@ -28,6 +28,8 @@ class TokenSnapshot:
     best_bid: float
     best_ask: float
     spread: float
+    anchor_price: float = 0.0  # tiered reference price (micro-price / mid / last_trade)
+    anchor_source: str = ""    # "micro" | "mid" | "last_trade" | "none"
     bid_levels: list[tuple[float, float]] = field(default_factory=list)  # [(price, size)]
     ask_levels: list[tuple[float, float]] = field(default_factory=list)
 
@@ -163,7 +165,7 @@ class BacktestSession:
     equity_curve: list[dict] = field(default_factory=list)  # [{timestamp, equity}]
     drawdown_curve: list[dict] = field(default_factory=list)
     position_curve: list[dict] = field(default_factory=list)
-    price_curve: list[dict] = field(default_factory=list)  # [{timestamp, token_id, mid_price}]
+    price_curve: list[dict] = field(default_factory=list)  # [{timestamp, token_id, mid_price, anchor_price, anchor_source}]
     drawdown_events: list[DrawdownEvent] = field(default_factory=list)
     metrics: EvaluationMetrics = field(default_factory=EvaluationMetrics)
     strategy_summary: dict = field(default_factory=dict)

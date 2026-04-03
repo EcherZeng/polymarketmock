@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import logging
+from datetime import datetime, timezone
+
+import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
 import api.state as state
 from api.result_store import sanitize_floats
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -123,3 +129,77 @@ async def clear_results():
     store = _get_store()
     count = store.clear()
     return {"deleted": count}
+
+
+# ── BTC Kline (Binance) ─────────────────────────────────────────────────────
+
+BINANCE_KLINE_URL = "https://api.binance.com/api/v3/klines"
+
+
+def _iso_to_ms(ts: str) -> int:
+    """Convert ISO 8601 timestamp string to milliseconds since epoch."""
+    dt = datetime.fromisoformat(ts)
+    return int(dt.timestamp() * 1000)
+
+
+@router.get("/results/{session_id}/btc-klines")
+async def get_btc_klines(session_id: str):
+    """Fetch BTC/USDT 1m klines from Binance for the session's time range."""
+    store = _get_store()
+    result = store.get(session_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Result not found")
+
+    # Determine time range from equity_curve or price_curve
+    equity_curve = result.get("equity_curve", [])
+    price_curve = result.get("price_curve", [])
+    source = equity_curve if equity_curve else price_curve
+    if not source:
+        raise HTTPException(status_code=400, detail="No time series data in result")
+
+    start_ts = source[0]["timestamp"]
+    end_ts = source[-1]["timestamp"]
+    start_ms = _iso_to_ms(start_ts)
+    end_ms = _iso_to_ms(end_ts)
+
+    # Fetch from Binance
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                BINANCE_KLINE_URL,
+                params={
+                    "symbol": "BTCUSDT",
+                    "interval": "1m",
+                    "startTime": start_ms,
+                    "endTime": end_ms,
+                    "limit": 1000,
+                },
+            )
+            resp.raise_for_status()
+            raw = resp.json()
+    except httpx.HTTPError as e:
+        logger.warning("Binance kline request failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"Binance API error: {e}")
+
+    # Transform to structured response
+    klines = []
+    for k in raw:
+        klines.append({
+            "open_time": k[0],
+            "open": float(k[1]),
+            "high": float(k[2]),
+            "low": float(k[3]),
+            "close": float(k[4]),
+            "volume": float(k[5]),
+            "close_time": k[6],
+            "quote_volume": float(k[7]),
+            "trades": k[8],
+        })
+
+    return {
+        "symbol": "BTCUSDT",
+        "interval": "1m",
+        "start_time": start_ts,
+        "end_time": end_ts,
+        "klines": klines,
+    }

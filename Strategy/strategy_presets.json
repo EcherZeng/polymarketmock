@@ -619,6 +619,72 @@
       },
       "type": "bool",
       "scope": "strategy"
+    },
+    "max_spread": {
+      "group": "entry",
+      "label": {
+        "zh": "最大 Spread 阈值",
+        "en": "Max Spread"
+      },
+      "desc": {
+        "zh": "入场 Spread（best_ask - best_bid）超过此值时跳过入场，避免在流动性不足的宽价差市场建仓。区间为 [0.01, 1.0]。",
+        "en": "Skip entry when the bid-ask spread exceeds this value, avoiding illiquid wide-spread markets. Range [0.01, 1.0]."
+      },
+      "disable_value": 1.0,
+      "disable_note": {
+        "zh": "设为 1.0：Spread 永远 ≤ 1，价差过滤实际失效",
+        "en": "Set to 1.0: spread never exceeds 1, filter effectively disabled"
+      },
+      "type": "float",
+      "min": 0.01,
+      "max": 1.0,
+      "step": 0.01,
+      "unit": "",
+      "scope": "strategy"
+    },
+    "max_ask_deviation": {
+      "group": "entry",
+      "label": {
+        "zh": "最大 Ask 偏离度",
+        "en": "Max Ask Deviation"
+      },
+      "desc": {
+        "zh": "best_ask 相对锚点价格的偏离比例上限。偏离过大就不入场，避免实际买入价远高于参考价。区间为 [0.01, 1.0]。",
+        "en": "Maximum ratio by which best_ask can deviate from the anchor price. Prevents buying at prices far above the reference. Range [0.01, 1.0]."
+      },
+      "disable_value": 1.0,
+      "disable_note": {
+        "zh": "设为 1.0：不限制 Ask 偏离度",
+        "en": "Set to 1.0: no ask deviation limit"
+      },
+      "type": "float",
+      "min": 0.01,
+      "max": 1.0,
+      "step": 0.01,
+      "unit": "",
+      "scope": "strategy"
+    },
+    "min_profit_room": {
+      "group": "entry",
+      "label": {
+        "zh": "最小利润空间",
+        "en": "Min Profit Room"
+      },
+      "desc": {
+        "zh": "要求 1.0 - best_ask > 此值才入场，确保有足够的潜在利润空间。区间为 [0.0, 0.5]。",
+        "en": "Requires (1.0 - best_ask) > this value before entry, ensuring sufficient potential profit margin. Range [0.0, 0.5]."
+      },
+      "disable_value": 0.0,
+      "disable_note": {
+        "zh": "设为 0.0：不检查利润空间",
+        "en": "Set to 0.0: no profit room check"
+      },
+      "type": "float",
+      "min": 0.0,
+      "max": 0.5,
+      "step": 0.01,
+      "unit": "",
+      "scope": "strategy"
     }
   },
   "param_groups": {
@@ -676,6 +742,9 @@
       "use_drawdown_check": true,
       "use_amplitude_check": true,
       "use_reverse_check": true,
+      "max_spread": 0.15,
+      "max_ask_deviation": 0.10,
+      "min_profit_room": 0.05,
       "builtin": true
     },
     "main_force": {
@@ -704,7 +773,10 @@
       "use_std_check": true,
       "use_drawdown_check": true,
       "use_amplitude_check": true,
-      "use_reverse_check": true
+      "use_reverse_check": true,
+      "max_spread": 0.15,
+      "max_ask_deviation": 0.10,
+      "min_profit_room": 0.05
     },
     "high_freq_coverage": {
       "builtin": true,
@@ -729,7 +801,10 @@
       "use_std_check": false,
       "use_drawdown_check": false,
       "use_amplitude_check": true,
-      "use_reverse_check": true
+      "use_reverse_check": true,
+      "max_spread": 0.20,
+      "max_ask_deviation": 0.15,
+      "min_profit_room": 0.03
     },
     "Test预设": {
       "take_profit_price": 0.99,

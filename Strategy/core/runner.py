@@ -102,6 +102,107 @@ def _apply_delta(working_ob: dict, delta: dict) -> None:
         levels[price] = size
 
 
+# ── Tiered anchor price ─────────────────────────────────────────────────────
+
+# Spread thresholds for tiered anchor selection (Polymarket uses 0.10)
+_SPREAD_TIGHT = 0.05    # spread < 0.05 → simple mid is reliable
+_SPREAD_WIDE = 0.15     # spread > 0.15 → mid is unreliable, use last_trade_price
+_MICRO_DEPTH = 3        # number of orderbook levels used for micro-price
+
+
+def _weighted_micro_price(
+    bid_levels: list[tuple[float, float]],
+    ask_levels: list[tuple[float, float]],
+    depth: int = _MICRO_DEPTH,
+) -> float | None:
+    """Compute depth-weighted micro-price using top N levels from each side.
+
+    Formula (generalised for N levels):
+      micro = (Σ bid_i × V_ask_i  +  Σ ask_i × V_bid_i) / (Σ V_bid + Σ V_ask)
+
+    When the orderbook is oscillating with several close price levels at
+    similar volumes, this captures the "centre of gravity" across the
+    full visible depth rather than relying solely on a single best level.
+    """
+    top_bids = bid_levels[:depth]
+    top_asks = ask_levels[:depth]
+    if not top_bids or not top_asks:
+        return None
+
+    sum_bid_vol = sum(v for _, v in top_bids)
+    sum_ask_vol = sum(v for _, v in top_asks)
+    total_vol = sum_bid_vol + sum_ask_vol
+    if total_vol <= 0:
+        return None
+
+    # Cross-weight: bid prices weighted by ask volume; ask prices by bid volume
+    bid_weighted = sum(p * v for p, v in top_bids)
+    ask_weighted = sum(p * v for p, v in top_asks)
+    micro = (bid_weighted * sum_ask_vol + ask_weighted * sum_bid_vol) / (
+        total_vol * ((sum_bid_vol + sum_ask_vol) / 2)
+    )
+    # Simpler equivalent that avoids the cross-product confusion:
+    # Use the standard per-level cross-imbalance micro-price.
+    # Weight each side's prices by the *opposing* side's total volume.
+    micro = (
+        sum(p * sum_ask_vol for p, _ in top_bids)
+        + sum(p * sum_bid_vol for p, _ in top_asks)
+    )
+    denominator = len(top_bids) * sum_ask_vol + len(top_asks) * sum_bid_vol
+    if denominator <= 0:
+        return None
+    micro = micro / denominator
+    return round(micro, 6)
+
+
+def _compute_anchor_price(
+    best_bid: float,
+    best_ask: float,
+    mid: float,
+    spread: float,
+    bid_levels: list[tuple[float, float]],
+    ask_levels: list[tuple[float, float]],
+    last_trade_price: float = 0.0,
+) -> tuple[float, str]:
+    """Compute tiered anchor price based on orderbook conditions.
+
+    Returns (anchor_price, source) where source is one of:
+      "mid"         — spread < 0.05, simple midpoint is reliable
+      "micro"       — 0.05 <= spread < 0.15, depth-weighted micro-price (top N levels)
+      "last_trade"  — spread >= 0.15 and a recent trade exists
+      "none"        — no reliable price available
+
+    When the orderbook is oscillating (multiple close price levels with
+    similar volume), the micro-price uses up to 3 levels from each side
+    to capture the volume-weighted centre of gravity.
+    """
+    if not best_bid and not best_ask:
+        if last_trade_price > 0:
+            return last_trade_price, "last_trade"
+        return 0.0, "none"
+
+    # Only one side available
+    if not best_bid or not best_ask:
+        if last_trade_price > 0:
+            return last_trade_price, "last_trade"
+        return mid, "mid"
+
+    if spread < _SPREAD_TIGHT:
+        # Tight spread: simple mid is reliable
+        return mid, "mid"
+    elif spread < _SPREAD_WIDE:
+        # Medium spread: use multi-level micro-price
+        micro = _weighted_micro_price(bid_levels, ask_levels)
+        return (micro, "micro") if micro is not None else (mid, "mid")
+    else:
+        # Wide spread: mid is unreliable
+        if last_trade_price > 0:
+            return last_trade_price, "last_trade"
+        # Fallback to micro-price even for wide spread (better than simple mid)
+        micro = _weighted_micro_price(bid_levels, ask_levels)
+        return (micro, "micro") if micro is not None else (mid, "mid")
+
+
 def _derive_snapshot_from_ob(token_id: str, working_ob: dict) -> TokenSnapshot:
     """Derive TokenSnapshot from working orderbook."""
     bids = working_ob.get("bids", {})
@@ -121,12 +222,19 @@ def _derive_snapshot_from_ob(token_id: str, working_ob: dict) -> TokenSnapshot:
         key=lambda x: x[0],
     )
 
+    # Compute tiered anchor price
+    anchor_price, anchor_source = _compute_anchor_price(
+        best_bid, best_ask, mid, spread, bid_levels, ask_levels,
+    )
+
     return TokenSnapshot(
         token_id=token_id,
         mid_price=round(mid, 6),
         best_bid=round(best_bid, 6),
         best_ask=round(best_ask, 6),
         spread=round(spread, 6),
+        anchor_price=round(anchor_price, 6),
+        anchor_source=anchor_source,
         bid_levels=bid_levels,
         ask_levels=ask_levels,
     )
@@ -259,6 +367,7 @@ def run_backtest(
 
     # Last known prices per token
     last_mid: dict[str, float] = {tid: 0.0 for tid in token_ids}
+    last_trade_prices: dict[str, float] = {tid: 0.0 for tid in token_ids}
 
     # Init strategy
     merged_config = {**registry.get_default_config(strategy_name), **user_config}
@@ -293,6 +402,9 @@ def run_backtest(
             new_trades = trade_ptrs[tid].advance_to(grid_ts)
             for t in new_trades:
                 recent_trades.append(t)
+                tp = float(t.get("price", 0))
+                if tp > 0:
+                    last_trade_prices[tid] = tp
         # Trim recent trades
         if len(recent_trades) > 200:
             recent_trades = recent_trades[-200:]
@@ -301,14 +413,27 @@ def run_backtest(
         token_snapshots: dict[str, TokenSnapshot] = {}
         for tid in token_ids:
             snap = _derive_snapshot_from_ob(tid, working_obs[tid])
+
+            # Recompute anchor with last_trade_price context
+            if snap.anchor_source == "none" or (snap.spread >= _SPREAD_WIDE and last_trade_prices[tid] > 0):
+                anchor, src = _compute_anchor_price(
+                    snap.best_bid, snap.best_ask, snap.mid_price, snap.spread,
+                    snap.bid_levels, snap.ask_levels, last_trade_prices[tid],
+                )
+                snap.anchor_price = round(anchor, 6)
+                snap.anchor_source = src
+
             # If no orderbook data yet, use last_mid from prices
             if snap.mid_price == 0 and last_mid[tid] > 0:
+                anchor = last_trade_prices[tid] if last_trade_prices[tid] > 0 else last_mid[tid]
                 snap = TokenSnapshot(
                     token_id=tid,
                     mid_price=last_mid[tid],
                     best_bid=last_mid[tid],
                     best_ask=last_mid[tid],
                     spread=0.0,
+                    anchor_price=round(anchor, 6),
+                    anchor_source="last_trade" if last_trade_prices[tid] > 0 else "mid",
                     bid_levels=snap.bid_levels,
                     ask_levels=snap.ask_levels,
                 )
@@ -383,10 +508,17 @@ def run_backtest(
             # Record price curve at same sampling rate
             for tid in token_ids:
                 if last_mid.get(tid, 0) > 0:
+                    snap = token_snapshots.get(tid)
                     price_curve.append({
                         "timestamp": grid_ts,
                         "token_id": tid,
                         "mid_price": round(last_mid[tid], 6),
+                        "anchor_price": round(snap.anchor_price, 6) if snap else round(last_mid[tid], 6),
+                        "anchor_source": snap.anchor_source if snap else "mid",
+                        "best_bid": round(snap.best_bid, 6) if snap else 0.0,
+                        "best_ask": round(snap.best_ask, 6) if snap else 0.0,
+                        "spread": round(snap.spread, 6) if snap else 0.0,
+                        "last_trade_price": round(last_trade_prices.get(tid, 0), 6),
                     })
 
         # 10) Record position curve (on trade or periodically)

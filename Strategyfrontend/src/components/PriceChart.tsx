@@ -30,7 +30,7 @@ export default function PriceChart({ priceCurve, trades }: PriceChartProps) {
     return ids.sort()
   }, [priceCurve])
 
-  // Build merged time-series: { timestamp, [token_0]: price, [token_1]: price, ... }
+  // Build merged time-series: { timestamp, [token_0]: price, [token_1]: price, anchor_0, anchor_1, ... }
   const merged = useMemo(() => {
     const map = new Map<string, Record<string, number | string>>()
     for (const pt of priceCurve) {
@@ -40,11 +40,20 @@ export default function PriceChart({ priceCurve, trades }: PriceChartProps) {
       const entry = map.get(pt.timestamp)!
       const idx = tokenIds.indexOf(pt.token_id)
       entry[`token_${idx}`] = pt.mid_price
+      if (pt.anchor_price != null) {
+        entry[`anchor_${idx}`] = pt.anchor_price
+      }
     }
     return [...map.values()].sort((a, b) =>
       String(a.timestamp).localeCompare(String(b.timestamp)),
     )
   }, [priceCurve, tokenIds])
+
+  // Check if anchor data is present
+  const hasAnchor = useMemo(
+    () => priceCurve.some((p) => p.anchor_price != null && p.anchor_price !== p.mid_price),
+    [priceCurve],
+  )
 
   // Map trades to chart reference dots
   const tradeMarkers = useMemo(() => {
@@ -97,19 +106,29 @@ export default function PriceChart({ priceCurve, trades }: PriceChartProps) {
           <Tooltip
             labelFormatter={(v) => String(v).slice(0, 19).replace("T", " ")}
             formatter={(value, name) => {
-              const idx = parseInt(String(name).replace("token_", ""))
-              const label = tokenLabels[idx] ?? String(name)
-              return [`$${Number(value).toFixed(4)}`, label]
+              const nameStr = String(name)
+              if (nameStr.startsWith("anchor_")) {
+                const idx = parseInt(nameStr.replace("anchor_", ""))
+                const label = tokenLabels[idx] ?? nameStr
+                return [`$${Number(value).toFixed(4)}`, `${label} 锚点`]
+              }
+              const idx = parseInt(nameStr.replace("token_", ""))
+              const label = tokenLabels[idx] ?? nameStr
+              return [`$${Number(value).toFixed(4)}`, `${label} Mid`]
             }}
           />
           <Legend
             formatter={(value: string) => {
+              if (value.startsWith("anchor_")) {
+                const idx = parseInt(value.replace("anchor_", ""))
+                return `${tokenLabels[idx] ?? value} 锚点`
+              }
               const idx = parseInt(value.replace("token_", ""))
               return tokenLabels[idx] ?? value
             }}
           />
 
-          {/* Price lines for each token */}
+          {/* Mid price lines for each token */}
           {tokenIds.map((_, i) => (
             <Line
               key={`token_${i}`}
@@ -117,6 +136,20 @@ export default function PriceChart({ priceCurve, trades }: PriceChartProps) {
               dataKey={`token_${i}`}
               stroke={tokenColors[i % tokenColors.length]}
               strokeWidth={2}
+              dot={false}
+              connectNulls
+            />
+          ))}
+
+          {/* Anchor price lines (dashed) */}
+          {hasAnchor && tokenIds.map((_, i) => (
+            <Line
+              key={`anchor_${i}`}
+              type="monotone"
+              dataKey={`anchor_${i}`}
+              stroke={tokenColors[i % tokenColors.length]}
+              strokeWidth={1.5}
+              strokeDasharray="4 3"
               dot={false}
               connectNulls
             />

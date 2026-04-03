@@ -14,6 +14,7 @@ import type {
   BatchTask,
   BatchTaskDetail,
   PresetsResponse,
+  BtcKlineResponse,
 } from "@/types"
 
 const api = axios.create({ baseURL: "/strategy" })
@@ -130,6 +131,11 @@ export async function fetchPositions(sessionId: string): Promise<PositionPoint[]
 
 export async function deleteResult(sessionId: string): Promise<void> {
   await api.delete(`/results/${sessionId}`)
+}
+
+export async function fetchBtcKlines(sessionId: string): Promise<BtcKlineResponse> {
+  const { data } = await api.get<BtcKlineResponse>(`/results/${sessionId}/btc-klines`)
+  return data
 }
 
 export async function clearResults(): Promise<void> {

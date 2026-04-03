@@ -5,6 +5,7 @@ import type { BacktestResult } from "@/types"
 import MetricsPanel from "@/components/MetricsPanel"
 import EquityCurveChart from "@/components/EquityCurveChart"
 import PriceChart from "@/components/PriceChart"
+import AnchorBulletin from "@/components/AnchorBulletin"
 import DrawdownTable from "@/components/DrawdownTable"
 import TradesTable from "@/components/TradesTable"
 
@@ -104,6 +105,11 @@ export default function ResultDetailPage() {
             trades={result.trades}
           />
         </div>
+      )}
+
+      {/* Anchor price bulletin */}
+      {result.price_curve && result.price_curve.length > 0 && (
+        <AnchorBulletin priceCurve={result.price_curve} />
       )}
 
       {/* Equity curve */}

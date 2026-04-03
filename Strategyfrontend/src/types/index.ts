@@ -157,6 +157,12 @@ export interface PricePoint {
   timestamp: string
   token_id: string
   mid_price: number
+  anchor_price?: number
+  anchor_source?: "mid" | "micro" | "last_trade" | "none"
+  best_bid?: number
+  best_ask?: number
+  spread?: number
+  last_trade_price?: number
 }
 
 export interface BacktestResult extends BacktestResultSummary {
@@ -190,6 +196,28 @@ export interface BatchRequest {
   initial_balance: number
   config: Record<string, unknown>
   settlement_result?: Record<string, number>
+}
+
+// ── BTC Kline (Binance) ────────────────────────────────────────────────────
+
+export interface BtcKline {
+  open_time: number
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+  close_time: number
+  quote_volume: number
+  trades: number
+}
+
+export interface BtcKlineResponse {
+  symbol: string
+  interval: string
+  start_time: string
+  end_time: string
+  klines: BtcKline[]
 }
 
 export interface BatchTask {

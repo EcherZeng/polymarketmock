@@ -29,6 +29,11 @@ class UnifiedStrategy(UnifiedBaseStrategy):
         self.min_price: float = config.get("min_price", 0.85)
         self.time_remaining_ratio: float = config.get("time_remaining_ratio", 0.333)
 
+        # ── Spread / anchor gating ──
+        self.max_spread: float = config.get("max_spread", 0.15)
+        self.max_ask_deviation: float = config.get("max_ask_deviation", 0.10)
+        self.min_profit_room: float = config.get("min_profit_room", 0.05)
+
         # ── Feature toggles ──
         self.use_momentum: bool = config.get("use_momentum_check", True)
         self.use_direction: bool = config.get("use_direction_check", False)
@@ -91,6 +96,21 @@ class UnifiedStrategy(UnifiedBaseStrategy):
             # Price filter: apply min_price to the token's actual market price.
             # Only buy tokens whose raw mid_price meets the minimum threshold.
             if mid < self.min_price:
+                continue
+
+            # Spread gating: skip if orderbook is too thin
+            if snapshot.spread > self.max_spread:
+                continue
+
+            # Ask deviation: skip if best_ask deviates too far from anchor
+            anchor = snapshot.anchor_price if snapshot.anchor_price > 0 else mid
+            if snapshot.best_ask > 0 and anchor > 0:
+                ask_dev = (snapshot.best_ask - anchor) / anchor
+                if ask_dev > self.max_ask_deviation:
+                    continue
+
+            # Profit room: skip if too close to $1.00 (not enough upside)
+            if snapshot.best_ask > 0 and (1.0 - snapshot.best_ask) < self.min_profit_room:
                 continue
 
             history = ctx.price_history.get(token_id, [])
