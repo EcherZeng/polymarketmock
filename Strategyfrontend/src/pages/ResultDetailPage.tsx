@@ -1,13 +1,14 @@
 import { useParams, Link } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
-import { fetchResult } from "@/api/client"
-import type { BacktestResult } from "@/types"
+import { fetchResult, fetchBtcKlines } from "@/api/client"
+import type { BacktestResult, BtcKlineResponse } from "@/types"
 import MetricsPanel from "@/components/MetricsPanel"
 import EquityCurveChart from "@/components/EquityCurveChart"
 import PriceChart from "@/components/PriceChart"
 import AnchorBulletin from "@/components/AnchorBulletin"
 import DrawdownTable from "@/components/DrawdownTable"
 import TradesTable from "@/components/TradesTable"
+import BtcKlineChart from "@/components/BtcKlineChart"
 
 export default function ResultDetailPage() {
   const { sessionId } = useParams<{ sessionId: string }>()
@@ -15,6 +16,12 @@ export default function ResultDetailPage() {
   const { data: result, isLoading, error } = useQuery<BacktestResult>({
     queryKey: ["result", sessionId],
     queryFn: () => fetchResult(sessionId!),
+    enabled: !!sessionId,
+  })
+
+  const { data: btcKlines, isLoading: btcLoading } = useQuery<BtcKlineResponse>({
+    queryKey: ["btc-klines", sessionId],
+    queryFn: () => fetchBtcKlines(sessionId!),
     enabled: !!sessionId,
   })
 
@@ -111,6 +118,20 @@ export default function ResultDetailPage() {
       {result.price_curve && result.price_curve.length > 0 && (
         <AnchorBulletin priceCurve={result.price_curve} />
       )}
+
+      {/* BTC/USDT kline chart from Binance */}
+      <div className="rounded-lg border p-4">
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">
+          BTC/USDT 1分钟K线（Binance）
+        </h2>
+        {btcLoading ? (
+          <div className="py-8 text-center text-sm text-muted-foreground">加载 BTC K线数据中...</div>
+        ) : btcKlines && btcKlines.klines.length > 0 ? (
+          <BtcKlineChart klines={btcKlines.klines} />
+        ) : (
+          <div className="py-8 text-center text-sm text-muted-foreground">暂无 BTC K线数据</div>
+        )}
+      </div>
 
       {/* Equity curve */}
       {result.equity_curve.length > 0 && (
