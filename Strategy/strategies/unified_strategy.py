@@ -88,11 +88,9 @@ class UnifiedStrategy(UnifiedBaseStrategy):
             if mid <= 0:
                 continue
 
-            # Price filter: for UP tokens (>= 0.5) use mid directly;
-            # for DOWN tokens (< 0.5) use mirrored price (1 - mid),
-            # so min_price filters on underlying event probability.
-            effective_price = mid if mid >= 0.5 else 1.0 - mid
-            if effective_price < self.min_price:
+            # Price filter: apply min_price to the token's actual market price.
+            # Only buy tokens whose raw mid_price meets the minimum threshold.
+            if mid < self.min_price:
                 continue
 
             history = ctx.price_history.get(token_id, [])
@@ -174,18 +172,21 @@ class UnifiedStrategy(UnifiedBaseStrategy):
                     continue
 
             # 8. Position sizing
+            # Use best_ask (not mid) for conservative share count so the computed
+            # amount stays within budget even before order-book walking.
             target_pct = (self.position_min_pct + self.position_max_pct) / 2
             buy_budget = ctx.balance * target_pct
-            if buy_budget <= 0 or mid <= 0:
+            price_for_sizing = snapshot.best_ask if snapshot.best_ask > 0 else mid
+            if buy_budget <= 0 or price_for_sizing <= 0:
                 continue
 
-            amount = math.floor(buy_budget / mid)
+            amount = math.floor(buy_budget / price_for_sizing)
             if amount <= 0:
                 continue
 
             self._entered_tokens.add(token_id)
             self._entry_count += 1
-            return [Signal(token_id=token_id, side="BUY", amount=float(amount))]
+            return [Signal(token_id=token_id, side="BUY", amount=float(amount), max_cost=buy_budget)]
 
         return []
 

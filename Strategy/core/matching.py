@@ -10,12 +10,15 @@ from core.types import FillInfo, Signal
 def calculate_vwap_from_levels(
     levels: list[tuple[float, float]],
     amount: float,
+    max_cost: float | None = None,
 ) -> tuple[float, float, float]:
     """Walk through orderbook levels to fill `amount` shares.
 
     Args:
         levels: list of (price, size) sorted best-first
         amount: number of shares to fill
+        max_cost: optional hard cap on total spend (USDC). Fills stop when
+                  cumulative cost would exceed this limit.
 
     Returns:
         (filled_amount, avg_price, total_cost)
@@ -23,6 +26,7 @@ def calculate_vwap_from_levels(
     remaining = Decimal(str(amount))
     total_cost = Decimal("0")
     filled = Decimal("0")
+    budget = Decimal(str(max_cost)) if max_cost is not None else None
 
     for price_f, size_f in levels:
         price = Decimal(str(price_f))
@@ -32,6 +36,16 @@ def calculate_vwap_from_levels(
 
         fill_qty = min(remaining, size)
         cost = fill_qty * price
+
+        # Budget guard: only take as much as the remaining budget allows
+        if budget is not None:
+            remaining_budget = budget - total_cost
+            if remaining_budget <= 0:
+                break
+            if cost > remaining_budget:
+                fill_qty = remaining_budget / price
+                cost = fill_qty * price
+
         total_cost += cost
         filled += fill_qty
         remaining -= fill_qty
@@ -90,7 +104,9 @@ def execute_signal(
     if signal.side == "SELL":
         request_amount = min(request_amount, current_pos)
 
-    filled, avg_price, total_cost = calculate_vwap_from_levels(levels, request_amount)
+    # For BUY, pass max_cost so the VWAP walk stops at budget
+    buy_max_cost = signal.max_cost if signal.side == "BUY" else None
+    filled, avg_price, total_cost = calculate_vwap_from_levels(levels, request_amount, max_cost=buy_max_cost)
     if filled <= 0:
         return None
 

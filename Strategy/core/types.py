@@ -14,6 +14,7 @@ class Signal:
     amount: float  # target shares
     order_type: str = "MARKET"  # "MARKET" | "LIMIT"
     limit_price: float | None = None
+    max_cost: float | None = None  # BUY only: hard cap on total spend (USDC)
 
 
 @dataclass
