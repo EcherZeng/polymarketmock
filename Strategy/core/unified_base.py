@@ -35,7 +35,8 @@ class UnifiedBaseStrategy(BaseStrategy):
         # Internal state
         self._consecutive_losses: int = 0
         self._position_scale: float = 1.0
-        self._entry_prices: dict[str, float] = {}
+        self._entry_effective_prices: dict[str, float] = {}
+        self._entry_price_sides: dict[str, str] = {}
 
         # Delegate to child
         self.init_strategy(config)
@@ -48,6 +49,12 @@ class UnifiedBaseStrategy(BaseStrategy):
         if remaining_seconds <= self._force_close_seconds:
             for token_id, qty in ctx.positions.items():
                 if qty > 0:
+                    entry_side = self._entry_price_sides.get(token_id)
+                    snapshot = ctx.tokens.get(token_id)
+                    if snapshot is not None and entry_side is not None:
+                        current_side = self._price_side(snapshot.mid_price)
+                        if current_side != entry_side:
+                            continue
                     signals.append(Signal(token_id=token_id, side="SELL", amount=qty))
             return signals
 
@@ -57,20 +64,26 @@ class UnifiedBaseStrategy(BaseStrategy):
             if qty <= 0:
                 continue
             mid = snapshot.mid_price
-            entry = self._entry_prices.get(token_id)
+            entry_side = self._entry_price_sides.get(token_id)
+            if entry_side is not None and self._price_side(mid) != entry_side:
+                continue
+
+            price_side = entry_side or self._price_side(mid)
+            effective_mid = self._effective_price(mid, price_side)
+            entry = self._entry_effective_prices.get(token_id)
             should_close = False
 
             # Relative pct mode — anchored to entry price per token
             if entry is not None and entry > 0:
-                if self._tp_pct > 0 and mid >= entry * (1 + self._tp_pct):
+                if self._tp_pct > 0 and effective_mid >= entry * (1 + self._tp_pct):
                     should_close = True
-                if self._sl_pct > 0 and mid <= entry * (1 - self._sl_pct):
+                if self._sl_pct > 0 and effective_mid <= entry * (1 - self._sl_pct):
                     should_close = True
 
             # Absolute price mode
-            if mid >= self._tp_price:
+            if effective_mid >= self._tp_price:
                 should_close = True
-            if self._sl_price > 0 and mid <= self._sl_price:
+            if self._sl_price > 0 and effective_mid <= self._sl_price:
                 should_close = True
 
             if should_close:
@@ -91,16 +104,26 @@ class UnifiedBaseStrategy(BaseStrategy):
 
     def on_fill(self, fill: FillInfo) -> None:
         if fill.side == "BUY":
-            self._entry_prices[fill.token_id] = fill.avg_price
+            price_side = self._price_side(fill.avg_price)
+            self._entry_price_sides[fill.token_id] = price_side
+            self._entry_effective_prices[fill.token_id] = self._effective_price(fill.avg_price, price_side)
         elif fill.side == "SELL":
-            entry = self._entry_prices.pop(fill.token_id, 0)
+            entry_side = self._entry_price_sides.get(fill.token_id)
+            if entry_side is None:
+                entry_side = self._price_side(fill.avg_price)
+            entry = self._entry_effective_prices.get(fill.token_id, 0)
+            exit_effective_price = self._effective_price(fill.avg_price, entry_side)
             if entry > 0:
-                if fill.avg_price < entry:
+                if exit_effective_price < entry:
                     self._consecutive_losses += 1
                     if self._consecutive_losses >= self._consec_loss_threshold:
                         self._position_scale *= (1.0 - self._loss_reduction_pct)
                 else:
                     self._consecutive_losses = 0
+
+            if fill.position_after <= 0:
+                self._entry_effective_prices.pop(fill.token_id, None)
+                self._entry_price_sides.pop(fill.token_id, None)
         self.on_strategy_fill(fill)
 
     def on_end(self) -> dict:
@@ -132,3 +155,11 @@ class UnifiedBaseStrategy(BaseStrategy):
     def end_strategy(self) -> dict:
         """Optional: return child summary at end."""
         return {}
+
+    @staticmethod
+    def _price_side(price: float) -> str:
+        return "UP" if price >= 0.5 else "DOWN"
+
+    @staticmethod
+    def _effective_price(price: float, side: str) -> float:
+        return price if side == "UP" else (1.0 - price)
