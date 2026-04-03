@@ -1,28 +1,34 @@
-{
-  "take_profit_price": 0.99,
-  "take_profit_pct": 0,
-  "stop_loss_price": 0.38,
-  "stop_loss_pct": 0,
-  "force_close_remaining_seconds": 0,
-  "consecutive_loss_threshold": 20,
-  "loss_position_reduction_pct": 0,
-  "min_price": 0.89,
-  "time_remaining_ratio": 0.333,
-  "momentum_window": 120,
-  "momentum_min": 0.02,
-  "volatility_window": 120,
-  "amplitude_min": 0.0015,
-  "amplitude_max": 0.002,
-  "max_std": 0.0012,
-  "max_drawdown": 0.0008,
-  "position_min_pct": 0.2,
-  "position_max_pct": 0.3,
-  "reverse_tick_window": 15,
-  "reverse_threshold": 0.03,
-  "use_momentum_check": false,
-  "use_direction_check": false,
-  "use_std_check": false,
-  "use_drawdown_check": false,
-  "use_amplitude_check": false,
-  "use_reverse_check": false
-}
+ => [backend] resolving provenance for metadata file                                                               0.0s
+ => ERROR [strategyfrontend build 6/6] RUN npm run build                                                          16.9s
+ => [frontend] resolving provenance for metadata file                                                              0.0s
+ => CANCELED [strategy builder 5/5] RUN pip install --no-cache-dir --upgrade pip  && pip install --no-cache-dir -  7.9s
+------
+ > [strategyfrontend build 6/6] RUN npm run build:
+2.047
+2.047 > strategyfrontend@0.0.0 build
+2.047 > tsc -b && vite build
+2.047
+14.93 src/components/AnchorBulletin.tsx(128,9): error TS6133: 'getLabel' is declared but its value is never read.
+------
+[+] up 0/4
+ ⠙ Image polymarketmock-strategy         Building                                                                  19.9s
+ ⠙ Image polymarketmock-frontend         Building                                                                  19.9s
+ ⠙ Image polymarketmock-strategyfrontend Building                                                                  19.9s
+ ⠙ Image polymarketmock-backend          Building                                                                  19.9s
+Dockerfile:8
+
+--------------------
+
+   6 |     RUN npm ci
+
+   7 |     COPY . .
+
+   8 | >>> RUN npm run build
+
+   9 |
+
+  10 |     # ── Stage 2: nginx serve ─────────────────────────────────────────────────────
+
+--------------------
+
+target strategyfrontend: failed to solve: process "/bin/sh -c npm run build" did not complete successfully: exit code: 2

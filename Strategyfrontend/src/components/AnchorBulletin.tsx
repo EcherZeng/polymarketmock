@@ -125,11 +125,6 @@ export default function AnchorBulletin({ priceCurve }: AnchorBulletinProps) {
 
   if (tokenIds.length === 0) return null
 
-  const getLabel = (tid: string) => {
-    const info = tokenSides[tid]
-    return info ? `${info.emoji} ${info.side}` : tid.slice(0, 8)
-  }
-
   return (
     <>
       <Card>
