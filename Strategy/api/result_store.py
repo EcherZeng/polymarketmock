@@ -146,3 +146,99 @@ class BatchStore:
 
     def __contains__(self, batch_id: str) -> bool:
         return batch_id in self._data
+
+
+class PortfolioStore:
+    """Persists data-source portfolios (user-curated result collections) to disk.
+
+    Each portfolio is ``{portfolio_id}.json`` inside *portfolios_dir*.
+    """
+
+    def __init__(self, portfolios_dir: Path) -> None:
+        self._dir = portfolios_dir
+        self._dir.mkdir(parents=True, exist_ok=True)
+        self._data: dict[str, dict] = {}
+
+    def load(self) -> int:
+        count = 0
+        for f in self._dir.glob("*.json"):
+            try:
+                raw = f.read_text("utf-8")
+                data = json.loads(raw)
+                pid = data.get("portfolio_id")
+                if pid:
+                    self._data[pid] = data
+                    count += 1
+            except Exception as e:
+                logger.warning("Failed to load portfolio %s: %s", f.name, e)
+        if count:
+            logger.info("Loaded %d persisted portfolios from %s", count, self._dir)
+        return count
+
+    # ── CRUD ─────────────────────────────────────────────────────────────────
+
+    def put(self, portfolio_id: str, portfolio: dict) -> None:
+        portfolio = sanitize_floats(portfolio)
+        self._data[portfolio_id] = portfolio
+        self._persist(portfolio_id, portfolio)
+
+    def get(self, portfolio_id: str) -> dict | None:
+        return self._data.get(portfolio_id)
+
+    def values(self) -> list[dict]:
+        return list(self._data.values())
+
+    def delete(self, portfolio_id: str) -> bool:
+        if portfolio_id not in self._data:
+            return False
+        del self._data[portfolio_id]
+        path = self._dir / f"{portfolio_id}.json"
+        path.unlink(missing_ok=True)
+        return True
+
+    def __contains__(self, portfolio_id: str) -> bool:
+        return portfolio_id in self._data
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    # ── Item-level operations ────────────────────────────────────────────────
+
+    def add_items(self, portfolio_id: str, items: list[dict]) -> dict | None:
+        portfolio = self._data.get(portfolio_id)
+        if portfolio is None:
+            return None
+        existing_ids = {it["session_id"] for it in portfolio["items"]}
+        for item in items:
+            if item["session_id"] not in existing_ids:
+                portfolio["items"].append(sanitize_floats(item))
+                existing_ids.add(item["session_id"])
+        from datetime import datetime, timezone
+        portfolio["updated_at"] = datetime.now(timezone.utc).isoformat()
+        self._persist(portfolio_id, portfolio)
+        return portfolio
+
+    def remove_items(self, portfolio_id: str, session_ids: list[str]) -> dict | None:
+        portfolio = self._data.get(portfolio_id)
+        if portfolio is None:
+            return None
+        remove_set = set(session_ids)
+        portfolio["items"] = [
+            it for it in portfolio["items"] if it["session_id"] not in remove_set
+        ]
+        from datetime import datetime, timezone
+        portfolio["updated_at"] = datetime.now(timezone.utc).isoformat()
+        self._persist(portfolio_id, portfolio)
+        return portfolio
+
+    # ── Internal ─────────────────────────────────────────────────────────────
+
+    def _persist(self, portfolio_id: str, data: dict) -> None:
+        try:
+            path = self._dir / f"{portfolio_id}.json"
+            path.write_text(
+                json.dumps(data, ensure_ascii=False, default=str),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            logger.error("Failed to persist portfolio %s: %s", portfolio_id, e)

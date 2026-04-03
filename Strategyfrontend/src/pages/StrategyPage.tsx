@@ -12,6 +12,7 @@ import {
   submitBatch,
   trackArchive,
   fetchTracked,
+  fetchPortfolios,
 } from "@/api/client"
 import type {
   StrategyInfo,
@@ -20,6 +21,7 @@ import type {
   BatchRequest,
   PresetsResponse,
   I18nLabel,
+  Portfolio,
 } from "@/types"
 import StrategyConfigForm from "@/components/StrategyConfigForm"
 import MechanismExplainer from "@/components/MechanismExplainer"
@@ -60,6 +62,9 @@ export default function StrategyPage() {
   const [batchSize, setBatchSize] = useState<number>(0) // 0 = all
   const [savePresetName, setSavePresetName] = useState("")
   const [savePresetDesc, setSavePresetDesc] = useState("")
+  const [dataTab, setDataTab] = useState<"archives" | "portfolios">("archives")
+  const [portfolioSearch, setPortfolioSearch] = useState("")
+  const [selectedPortfolioId, setSelectedPortfolioId] = useState<string>("")
 
   const { data: strategies = [], isLoading: loadingStrategies } = useQuery<StrategyInfo[]>({
     queryKey: ["strategies"],
@@ -80,6 +85,26 @@ export default function StrategyPage() {
     queryKey: ["tracked"],
     queryFn: fetchTracked,
   })
+
+  const { data: portfolios = [] } = useQuery<Portfolio[]>({
+    queryKey: ["portfolios"],
+    queryFn: fetchPortfolios,
+  })
+
+  const filteredPortfolios = useMemo(() => {
+    if (!portfolioSearch.trim()) return portfolios
+    const term = portfolioSearch.trim().toLowerCase()
+    return portfolios.filter(
+      (p) =>
+        p.name.toLowerCase().includes(term) ||
+        p.items.some((it) => it.slug.toLowerCase().includes(term)),
+    )
+  }, [portfolios, portfolioSearch])
+
+  const selectedPortfolio = useMemo(
+    () => portfolios.find((p) => p.portfolio_id === selectedPortfolioId),
+    [portfolios, selectedPortfolioId],
+  )
 
   const trackMutation = useMutation({
     mutationFn: (slug: string) => trackArchive(slug),
@@ -252,6 +277,23 @@ export default function StrategyPage() {
     })
   }
 
+  function handlePortfolioBatchRun() {
+    if (!selectedStrategy || !selectedPortfolio) return
+    const slugs = [...new Set(selectedPortfolio.items.map((it) => it.slug))]
+    if (slugs.length === 0) return
+    const firstArchive = archives.find((a) => a.slug === slugs[0])
+    const settlement_result = firstArchive
+      ? buildSettlementResult(firstArchive.token_ids)
+      : undefined
+    batchMutation.mutate({
+      strategy: selectedStrategy,
+      slugs,
+      initial_balance: balance,
+      config: configValues,
+      ...(settlement_result ? { settlement_result } : {}),
+    })
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -383,8 +425,34 @@ export default function StrategyPage() {
         {/* Right: Data source */}
         <div className="flex flex-col gap-4 lg:col-span-8">
           <div className="rounded-lg border p-4">
-            <h2 className="mb-3 text-sm font-medium text-muted-foreground">数据源</h2>
+            {/* Tab switcher: 数据源 / 组合 */}
+            <div className="mb-3 flex items-center gap-2">
+              <button
+                onClick={() => setDataTab("archives")}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                  dataTab === "archives"
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                数据源
+              </button>
+              <button
+                onClick={() => setDataTab("portfolios")}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                  dataTab === "portfolios"
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                组合
+              </button>
+            </div>
 
+            {dataTab === "archives" && (
+              <>
             {/* Category filter tabs */}
             {categories.length > 1 && (
               <div className="mb-3 flex flex-wrap gap-2">
@@ -555,6 +623,124 @@ export default function StrategyPage() {
                   </div>
                 ))}
               </div>
+            )}
+              </>
+            )}
+
+            {dataTab === "portfolios" && (
+              <>
+                {/* Portfolio search */}
+                <div className="mb-3 flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="搜索组合名称或数据源..."
+                    value={portfolioSearch}
+                    onChange={(e) => setPortfolioSearch(e.target.value)}
+                    className="h-8 w-64 rounded-md border bg-background px-3 text-sm"
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    {filteredPortfolios.length} 个组合
+                  </span>
+                </div>
+
+                {filteredPortfolios.length === 0 ? (
+                  <div className="py-8 text-center text-sm text-muted-foreground">
+                    暂无组合。在批量回测详情页中选择成功结果来创建组合。
+                  </div>
+                ) : (
+                  <div className="flex max-h-[520px] flex-col gap-2 overflow-y-auto pr-1">
+                    {filteredPortfolios.map((p) => {
+                      const avgReturn =
+                        p.items.length > 0
+                          ? p.items.reduce((a, it) => a + it.total_return_pct, 0) /
+                            p.items.length
+                          : 0
+                      const isSelected = selectedPortfolioId === p.portfolio_id
+                      return (
+                        <button
+                          key={p.portfolio_id}
+                          onClick={() => setSelectedPortfolioId(isSelected ? "" : p.portfolio_id)}
+                          className={cn(
+                            "rounded-lg border p-3 text-left transition-colors",
+                            isSelected
+                              ? "border-primary bg-primary/5"
+                              : "border-border hover:border-primary/50",
+                          )}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-medium">{p.name}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {p.items.length} 条数据源
+                            </span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                            <span
+                              className={cn(
+                                "font-mono",
+                                avgReturn >= 0 ? "text-emerald-600" : "text-red-500",
+                              )}
+                            >
+                              平均收益: {avgReturn >= 0 ? "+" : ""}
+                              {avgReturn.toFixed(2)}%
+                            </span>
+                            <span>·</span>
+                            <span>
+                              创建于 {p.created_at.replace("T", " ").slice(0, 10)}
+                            </span>
+                          </div>
+                          {isSelected && (
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {p.items.slice(0, 8).map((it) => (
+                                <span
+                                  key={it.session_id}
+                                  className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]"
+                                >
+                                  {it.slug}
+                                </span>
+                              ))}
+                              {p.items.length > 8 && (
+                                <span className="text-[10px] text-muted-foreground">
+                                  +{p.items.length - 8} 更多
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {/* Run batch on selected portfolio */}
+                {selectedPortfolio && (
+                  <div className="mt-3 flex items-center justify-between rounded-lg border bg-muted/30 p-3">
+                    <div className="text-sm">
+                      <span className="text-muted-foreground">已选组合: </span>
+                      <span className="font-medium">{selectedPortfolio.name}</span>
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        ({selectedPortfolio.items.length} 条数据源)
+                      </span>
+                    </div>
+                    <button
+                      onClick={handlePortfolioBatchRun}
+                      disabled={
+                        !selectedStrategy ||
+                        selectedPortfolio.items.length === 0 ||
+                        batchMutation.isPending
+                      }
+                      className={cn(
+                        "rounded-md px-4 py-1.5 text-sm font-medium transition-colors",
+                        "bg-emerald-600 text-white hover:bg-emerald-700",
+                        "disabled:pointer-events-none disabled:opacity-50",
+                      )}
+                    >
+                      {batchMutation.isPending
+                        ? "提交中..."
+                        : `批量回测 (${selectedPortfolio.items.length} 条)`}
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </div>
 

@@ -265,3 +265,28 @@ export interface BatchTaskDetail extends BatchTask {
   errors: Record<string, string>
   workflows: Record<string, SlugWorkflow>
 }
+
+// ── Portfolios (data-source combinations) ──────────────────────────────────
+
+export interface PortfolioItem {
+  session_id: string
+  strategy: string
+  slug: string
+  total_return_pct: number
+  sharpe_ratio: number
+  win_rate: number
+  max_drawdown: number
+  profit_factor: number
+  total_trades: number
+  avg_slippage: number
+  initial_balance: number
+  final_equity: number
+}
+
+export interface Portfolio {
+  portfolio_id: string
+  name: string
+  created_at: string
+  updated_at: string
+  items: PortfolioItem[]
+}

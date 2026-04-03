@@ -3,7 +3,9 @@ import { useParams, Link } from "react-router-dom"
 import { useMemo, useState } from "react"
 import { cn } from "@/lib/utils"
 import { fetchBatchTask, cancelBatch } from "@/api/client"
-import type { BatchTaskDetail, BatchResultSummary, SlugWorkflow } from "@/types"
+import { Checkbox } from "@/components/ui/checkbox"
+import AddToPortfolioDialog from "@/components/AddToPortfolioDialog"
+import type { BatchTaskDetail, BatchResultSummary, SlugWorkflow, PortfolioItem } from "@/types"
 
 const statusLabel: Record<string, string> = {
   running: "运行中",
@@ -43,6 +45,9 @@ export default function BatchDetailPage() {
   const { batchId } = useParams<{ batchId: string }>()
   const queryClient = useQueryClient()
   const [expandedSlug, setExpandedSlug] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [returnFilter, setReturnFilter] = useState<"all" | "positive" | "negative">("all")
+  const [portfolioOpen, setPortfolioOpen] = useState(false)
 
   const { data: task, isLoading } = useQuery<BatchTaskDetail>({
     queryKey: ["batchTask", batchId],
@@ -92,6 +97,59 @@ export default function BatchDetailPage() {
       totalTrades: results.reduce((a, [, r]) => a + r.total_trades, 0),
     }
   }, [results, workflows])
+
+  const filteredResults = useMemo(() => {
+    if (returnFilter === "all") return results
+    return results.filter(([, r]) =>
+      returnFilter === "positive" ? r.total_return_pct > 0 : r.total_return_pct < 0,
+    )
+  }, [results, returnFilter])
+
+  const toggleSelect = (sessionId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(sessionId)) next.delete(sessionId)
+      else next.add(sessionId)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    const visibleIds = filteredResults.map(([, r]) => r.session_id)
+    const allSelected = visibleIds.every((id) => selectedIds.has(id))
+    if (allSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        for (const id of visibleIds) next.delete(id)
+        return next
+      })
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        for (const id of visibleIds) next.add(id)
+        return next
+      })
+    }
+  }
+
+  const selectedItems = useMemo<PortfolioItem[]>(() => {
+    return results
+      .filter(([, r]) => selectedIds.has(r.session_id))
+      .map(([slug, r]) => ({
+        session_id: r.session_id,
+        strategy: task?.strategy ?? "",
+        slug,
+        total_return_pct: r.total_return_pct,
+        sharpe_ratio: r.sharpe_ratio,
+        win_rate: r.win_rate,
+        max_drawdown: r.max_drawdown,
+        profit_factor: r.profit_factor,
+        total_trades: r.total_trades,
+        avg_slippage: r.avg_slippage,
+        initial_balance: r.initial_balance,
+        final_equity: r.final_equity,
+      }))
+  }, [results, selectedIds, task])
 
   if (isLoading || !task) {
     return <div className="py-12 text-center text-muted-foreground">加载中...</div>
@@ -322,13 +380,53 @@ export default function BatchDetailPage() {
       {/* Results table — successful only */}
       {results.length > 0 && (
         <div className="rounded-lg border">
-          <div className="border-b bg-muted/50 px-4 py-2">
+          <div className="flex items-center justify-between border-b bg-muted/50 px-4 py-2">
             <h2 className="text-sm font-medium">成功结果 ({results.length})</h2>
+            <div className="flex items-center gap-2">
+              {/* Return filter toggles */}
+              {(["all", "positive", "negative"] as const).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => { setReturnFilter(f); setSelectedIds(new Set()) }}
+                  className={cn(
+                    "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                    returnFilter === f
+                      ? "bg-foreground text-background"
+                      : "bg-muted text-muted-foreground hover:bg-muted/80",
+                  )}
+                >
+                  {f === "all" ? "全部" : f === "positive" ? "收益增加" : "收益减少"}
+                </button>
+              ))}
+              {/* Selection info + Add to portfolio */}
+              {selectedIds.size > 0 && (
+                <>
+                  <span className="text-xs text-muted-foreground">
+                    已选 {selectedIds.size} 条
+                  </span>
+                  <button
+                    onClick={() => setPortfolioOpen(true)}
+                    className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                  >
+                    加入组合
+                  </button>
+                </>
+              )}
+            </div>
           </div>
           <div className="overflow-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/30">
                 <tr className="border-b text-left text-xs text-muted-foreground">
+                  <th className="px-3 py-2">
+                    <Checkbox
+                      checked={
+                        filteredResults.length > 0 &&
+                        filteredResults.every(([, r]) => selectedIds.has(r.session_id))
+                      }
+                      onCheckedChange={toggleSelectAll}
+                    />
+                  </th>
                   <th className="px-3 py-2">数据源</th>
                   <th className="px-3 py-2 text-right">收益率</th>
                   <th className="px-3 py-2 text-right">Sharpe</th>
@@ -341,11 +439,20 @@ export default function BatchDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {results.map(([slug, r]) => (
+                {filteredResults.map(([slug, r]) => (
                   <tr
                     key={slug}
-                    className="border-b transition-colors hover:bg-muted/30"
+                    className={cn(
+                      "border-b transition-colors hover:bg-muted/30",
+                      selectedIds.has(r.session_id) && "bg-primary/5",
+                    )}
                   >
+                    <td className="px-3 py-2">
+                      <Checkbox
+                        checked={selectedIds.has(r.session_id)}
+                        onCheckedChange={() => toggleSelect(r.session_id)}
+                      />
+                    </td>
                     <td className="px-3 py-2 font-mono text-xs">{slug}</td>
                     <td
                       className={cn(
@@ -391,6 +498,12 @@ export default function BatchDetailPage() {
           </div>
         </div>
       )}
+
+      <AddToPortfolioDialog
+        open={portfolioOpen}
+        onOpenChange={setPortfolioOpen}
+        items={selectedItems}
+      />
     </div>
   )
 }

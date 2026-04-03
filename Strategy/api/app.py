@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 import api.state as state
-from api.result_store import BatchStore, ResultStore
+from api.result_store import BatchStore, PortfolioStore, ResultStore
 from config import config
 from core.data_scanner import load_token_map
 from core.batch_runner import BatchRunner, BatchTask
@@ -35,6 +35,9 @@ async def lifespan(app: FastAPI):
 
     state.batch_store = BatchStore(config.results_dir / "batches")
     state.batch_store.load()
+
+    state.portfolio_store = PortfolioStore(config.results_dir / "portfolios")
+    state.portfolio_store.load()
 
     # ── Init batch runner with persistence callbacks ─────────────────────
     from api.execution import store_session, _serialize_workflow, _build_result_summary
@@ -98,12 +101,14 @@ from api.data import router as data_router
 from api.execution import router as execution_router
 from api.results import router as results_router
 from api.presets import router as presets_router
+from api.portfolios import router as portfolios_router
 
 app.include_router(strategies_router, tags=["Strategies"])
 app.include_router(data_router, tags=["Data"])
 app.include_router(execution_router, tags=["Execution"])
 app.include_router(results_router, tags=["Results"])
 app.include_router(presets_router, tags=["Presets"])
+app.include_router(portfolios_router, tags=["Portfolios"])
 
 
 @app.get("/health")

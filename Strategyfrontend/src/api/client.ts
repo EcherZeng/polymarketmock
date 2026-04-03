@@ -15,6 +15,8 @@ import type {
   BatchTaskDetail,
   PresetsResponse,
   BtcKlineResponse,
+  Portfolio,
+  PortfolioItem,
 } from "@/types"
 
 const api = axios.create({ baseURL: "/strategy" })
@@ -203,4 +205,56 @@ export async function trackArchive(
 export async function fetchTracked(): Promise<string[]> {
   const { data } = await api.get<string[]>("/data/tracked")
   return data
+}
+
+// ── Portfolios ──────────────────────────────────────────────────────────────
+
+export async function fetchPortfolios(): Promise<Portfolio[]> {
+  const { data } = await api.get<Portfolio[]>("/portfolios")
+  return data
+}
+
+export async function fetchPortfolio(portfolioId: string): Promise<Portfolio> {
+  const { data } = await api.get<Portfolio>(`/portfolios/${portfolioId}`)
+  return data
+}
+
+export async function createPortfolio(body: {
+  name: string
+  items: PortfolioItem[]
+}): Promise<Portfolio> {
+  const { data } = await api.post<Portfolio>("/portfolios", body)
+  return data
+}
+
+export async function renamePortfolio(
+  portfolioId: string,
+  name: string,
+): Promise<Portfolio> {
+  const { data } = await api.put<Portfolio>(`/portfolios/${portfolioId}`, { name })
+  return data
+}
+
+export async function addPortfolioItems(
+  portfolioId: string,
+  items: PortfolioItem[],
+): Promise<Portfolio> {
+  const { data } = await api.put<Portfolio>(`/portfolios/${portfolioId}/items`, {
+    items,
+  })
+  return data
+}
+
+export async function removePortfolioItems(
+  portfolioId: string,
+  sessionIds: string[],
+): Promise<Portfolio> {
+  const { data } = await api.delete<Portfolio>(`/portfolios/${portfolioId}/items`, {
+    data: { session_ids: sessionIds },
+  })
+  return data
+}
+
+export async function deletePortfolio(portfolioId: string): Promise<void> {
+  await api.delete(`/portfolios/${portfolioId}`)
 }
