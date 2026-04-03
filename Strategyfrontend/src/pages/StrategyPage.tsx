@@ -55,6 +55,7 @@ export default function StrategyPage() {
   const [configDialogOpen, setConfigDialogOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
   const [activeCategory, setActiveCategory] = useState<string>("")
+  const [archiveSort, setArchiveSort] = useState<"time" | "name">("time")
   const [batchSize, setBatchSize] = useState<number>(0) // 0 = all
   const [savePresetName, setSavePresetName] = useState("")
   const [savePresetDesc, setSavePresetDesc] = useState("")
@@ -138,8 +139,14 @@ export default function StrategyPage() {
       const term = searchTerm.trim().toLowerCase()
       list = list.filter((a) => a.slug.toLowerCase().includes(term))
     }
-    return list
-  }, [archives, activeCategory, searchTerm])
+    const sorted = [...list]
+    if (archiveSort === "time") {
+      sorted.sort((a, b) => (b.time_range?.end ?? "").localeCompare(a.time_range?.end ?? ""))
+    } else {
+      sorted.sort((a, b) => a.slug.localeCompare(b.slug))
+    }
+    return sorted
+  }, [archives, activeCategory, searchTerm, archiveSort])
 
   // ── Settlement helper ─────────────────────────────────────────────────────
 
@@ -415,6 +422,14 @@ export default function StrategyPage() {
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="h-8 w-48 rounded-md border bg-background px-3 text-sm"
               />
+              <select
+                value={archiveSort}
+                onChange={(e) => setArchiveSort(e.target.value as "time" | "name")}
+                className="h-8 rounded-md border bg-background px-2 text-xs"
+              >
+                <option value="time">时间最新</option>
+                <option value="name">名称排序</option>
+              </select>
               <div className="flex items-center gap-1">
                 <select
                   value={batchSize}

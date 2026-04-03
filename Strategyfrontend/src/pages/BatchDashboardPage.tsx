@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMemo } from "react"
 import { Link } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { fetchBatchTasks, cancelBatch } from "@/api/client"
@@ -19,11 +20,16 @@ const statusColor: Record<string, string> = {
 export default function BatchDashboardPage() {
   const queryClient = useQueryClient()
 
-  const { data: tasks = [], isLoading } = useQuery<BatchTask[]>({
+  const { data: rawTasks = [], isLoading } = useQuery<BatchTask[]>({
     queryKey: ["batchTasks"],
     queryFn: fetchBatchTasks,
     refetchInterval: 3000,
   })
+
+  const tasks = useMemo(
+    () => [...rawTasks].sort((a, b) => b.created_at.localeCompare(a.created_at)),
+    [rawTasks],
+  )
 
   const cancelMutation = useMutation({
     mutationFn: (batchId: string) => cancelBatch(batchId),

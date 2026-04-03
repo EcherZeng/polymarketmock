@@ -18,10 +18,10 @@ export default function DashboardPage() {
     [results],
   )
 
-  const filtered = useMemo(
-    () => filterStrategy ? results.filter((r) => r.strategy === filterStrategy) : results,
-    [results, filterStrategy],
-  )
+  const filtered = useMemo(() => {
+    const list = filterStrategy ? results.filter((r) => r.strategy === filterStrategy) : results
+    return [...list].sort((a, b) => b.created_at.localeCompare(a.created_at))
+  }, [results, filterStrategy])
 
   // Aggregate stats
   const stats = useMemo(() => {
