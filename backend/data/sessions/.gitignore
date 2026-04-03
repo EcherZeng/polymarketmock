@@ -1,0 +1,5 @@
+# Default: ignore all session data
+*
+!.gitignore
+
+# Tracked sessions (managed by Strategy API):

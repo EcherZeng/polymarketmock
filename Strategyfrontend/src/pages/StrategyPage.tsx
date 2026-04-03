@@ -10,6 +10,8 @@ import {
   deletePreset,
   runBacktest,
   submitBatch,
+  trackArchive,
+  fetchTracked,
 } from "@/api/client"
 import type {
   StrategyInfo,
@@ -70,6 +72,18 @@ export default function StrategyPage() {
   const { data: presetsData } = useQuery<PresetsResponse>({
     queryKey: ["presets"],
     queryFn: fetchPresets,
+  })
+
+  const { data: trackedSlugs = [] } = useQuery<string[]>({
+    queryKey: ["tracked"],
+    queryFn: fetchTracked,
+  })
+
+  const trackMutation = useMutation({
+    mutationFn: (slug: string) => trackArchive(slug),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tracked"] })
+    },
   })
 
   const paramSchema = presetsData?.param_schema ?? {}
@@ -494,6 +508,32 @@ export default function StrategyPage() {
                         )}
                       </div>
                     </button>
+                    {/* Track / Upload button */}
+                    {selectedSlug === a.slug && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          trackMutation.mutate(a.slug)
+                        }}
+                        disabled={
+                          trackMutation.isPending || trackedSlugs.includes(a.slug)
+                        }
+                        className={cn(
+                          "shrink-0 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
+                          trackedSlugs.includes(a.slug)
+                            ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
+                            : "border-primary/50 text-primary hover:bg-primary/10",
+                          "disabled:pointer-events-none disabled:opacity-60",
+                        )}
+                      >
+                        {trackedSlugs.includes(a.slug)
+                          ? "已上传"
+                          : trackMutation.isPending &&
+                              trackMutation.variables === a.slug
+                            ? "上传中..."
+                            : "上传"}
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>

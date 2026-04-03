@@ -168,8 +168,8 @@ export async function fetchIncomplete(
   min15m?: number,
 ): Promise<IncompleteResponse> {
   const params: Record<string, number> = {}
-  if (min5m !== undefined) params.min_prices_5m = min5m
-  if (min15m !== undefined) params.min_prices_15m = min15m
+  if (min5m !== undefined) params.min_trades_5m = min5m
+  if (min15m !== undefined) params.min_trades_15m = min15m
   const { data } = await api.get<IncompleteResponse>("/data/incomplete", { params })
   return data
 }
@@ -181,4 +181,20 @@ export async function cleanupSlugs(slugs: string[]): Promise<CleanupResponse> {
 
 export async function deleteArchive(slug: string): Promise<void> {
   await api.delete(`/data/archives/${slug}`)
+}
+
+// ── Track data source for git commit ────────────────────────────────────────
+
+export async function trackArchive(
+  slug: string,
+): Promise<{ slug: string; status: string }> {
+  const { data } = await api.post<{ slug: string; status: string }>(
+    `/data/archives/${slug}/track`,
+  )
+  return data
+}
+
+export async function fetchTracked(): Promise<string[]> {
+  const { data } = await api.get<string[]>("/data/tracked")
+  return data
 }

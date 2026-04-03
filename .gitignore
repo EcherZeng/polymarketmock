@@ -56,7 +56,8 @@ Strategy/results/batches/*.json
 !backend/data/prices/.gitkeep
 
 # Session data (Parquet, logs, etc.)
-backend/data/sessions/
+backend/data/sessions/*
+!backend/data/sessions/.gitignore
 backend/data/logs/
 
 # Parquet files anywhere

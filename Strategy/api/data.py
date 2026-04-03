@@ -64,12 +64,12 @@ async def list_markets():
 
 # ── Incomplete data detection & cleanup ──────────────────────────────────────
 
-# Thresholds: minimum prices_count required for a session to be "complete"
-_DURATION_MIN_PRICES: dict[int, int] = {
+# Thresholds: minimum live_trades_count required for a session to be "complete"
+_DURATION_MIN_TRADES: dict[int, int] = {
     5: 100,
     15: 1000,
 }
-_DEFAULT_MIN_PRICES = 100  # fallback for unknown durations
+_DEFAULT_MIN_TRADES = 100  # fallback for unknown durations
 
 
 def _extract_duration_min(slug: str) -> int:
@@ -80,17 +80,17 @@ def _extract_duration_min(slug: str) -> int:
 
 @router.get("/data/incomplete")
 async def list_incomplete_archives(
-    min_prices_5m: int = Query(100, ge=0, description="5 分钟场次最低 prices 条数"),
-    min_prices_15m: int = Query(1000, ge=0, description="15 分钟场次最低 prices 条数"),
+    min_trades_5m: int = Query(100, ge=0, description="5 分钟场次最低成交量"),
+    min_trades_15m: int = Query(1000, ge=0, description="15 分钟场次最低成交量"),
 ):
-    """扫描所有归档，返回不满足最低数据量的不完整数据源列表。"""
+    """扫描所有归档，返回不满足最低成交量的不完整数据源列表。"""
     archives = scan_archives(config.data_dir)
-    thresholds = {5: min_prices_5m, 15: min_prices_15m}
+    thresholds = {5: min_trades_5m, 15: min_trades_15m}
     incomplete: list[dict] = []
     for a in archives:
         dur = _extract_duration_min(a.slug)
-        threshold = thresholds.get(dur, _DEFAULT_MIN_PRICES)
-        if a.prices_count < threshold:
+        threshold = thresholds.get(dur, _DEFAULT_MIN_TRADES)
+        if a.live_trades_count < threshold:
             incomplete.append({
                 "slug": a.slug,
                 "source": a.source,
@@ -148,3 +148,59 @@ async def delete_single_archive(slug: str):
         raise HTTPException(status_code=404, detail=f"Session '{slug}' not found")
     shutil.rmtree(session_dir)
     return {"deleted": slug}
+
+
+# ── Track data source for git commit ─────────────────────────────────────────
+
+_TRACK_HEADER = "# Tracked sessions (managed by Strategy API):"
+
+
+@router.post("/data/archives/{slug}/track")
+async def track_archive(slug: str):
+    """将指定数据源从 .gitignore 提出，使其可被 git 提交。"""
+    if not re.match(r"^[\w\-]+$", slug):
+        raise HTTPException(status_code=400, detail="Invalid slug format")
+    sessions_dir = config.data_dir / "sessions"
+    session_dir = sessions_dir / slug
+    if not session_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"Session '{slug}' not found")
+
+    gitignore_path = sessions_dir / ".gitignore"
+
+    # Ensure sessions/.gitignore exists with default rules
+    if not gitignore_path.exists():
+        gitignore_path.write_text(
+            "# Default: ignore all session data\n*\n!.gitignore\n\n"
+            f"{_TRACK_HEADER}\n",
+            encoding="utf-8",
+        )
+
+    content = gitignore_path.read_text(encoding="utf-8")
+    neg_dir = f"!{slug}/"
+    neg_files = f"!{slug}/**"
+
+    # Already tracked?
+    if neg_dir in content:
+        return {"slug": slug, "status": "already_tracked"}
+
+    # Append negation rules
+    if _TRACK_HEADER not in content:
+        content = content.rstrip("\n") + f"\n\n{_TRACK_HEADER}\n"
+
+    content = content.rstrip("\n") + f"\n{neg_dir}\n{neg_files}\n"
+    gitignore_path.write_text(content, encoding="utf-8")
+
+    return {"slug": slug, "status": "tracked"}
+
+
+@router.get("/data/tracked")
+async def list_tracked():
+    """列出所有已标记为可提交的数据源 slug。"""
+    gitignore_path = config.data_dir / "sessions" / ".gitignore"
+    tracked: list[str] = []
+    if gitignore_path.exists():
+        for line in gitignore_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("!") and line.endswith("/"):
+                tracked.append(line[1:-1])
+    return tracked

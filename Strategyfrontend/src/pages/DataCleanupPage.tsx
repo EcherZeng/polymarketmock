@@ -102,7 +102,7 @@ export default function DataCleanupPage() {
       {/* Threshold controls */}
       <div className="flex flex-wrap items-end gap-4 rounded-lg border p-4">
         <div className="flex flex-col gap-1">
-          <label className="text-xs text-muted-foreground">5 分钟场次最低条数</label>
+          <label className="text-xs text-muted-foreground">5 分钟场次最低成交量</label>
           <input
             type="number"
             min={0}
@@ -112,7 +112,7 @@ export default function DataCleanupPage() {
           />
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-xs text-muted-foreground">15 分钟场次最低条数</label>
+          <label className="text-xs text-muted-foreground">15 分钟场次最低成交量</label>
           <input
             type="number"
             min={0}
@@ -223,7 +223,7 @@ export default function DataCleanupPage() {
                 </th>
                 <th className="px-3 py-2">数据源</th>
                 <th className="px-3 py-2 text-right">时长</th>
-                <th className="px-3 py-2 text-right">价格条数</th>
+                <th className="px-3 py-2 text-right">成交量</th>
                 <th className="px-3 py-2 text-right">阈值</th>
                 <th className="px-3 py-2 text-right">订单簿</th>
                 <th className="px-3 py-2 text-right">大小</th>
@@ -255,12 +255,12 @@ export default function DataCleanupPage() {
                     <span
                       className={cn(
                         "font-medium",
-                        item.prices_count < item.threshold
+                        item.live_trades_count < item.threshold
                           ? "text-destructive"
                           : "text-foreground",
                       )}
                     >
-                      {item.prices_count.toLocaleString()}
+                      {item.live_trades_count.toLocaleString()}
                     </span>
                   </td>
                   <td className="px-3 py-2 text-right text-muted-foreground">
