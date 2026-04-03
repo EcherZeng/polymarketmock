@@ -3,7 +3,7 @@
   "take_profit_pct": 0,
   "stop_loss_price": 0.38,
   "stop_loss_pct": 0,
-  "force_close_remaining_seconds": 2020,
+  "force_close_remaining_seconds": 0,
   "consecutive_loss_threshold": 20,
   "loss_position_reduction_pct": 0,
   "min_price": 0.89,

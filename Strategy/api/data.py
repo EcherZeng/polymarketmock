@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 
@@ -152,12 +153,27 @@ async def delete_single_archive(slug: str):
 
 # ── Track data source for git commit ─────────────────────────────────────────
 
-_TRACK_HEADER = "# Tracked sessions (managed by Strategy API):"
+_TRACKED_FILE = "tracked_slugs.json"
+
+
+def _load_tracked() -> list[str]:
+    """Load tracked slugs from results directory (writable)."""
+    path = config.results_dir / _TRACKED_FILE
+    if path.exists():
+        return json.loads(path.read_text(encoding="utf-8"))
+    return []
+
+
+def _save_tracked(slugs: list[str]) -> None:
+    """Persist tracked slugs to results directory."""
+    path = config.results_dir / _TRACKED_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(slugs, ensure_ascii=False), encoding="utf-8")
 
 
 @router.post("/data/archives/{slug}/track")
 async def track_archive(slug: str):
-    """将指定数据源从 .gitignore 提出，使其可被 git 提交。"""
+    """将指定数据源标记为需提交，使其可被 git 提交。"""
     if not re.match(r"^[\w\-]+$", slug):
         raise HTTPException(status_code=400, detail="Invalid slug format")
     sessions_dir = config.data_dir / "sessions"
@@ -165,42 +181,16 @@ async def track_archive(slug: str):
     if not session_dir.is_dir():
         raise HTTPException(status_code=404, detail=f"Session '{slug}' not found")
 
-    gitignore_path = sessions_dir / ".gitignore"
-
-    # Ensure sessions/.gitignore exists with default rules
-    if not gitignore_path.exists():
-        gitignore_path.write_text(
-            "# Default: ignore all session data\n*\n!.gitignore\n\n"
-            f"{_TRACK_HEADER}\n",
-            encoding="utf-8",
-        )
-
-    content = gitignore_path.read_text(encoding="utf-8")
-    neg_dir = f"!{slug}/"
-    neg_files = f"!{slug}/**"
-
-    # Already tracked?
-    if neg_dir in content:
+    tracked = _load_tracked()
+    if slug in tracked:
         return {"slug": slug, "status": "already_tracked"}
 
-    # Append negation rules
-    if _TRACK_HEADER not in content:
-        content = content.rstrip("\n") + f"\n\n{_TRACK_HEADER}\n"
-
-    content = content.rstrip("\n") + f"\n{neg_dir}\n{neg_files}\n"
-    gitignore_path.write_text(content, encoding="utf-8")
-
+    tracked.append(slug)
+    _save_tracked(tracked)
     return {"slug": slug, "status": "tracked"}
 
 
 @router.get("/data/tracked")
 async def list_tracked():
     """列出所有已标记为可提交的数据源 slug。"""
-    gitignore_path = config.data_dir / "sessions" / ".gitignore"
-    tracked: list[str] = []
-    if gitignore_path.exists():
-        for line in gitignore_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line.startswith("!") and line.endswith("/"):
-                tracked.append(line[1:-1])
-    return tracked
+    return _load_tracked()
