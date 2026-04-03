@@ -11,6 +11,7 @@ def calculate_vwap_from_levels(
     levels: list[tuple[float, float]],
     amount: float,
     max_cost: float | None = None,
+    min_price: float | None = None,
 ) -> tuple[float, float, float]:
     """Walk through orderbook levels to fill `amount` shares.
 
@@ -19,6 +20,8 @@ def calculate_vwap_from_levels(
         amount: number of shares to fill
         max_cost: optional hard cap on total spend (USDC). Fills stop when
                   cumulative cost would exceed this limit.
+        min_price: optional price floor for SELL orders. Bid levels below
+                   this price are skipped entirely.
 
     Returns:
         (filled_amount, avg_price, total_cost)
@@ -28,10 +31,16 @@ def calculate_vwap_from_levels(
     filled = Decimal("0")
     budget = Decimal(str(max_cost)) if max_cost is not None else None
 
+    min_price_d = Decimal(str(min_price)) if min_price is not None and min_price > 0 else None
+
     for price_f, size_f in levels:
         price = Decimal(str(price_f))
         size = Decimal(str(size_f))
         if size <= 0 or price <= 0:
+            continue
+
+        # Price floor: skip bid levels below minimum acceptable price
+        if min_price_d is not None and price < min_price_d:
             continue
 
         fill_qty = min(remaining, size)
@@ -97,16 +106,43 @@ def execute_signal(
     else:
         return None
 
-    if not levels:
-        return None
-
     request_amount = signal.amount
     if signal.side == "SELL":
         request_amount = min(request_amount, current_pos)
 
+    # ── Ideal sell mode: bypass orderbook, fill at mid price ────────────
+    if signal.side == "SELL" and signal.sell_mode == "ideal":
+        if mid_price <= 0:
+            return None
+        filled = request_amount
+        avg_price = mid_price
+        total_cost = filled * avg_price
+        slippage = 0.0
+        balance += total_cost
+        positions[signal.token_id] = current_pos - filled
+        return FillInfo(
+            timestamp=timestamp,
+            token_id=signal.token_id,
+            side=signal.side,
+            requested_amount=signal.amount,
+            filled_amount=round(filled, 6),
+            avg_price=round(avg_price, 6),
+            total_cost=round(total_cost, 6),
+            slippage_pct=0.0,
+            balance_after=round(balance, 6),
+            position_after=round(positions.get(signal.token_id, 0.0), 6),
+        )
+
+    if not levels:
+        return None
+
     # For BUY, pass max_cost so the VWAP walk stops at budget
     buy_max_cost = signal.max_cost if signal.side == "BUY" else None
-    filled, avg_price, total_cost = calculate_vwap_from_levels(levels, request_amount, max_cost=buy_max_cost)
+    # For SELL in orderbook mode, pass min_sell_price to skip cheap bids
+    sell_min_price = signal.min_sell_price if signal.side == "SELL" else None
+    filled, avg_price, total_cost = calculate_vwap_from_levels(
+        levels, request_amount, max_cost=buy_max_cost, min_price=sell_min_price,
+    )
     if filled <= 0:
         return None
 

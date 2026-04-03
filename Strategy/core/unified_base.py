@@ -32,6 +32,11 @@ class UnifiedBaseStrategy(BaseStrategy):
         self._consec_loss_threshold: int = int(config.get("consecutive_loss_threshold", 3))
         self._loss_reduction_pct: float = config.get("loss_position_reduction_pct", 0.5)
 
+        # Exit sell mode: ideal (mid price) vs orderbook (VWAP with protections)
+        self._exit_use_orderbook: bool = bool(config.get("exit_use_orderbook_mode", False))
+        self._exit_min_sell_price: float = float(config.get("exit_min_sell_price", 0.0))
+        self._exit_reduction_pct: float = float(config.get("exit_reduction_pct", 1.0))
+
         # Internal state
         self._consecutive_losses: int = 0
         self._position_scale: float = 1.0
@@ -40,6 +45,25 @@ class UnifiedBaseStrategy(BaseStrategy):
 
         # Delegate to child
         self.init_strategy(config)
+
+    def _make_exit_signal(self, token_id: str, qty: float) -> Signal:
+        """Build an exit SELL signal with the configured sell mode."""
+        if self._exit_use_orderbook:
+            amount = max(1.0, qty * self._exit_reduction_pct)
+            return Signal(
+                token_id=token_id,
+                side="SELL",
+                amount=amount,
+                sell_mode="orderbook",
+                min_sell_price=self._exit_min_sell_price if self._exit_min_sell_price > 0 else None,
+            )
+        else:
+            return Signal(
+                token_id=token_id,
+                side="SELL",
+                amount=qty,
+                sell_mode="ideal",
+            )
 
     def on_tick(self, ctx: TickContext) -> list[Signal]:
         signals: list[Signal] = []
@@ -55,7 +79,7 @@ class UnifiedBaseStrategy(BaseStrategy):
                         current_side = self._price_side(snapshot.mid_price)
                         if current_side != entry_side:
                             continue
-                    signals.append(Signal(token_id=token_id, side="SELL", amount=qty))
+                    signals.append(self._make_exit_signal(token_id, qty))
             return signals
 
         # ── 2. Take profit / Stop loss (per-token, pct + absolute) ────────
@@ -87,7 +111,7 @@ class UnifiedBaseStrategy(BaseStrategy):
                 should_close = True
 
             if should_close:
-                signals.append(Signal(token_id=token_id, side="SELL", amount=qty))
+                signals.append(self._make_exit_signal(token_id, qty))
 
         if signals:
             return signals

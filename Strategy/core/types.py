@@ -15,6 +15,8 @@ class Signal:
     order_type: str = "MARKET"  # "MARKET" | "LIMIT"
     limit_price: float | None = None
     max_cost: float | None = None  # BUY only: hard cap on total spend (USDC)
+    sell_mode: str = "market"  # "market" | "ideal" | "orderbook"
+    min_sell_price: float | None = None  # orderbook mode: skip bids below this price
 
 
 @dataclass
