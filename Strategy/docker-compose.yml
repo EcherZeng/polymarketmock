@@ -14,6 +14,8 @@ services:
     volumes:
       - backend_data:/app/data:ro
       - strategy_results:/app/results
+    env_file:
+      - .env
     environment:
       STRATEGY_DATA_DIR: /app/data
       STRATEGY_STRATEGIES_DIR: /app/strategies
