@@ -48,6 +48,7 @@ Thumbs.db
 # Data files
 backend/data/orderbooks/*
 backend/data/prices/*
+backend/data/token_map.json
 
 # Strategy results
 Strategy/results/*.json

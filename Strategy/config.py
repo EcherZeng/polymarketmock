@@ -39,7 +39,7 @@ class StrategyEngineConfig(BaseSettings):
         "deepseek-reasoner",
     ]
 
-    model_config = {"env_prefix": "STRATEGY_"}
+    model_config = {"env_prefix": "STRATEGY_", "env_file": _STRATEGY_DIR / ".env"}
 
 
 config = StrategyEngineConfig()

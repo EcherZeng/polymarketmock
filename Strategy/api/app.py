@@ -83,6 +83,14 @@ async def lifespan(app: FastAPI):
     )
 
     # ── Init AI optimizer ────────────────────────────────────────────
+    if not config.llm_api_key:
+        logger.warning(
+            "STRATEGY_LLM_API_KEY is not set — AI optimization will fail. "
+            "Set it in .env or as an environment variable."
+        )
+    else:
+        logger.info("LLM API key configured (model: %s)", config.llm_default_model)
+
     from core.ai_optimizer import AIOptimizer
     state.ai_optimizer = AIOptimizer(
         state.registry,
