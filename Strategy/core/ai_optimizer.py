@@ -104,9 +104,9 @@ _SYSTEM_PROMPT = (
     "需要较大仓位才能获得有意义的收益\n"
     "- **价格 0.50-0.85 的 token**：利润空间与风险的最佳平衡区间\n\n"
     "## 参数调优核心原则\n"
-    "⚠️ **最重要：避免过度过滤导致无法入场！**\n"
+    "[最高优先级] 避免过度过滤导致无法入场。\n"
     "- 多个严格条件的交集会导致几乎不可能入场（AND 逻辑的乘法效应）\n"
-    "- 首轮探索应使用宽松参数：先确保有足够交易次数（≥10 笔），再逐步收紧\n"
+    "- 首轮探索应使用宽松参数：先确保有足够交易次数（>=10 笔），再逐步收紧\n"
     "- 如果上一轮 total_trades=0 或 <5，必须大幅放宽过滤条件\n"
     "- 每次只收紧 1-2 个参数，保持其他参数宽松\n\n"
     "## 各参数在预测市场中的影响\n"
@@ -137,7 +137,7 @@ _SYSTEM_PROMPT = (
     "3. bool 类型参数只能是 true 或 false\n"
     "4. 每轮给出简短的调整理由（reason 字段）\n"
     "5. 基于历史结果中表现好的参数方向进行收敛，但保持多样性探索\n"
-    "6. **首轮用宽松参数**，后续逐步收紧表现差的方向\n"
+    "6. 首轮用宽松参数，后续逐步收紧表现差的方向\n"
     "7. 如果前几轮都是 0 交易，必须显著放宽多个过滤条件\n"
     "8. 每组参数之间应有差异性，避免生成雷同配置"
 )
@@ -220,7 +220,7 @@ def _build_history_digest(
         summary_lines.append("- 有交易回测的指标统计：")
         summary_lines.extend(stat_lines)
     else:
-        summary_lines.append("- ⚠️ 全部回测都没有产生交易")
+        summary_lines.append("- [严重] 全部回测都没有产生交易，过滤条件需大幅放宽")
 
     summary_text = "\n".join(summary_lines)
 
@@ -268,8 +268,8 @@ def _build_history_digest(
 
     if zero_trade and len(zero_trade) > total // 3:
         diag_lines.extend([
-            f"⚠️ 警告：{len(zero_trade)}/{total} 次回测产生 0 笔交易！",
-            "过滤条件过严导致策略无法入场。必须显著放宽以下参数：",
+            f"[严重] {len(zero_trade)}/{total} 次回测产生 0 笔交易。",
+            "过滤条件过严导致策略无法入场，必须显著放宽以下参数：",
             "- 降低 min_price（如 0.55）、增大 max_spread（如 0.05+）",
             "- 增大 max_ask_deviation（如 0.10+）、降低 min_profit_room（如 0.01）",
             "- 降低 momentum_min（如 0.002）、增大 amplitude_max（如 0.5+）",
@@ -279,7 +279,7 @@ def _build_history_digest(
     low_trade_rows = [r for r in traded_rows if r.get("total_trades", 0) < 5]
     if low_trade_rows and len(low_trade_rows) > len(traded_rows) // 2:
         diag_lines.extend([
-            f"⚠️ 注意：{len(low_trade_rows)}/{len(traded_rows)} 次有交易的回测交易次数不足5笔。",
+            f"[注意] {len(low_trade_rows)}/{len(traded_rows)} 次有交易的回测交易次数不足5笔。",
             "建议适度放宽过滤条件以增加交易机会。",
         ])
 
@@ -298,7 +298,7 @@ def _build_history_digest(
                 diff_hints.append(f"  {k}: 最佳={bv}, 最差={wv}")
         if diff_hints:
             diag_lines.append(
-                "💡 最佳盈利 vs 最差亏损的参数差异："
+                "[参考] 最佳盈利与最差亏损的参数差异："
             )
             diag_lines.extend(diff_hints[:8])
 
@@ -385,7 +385,7 @@ def _build_round_prompt(
         parts.extend([
             "",
             "## 无历史结果 (首轮探索)",
-            "⚠️ 首轮请使用偏宽松的参数组合，确保策略能产生交易。",
+            "[重要] 首轮请使用偏宽松的参数组合，确保策略能产生交易。",
             "建议：min_price≤0.60, max_spread≥0.04, momentum_min≤0.005, "
             "min_profit_room≤0.02, position_min_pct≥0.10",
         ])
