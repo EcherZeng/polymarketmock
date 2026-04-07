@@ -13,12 +13,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import re
 import time
 import traceback
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
+from pathlib import Path
 
 import httpx
 
@@ -492,6 +494,41 @@ def _parse_ai_configs(raw: str, param_schema: dict, runs_per_round: int) -> tupl
 # ── Optimizer ────────────────────────────────────────────────────────────────
 
 
+def _sanitize_floats(obj):
+    """Recursively replace inf/nan floats with JSON-safe values."""
+    if isinstance(obj, float):
+        if math.isnan(obj):
+            return None
+        if math.isinf(obj):
+            return 9999.0 if obj > 0 else -9999.0
+        return obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_floats(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_floats(v) for v in obj]
+    return obj
+
+
+def _task_to_dict(task: OptimizeTask) -> dict:
+    """Serialize an OptimizeTask to a JSON-safe dict."""
+    d = asdict(task)
+    return _sanitize_floats(d)
+
+
+def _task_from_dict(d: dict) -> OptimizeTask:
+    """Deserialize a dict back to an OptimizeTask."""
+    rounds_raw = d.pop("rounds", [])
+    rounds = []
+    for r in rounds_raw:
+        rounds.append(RoundResult(**r))
+    # Handle -inf sentinel stored as None or -9999
+    best_metric = d.get("best_metric")
+    if best_metric is None or best_metric == -9999.0:
+        d["best_metric"] = float("-inf")
+    d["rounds"] = rounds
+    return OptimizeTask(**d)
+
+
 class AIOptimizer:
     """Multi-round LLM-guided parameter optimizer."""
 
@@ -499,12 +536,49 @@ class AIOptimizer:
         self,
         registry: StrategyRegistry,
         on_result: callable | None = None,
+        tasks_dir: Path | None = None,
     ) -> None:
         self._registry = registry
         self._semaphore = asyncio.Semaphore(config.max_concurrency)
         self._tasks: dict[str, OptimizeTask] = {}
         self._running: dict[str, asyncio.Task] = {}
         self._on_result = on_result
+        self._tasks_dir = tasks_dir
+        if self._tasks_dir:
+            self._tasks_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── Persistence ──────────────────────────────────────────────────────────
+
+    def load_tasks(self) -> int:
+        """Load persisted tasks from disk. Returns count loaded."""
+        if not self._tasks_dir or not self._tasks_dir.exists():
+            return 0
+        count = 0
+        for f in sorted(self._tasks_dir.glob("opt_*.json")):
+            try:
+                raw = f.read_text("utf-8")
+                d = json.loads(raw)
+                task = _task_from_dict(d)
+                self._tasks[task.task_id] = task
+                count += 1
+            except Exception as e:
+                logger.warning("Failed to load AI task %s: %s", f.name, e)
+        if count:
+            logger.info("Loaded %d persisted AI optimization tasks", count)
+        return count
+
+    def _persist_task(self, task: OptimizeTask) -> None:
+        """Save a single task to disk."""
+        if not self._tasks_dir:
+            return
+        try:
+            path = self._tasks_dir / f"opt_{task.task_id}.json"
+            path.write_text(
+                json.dumps(_task_to_dict(task), ensure_ascii=False, default=str),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            logger.error("Failed to persist AI task %s: %s", task.task_id, e)
 
     async def submit(
         self,
@@ -769,6 +843,7 @@ class AIOptimizer:
                 round_result.best_metric_value = max(round_metrics) if round_metrics else 0.0
                 round_result.duration_ms = (time.monotonic() - t_round) * 1000
                 task.rounds.append(round_result)
+                self._persist_task(task)
 
                 logger.info(
                     "AI optimizer %s round %d done: %d runs, best %s=%.4f, reason: %s",
@@ -780,6 +855,7 @@ class AIOptimizer:
             # ── Done ─────────────────────────────────────────────────────
             if task.status != "cancelled":
                 task.status = "completed"
+            self._persist_task(task)
 
         except Exception as e:
             tb = traceback.format_exc()
@@ -793,6 +869,7 @@ class AIOptimizer:
                 "detail": tb,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
+            self._persist_task(task)
 
         self._running.pop(task_id, None)
 
@@ -805,6 +882,7 @@ class AIOptimizer:
         async_task = self._running.pop(task_id, None)
         if async_task:
             async_task.cancel()
+        self._persist_task(task)
         return True
 
     def get_task(self, task_id: str) -> OptimizeTask | None:

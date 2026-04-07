@@ -92,10 +92,13 @@ async def lifespan(app: FastAPI):
         logger.info("LLM API key configured (model: %s)", config.llm_default_model)
 
     from core.ai_optimizer import AIOptimizer
+    ai_tasks_dir = config.results_dir / "ai_tasks"
     state.ai_optimizer = AIOptimizer(
         state.registry,
         on_result=_on_result,
+        tasks_dir=ai_tasks_dir,
     )
+    state.ai_optimizer.load_tasks()
 
     yield
 

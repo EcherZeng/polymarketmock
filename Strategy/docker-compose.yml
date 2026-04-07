@@ -14,6 +14,7 @@ services:
     volumes:
       - backend_data:/app/data:ro
       - strategy_results:/app/results
+      - strategy_user_presets:/app/user_config
     env_file:
       - .env
     environment:
@@ -34,3 +35,4 @@ volumes:
     external: true
   strategy_results:
     external: true
+  strategy_user_presets:

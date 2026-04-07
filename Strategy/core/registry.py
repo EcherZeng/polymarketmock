@@ -25,7 +25,12 @@ logger = logging.getLogger(__name__)
 
 _STRATEGY_DIR = Path(__file__).resolve().parent.parent
 _PRESETS_DEFAULT_PATH = _STRATEGY_DIR / "strategy_presets.json"
-_PRESETS_USER_PATH = _STRATEGY_DIR / "strategy_presets_user.json"
+
+# User overrides: prefer /app/user_config (Docker volume) → fallback to local dir
+_USER_CONFIG_DIR = Path("/app/user_config")
+if not _USER_CONFIG_DIR.exists():
+    _USER_CONFIG_DIR = _STRATEGY_DIR
+_PRESETS_USER_PATH = _USER_CONFIG_DIR / "strategy_presets_user.json"
 
 
 def _load_json(path: Path) -> dict:
