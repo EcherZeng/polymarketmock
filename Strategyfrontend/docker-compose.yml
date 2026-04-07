@@ -1,6 +1,8 @@
 # 单独构建/更新 strategyfrontend 服务
 # 用法: cd Strategyfrontend && docker compose up -d --build
-# 注意: 需先通过根目录 docker compose up 启动主网络
+# 与根目录 docker-compose.yml 共享项目名，可直接替换容器
+
+name: polymarketmock
 
 services:
   strategyfrontend:
