@@ -1,7 +1,18 @@
-"""Strategy registry — loads presets and registers strategy classes."""
+"""Strategy registry — loads presets and registers strategy classes.
+
+Preset persistence uses a two-file overlay model:
+  - strategy_presets.json       (git-tracked, read-only defaults)
+  - strategy_presets_user.json  (git-ignored, user overrides)
+
+On load the user file is deep-merged on top of defaults so that:
+  - git pull updates built-in presets / schema without losing user changes
+  - user customisations (unified_rules tweaks, new presets) survive restarts
+On save only the user file is written.
+"""
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 import inspect
 import json
@@ -12,19 +23,44 @@ from core.base_strategy import BaseStrategy
 
 logger = logging.getLogger(__name__)
 
-_PRESETS_PATH = Path(__file__).resolve().parent.parent / "strategy_presets.json"
+_STRATEGY_DIR = Path(__file__).resolve().parent.parent
+_PRESETS_DEFAULT_PATH = _STRATEGY_DIR / "strategy_presets.json"
+_PRESETS_USER_PATH = _STRATEGY_DIR / "strategy_presets_user.json"
 
 
-def _load_presets_file() -> dict:
-    if _PRESETS_PATH.exists():
-        with open(_PRESETS_PATH, "r", encoding="utf-8") as f:
+def _load_json(path: Path) -> dict:
+    if path.exists():
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     return {}
 
 
-def _save_presets_file(data: dict) -> None:
-    with open(_PRESETS_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursively merge *override* into a copy of *base*."""
+    result = copy.deepcopy(base)
+    for key, val in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(val, dict):
+            result[key] = _deep_merge(result[key], val)
+        else:
+            result[key] = copy.deepcopy(val)
+    return result
+
+
+def _load_presets_merged() -> tuple[dict, dict]:
+    """Return (merged_presets, user_overrides).
+
+    merged = defaults ← user overlay.  user_overrides is kept separately so
+    we know what to persist back to the user file.
+    """
+    defaults = _load_json(_PRESETS_DEFAULT_PATH)
+    user = _load_json(_PRESETS_USER_PATH)
+    merged = _deep_merge(defaults, user)
+    return merged, user
+
+
+def _save_user_file(user_data: dict) -> None:
+    with open(_PRESETS_USER_PATH, "w", encoding="utf-8") as f:
+        json.dump(user_data, f, indent=2, ensure_ascii=False)
 
 
 class StrategyRegistry:
@@ -32,12 +68,13 @@ class StrategyRegistry:
 
     def __init__(self) -> None:
         self._strategy_cls: type[BaseStrategy] | None = None
-        self._presets: dict = {}  # full presets file content
+        self._presets: dict = {}  # merged presets (defaults + user)
+        self._user_overrides: dict = {}  # user-only delta (persisted separately)
         self._configs: dict[str, dict] = {}  # name → merged default_config
 
     def scan(self, directory: Path) -> None:
         """Scan strategies/ for the concrete strategy class, then register presets."""
-        self._presets = _load_presets_file()
+        self._presets, self._user_overrides = _load_presets_merged()
         unified_rules = self._presets.get("unified_rules", {})
         strategies_map = self._presets.get("strategies", {})
 
@@ -131,14 +168,16 @@ class StrategyRegistry:
         return strategies.get(name)
 
     def save_preset(self, name: str, params: dict) -> None:
-        """Create or update a preset. Rebuilds merged config."""
+        """Create or update a preset. Rebuilds merged config. Persists to user file."""
         strategies = self._presets.setdefault("strategies", {})
         strategies[name] = params
         # Rebuild merged config
         unified_rules = self._presets.get("unified_rules", {})
         clean = {k: v for k, v in params.items() if k not in self._meta_keys}
         self._configs[name] = {**unified_rules, **clean}
-        _save_presets_file(self._presets)
+        # Persist to user overlay only
+        self._user_overrides.setdefault("strategies", {})[name] = params
+        _save_user_file(self._user_overrides)
         logger.info("Saved preset: %s", name)
 
     def delete_preset(self, name: str) -> bool:
@@ -151,7 +190,10 @@ class StrategyRegistry:
             return False
         del strategies[name]
         self._configs.pop(name, None)
-        _save_presets_file(self._presets)
+        # Also remove from user overlay
+        user_strategies = self._user_overrides.get("strategies", {})
+        user_strategies.pop(name, None)
+        _save_user_file(self._user_overrides)
         logger.info("Deleted preset: %s", name)
         return True
 
@@ -163,4 +205,6 @@ class StrategyRegistry:
         for preset_name, preset_params in strategies.items():
             clean = {k: v for k, v in preset_params.items() if k not in self._meta_keys}
             self._configs[preset_name] = {**unified_rules, **clean}
-        _save_presets_file(self._presets)
+        # Persist to user overlay only
+        self._user_overrides["unified_rules"] = rules
+        _save_user_file(self._user_overrides)

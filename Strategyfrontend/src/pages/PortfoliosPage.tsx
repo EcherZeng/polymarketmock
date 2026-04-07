@@ -1,12 +1,24 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { Link } from "react-router-dom"
-import { useMemo } from "react"
+import { Link, useNavigate } from "react-router-dom"
+import { useMemo, useState } from "react"
 import { cn } from "@/lib/utils"
-import { fetchPortfolios, deletePortfolio } from "@/api/client"
+import { fetchPortfolios, deletePortfolio, createPortfolio } from "@/api/client"
 import type { Portfolio } from "@/types"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog"
 
 export default function PortfoliosPage() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const [createOpen, setCreateOpen] = useState(false)
+  const [newName, setNewName] = useState("")
 
   const { data: portfolios = [], isLoading } = useQuery<Portfolio[]>({
     queryKey: ["portfolios"],
@@ -20,6 +32,16 @@ export default function PortfoliosPage() {
     },
   })
 
+  const createMutation = useMutation({
+    mutationFn: createPortfolio,
+    onSuccess: (created) => {
+      queryClient.invalidateQueries({ queryKey: ["portfolios"] })
+      setCreateOpen(false)
+      setNewName("")
+      navigate(`/portfolios/${created.portfolio_id}`)
+    },
+  })
+
   const sorted = useMemo(
     () => [...portfolios].sort((a, b) => b.created_at.localeCompare(a.created_at)),
     [portfolios],
@@ -29,20 +51,60 @@ export default function PortfoliosPage() {
     return <div className="py-12 text-center text-muted-foreground">加载中...</div>
   }
 
+  const createDialog = (
+    <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>创建数据组合</DialogTitle>
+        </DialogHeader>
+        <Input
+          placeholder="输入组合名称"
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && newName.trim()) {
+              createMutation.mutate({ name: newName.trim(), items: [] })
+            }
+          }}
+        />
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setCreateOpen(false)}>
+            取消
+          </Button>
+          <Button
+            disabled={!newName.trim() || createMutation.isPending}
+            onClick={() => createMutation.mutate({ name: newName.trim(), items: [] })}
+          >
+            {createMutation.isPending ? "创建中..." : "创建"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+
   if (sorted.length === 0) {
     return (
       <div className="py-20 text-center">
         <h2 className="text-lg font-semibold">暂无数据组合</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          在批量回测详情页中选择成功结果，点击"加入组合"来创建
+          点击下方按钮创建新的数据组合，或在批量回测详情页中选择成功结果加入组合
         </p>
+        <Button className="mt-4" onClick={() => setCreateOpen(true)}>
+          创建组合
+        </Button>
+        {createDialog}
       </div>
     )
   }
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-2xl font-bold tracking-tight">数据组合</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold tracking-tight">数据组合</h1>
+        <Button onClick={() => setCreateOpen(true)}>创建组合</Button>
+      </div>
+
+      {createDialog}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {sorted.map((p) => {
