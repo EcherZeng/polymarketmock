@@ -76,23 +76,16 @@ export default function AiOptimizeDetailPage() {
   }
 
   // ── Best config display ───────────────────────────────────────────────
-  const bestConfigEntries = useMemo(() => {
-    if (!task?.best_config) return []
-    return Object.entries(task.best_config).filter(
+  const { bestConfigEntries, bestConfigJson } = useMemo(() => {
+    if (!task?.best_config) return { bestConfigEntries: [] as [string, unknown][], bestConfigJson: "" }
+    const entries = Object.entries(task.best_config).filter(
       ([, v]) => typeof v === "number" || typeof v === "boolean",
     )
-  }, [task])
-
-  // ── Best config as JSON ───────────────────────────────────────────────
-  const bestConfigJson = useMemo(() => {
-    if (!task?.best_config) return ""
-    const filtered: Record<string, unknown> = {}
-    for (const [k, v] of Object.entries(task.best_config)) {
-      if (typeof v === "number" || typeof v === "boolean") {
-        filtered[k] = v
-      }
+    const obj = Object.fromEntries(entries)
+    return {
+      bestConfigEntries: entries,
+      bestConfigJson: JSON.stringify(obj, null, 2),
     }
-    return JSON.stringify(filtered, null, 2)
   }, [task])
 
   const [showJson, setShowJson] = useState(false)
@@ -317,7 +310,7 @@ export default function AiOptimizeDetailPage() {
                         const m = cr.avg_metrics
                         const slugKey = `${round.round}-${cr.config_index}`
                         const isSlugExpanded = expandedRoundSlugs[slugKey] ?? false
-                        const slugMetrics = (cr as unknown as { slug_metrics?: Array<{ slug: string; session_id: string; total_return_pct: number; sharpe_ratio: number; win_rate: number; max_drawdown: number; total_trades: number }> }).slug_metrics ?? []
+                        const slugMetrics = cr.slug_metrics ?? []
                         return (
                           <>
                             <tr

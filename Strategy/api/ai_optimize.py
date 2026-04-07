@@ -124,14 +124,16 @@ async def get_optimization_task(task_id: str):
     # Build round summaries
     rounds_summary: list[dict] = []
     for r in task.rounds:
+        # Pre-group digests by config_index for O(1) lookup
+        digests_by_cfg: dict[int, list[dict]] = {}
+        for d in r.digests:
+            idx = d.get("config_index", -1)
+            digests_by_cfg.setdefault(idx, []).append(d)
+
         # Per-config metrics for this round
         configs_results: list[dict] = []
         for i, cfg in enumerate(r.configs):
-            # Find digests for this config
-            cfg_digests = [
-                d for d in r.digests
-                if d.get("config_index") == i
-            ]
+            cfg_digests = digests_by_cfg.get(i, [])
             avg_metrics: dict = {}
             slug_metrics: list[dict] = []
             if cfg_digests:

@@ -13,6 +13,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
+import time
 import traceback
 import uuid
 from dataclasses import dataclass, field
@@ -84,20 +86,19 @@ class OptimizeTask:
 # ── Prompt builder ───────────────────────────────────────────────────────────
 
 
-def _build_system_prompt() -> str:
-    return (
-        "你是一个量化策略参数优化专家。你的任务是根据回测结果调整策略参数，"
-        "使目标指标最优化。\n\n"
-        "规则：\n"
-        "1. 输出必须是严格的 JSON 数组，每个元素是一组参数配置\n"
-        "2. 所有参数值必须在 schema 规定的 min/max 范围内\n"
-        "3. bool 类型参数只能是 true 或 false\n"
-        "4. 每轮给出简短的调整理由（reason 字段）\n"
-        "5. 基于历史结果中表现好的参数方向进行收敛\n"
-        "6. 避免极端参数组合，优先探索表现好的参数邻域\n\n"
-        "输出格式：\n"
-        '{"configs": [...], "reason": "调整理由"}'
-    )
+_SYSTEM_PROMPT = (
+    "你是一个量化策略参数优化专家。你的任务是根据回测结果调整策略参数，"
+    "使目标指标最优化。\n\n"
+    "规则：\n"
+    "1. 输出必须是严格的 JSON 数组，每个元素是一组参数配置\n"
+    "2. 所有参数值必须在 schema 规定的 min/max 范围内\n"
+    "3. bool 类型参数只能是 true 或 false\n"
+    "4. 每轮给出简短的调整理由（reason 字段）\n"
+    "5. 基于历史结果中表现好的参数方向进行收敛\n"
+    "6. 避免极端参数组合，优先探索表现好的参数邻域\n\n"
+    "输出格式：\n"
+    '{"configs": [...], "reason": "调整理由"}'
+)
 
 
 def _build_round_prompt(
@@ -199,13 +200,14 @@ def _build_round_prompt(
 
 
 async def _call_llm(
+    client: httpx.AsyncClient,
     api_url: str,
     api_key: str,
     model: str,
     system_prompt: str,
     user_prompt: str,
 ) -> str:
-    """Call OpenAI-compatible chat completion endpoint."""
+    """Call OpenAI-compatible chat completion endpoint using a shared client."""
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}",
@@ -220,9 +222,8 @@ async def _call_llm(
         "response_format": {"type": "json_object"},
     }
 
-    async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(api_url, json=payload, headers=headers)
-        resp.raise_for_status()
+    resp = await client.post(api_url, json=payload, headers=headers)
+    resp.raise_for_status()
 
     data = resp.json()
     content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
@@ -239,7 +240,6 @@ def _parse_ai_configs(raw: str, param_schema: dict, runs_per_round: int) -> tupl
         parsed = json.loads(raw)
     except json.JSONDecodeError:
         # Try to extract JSON from markdown code block
-        import re
         match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
         if match:
             parsed = json.loads(match.group(1))
@@ -364,7 +364,6 @@ class AIOptimizer:
         """Execute the multi-round optimization loop."""
         task = self._tasks[task_id]
         param_schema = self._registry.get_param_schema()
-        system_prompt = _build_system_prompt()
 
         try:
             # ── Phase 1: Load data + build market profiles (once) ────────
@@ -374,13 +373,13 @@ class AIOptimizer:
                 data_cache[slug] = data
                 task.market_profiles[slug] = profile_market(slug, data)
 
-            # ── Phase 2: Iterative rounds ────────────────────────────────
-            for round_num in range(1, task.max_rounds + 1):
+            # ── Phase 2: Iterative rounds (shared HTTP client) ───────────
+            async with httpx.AsyncClient(timeout=120) as llm_client:
+              for round_num in range(1, task.max_rounds + 1):
                 if task.status == "cancelled":
                     break
 
                 task.current_round = round_num
-                import time
                 t_round = time.monotonic()
 
                 # Build AI context
@@ -403,8 +402,9 @@ class AIOptimizer:
                 # Call LLM
                 try:
                     raw_response = await _call_llm(
+                        llm_client,
                         config.llm_api_url, config.llm_api_key, llm_model,
-                        system_prompt, user_prompt,
+                        _SYSTEM_PROMPT, user_prompt,
                     )
                 except Exception as e:
                     tb = traceback.format_exc()

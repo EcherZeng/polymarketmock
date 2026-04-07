@@ -49,6 +49,7 @@ Thumbs.db
 backend/data/orderbooks/*
 backend/data/prices/*
 backend/data/token_map.json
+backend/data/token_map.json
 
 # Strategy user overrides (never track user customisations)
 Strategy/strategy_presets_user.json
