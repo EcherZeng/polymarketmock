@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 import api.state as state
+from config import config
 
 router = APIRouter(prefix="/ai-optimize", tags=["AI Optimize"])
 
@@ -25,12 +26,20 @@ class OptimizeRequest(BaseModel):
     settlement_result: dict[str, float] | None = None
 
     # LLM configuration
-    llm_api_url: str = Field(description="OpenAI-compatible API endpoint URL")
-    llm_api_key: str = Field(description="API key for the LLM service")
-    llm_model: str = Field(default="gpt-4o", description="Model name")
+    llm_model: str = Field(default="deepseek-chat", description="Model name")
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
+
+
+@router.get("/models")
+async def list_available_models():
+    """Return available LLM models and whether backend API key is configured."""
+    return {
+        "models": config.llm_available_models,
+        "default_model": config.llm_default_model,
+        "api_key_configured": bool(config.llm_api_key),
+    }
 
 
 @router.post("")
@@ -63,8 +72,6 @@ async def submit_optimization(req: OptimizeRequest):
         max_rounds=req.max_rounds,
         runs_per_round=req.runs_per_round,
         initial_balance=req.initial_balance,
-        llm_api_url=req.llm_api_url,
-        llm_api_key=req.llm_api_key,
         llm_model=req.llm_model,
         param_keys=req.param_keys,
         settlement_result=req.settlement_result,

@@ -331,3 +331,33 @@ export async function removePortfolioItems(
 export async function deletePortfolio(portfolioId: string): Promise<void> {
   await api.delete(`/portfolios/${portfolioId}`)
 }
+
+// ── AI Optimize ─────────────────────────────────────────────────────────────
+
+export async function fetchAiModels(): Promise<import("@/types").AiModelsResponse> {
+  const { data } = await api.get("/ai-optimize/models")
+  return data
+}
+
+export async function submitAiOptimize(
+  req: import("@/types").AiOptimizeRequest,
+): Promise<{ task_id: string; max_rounds: number; runs_per_round: number; total_slugs: number; estimated_total_runs: number }> {
+  const { data } = await api.post("/ai-optimize", req)
+  return data
+}
+
+export async function fetchAiOptimizeTasks(): Promise<import("@/types").AiOptimizeTask[]> {
+  const { data } = await api.get("/ai-optimize")
+  return data
+}
+
+export async function fetchAiOptimizeTask(
+  taskId: string,
+): Promise<import("@/types").AiOptimizeTaskDetail> {
+  const { data } = await api.get(`/ai-optimize/${taskId}`)
+  return data
+}
+
+export async function stopAiOptimize(taskId: string): Promise<void> {
+  await api.post(`/ai-optimize/${taskId}/stop`)
+}

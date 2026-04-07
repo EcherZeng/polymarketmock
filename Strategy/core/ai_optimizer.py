@@ -311,9 +311,7 @@ class AIOptimizer:
         max_rounds: int,
         runs_per_round: int,
         initial_balance: float,
-        llm_api_url: str,
-        llm_api_key: str,
-        llm_model: str,
+        llm_model: str | None = None,
         param_keys: list[str] | None = None,
         settlement_result: dict[str, float] | None = None,
     ) -> str:
@@ -345,11 +343,12 @@ class AIOptimizer:
         )
         self._tasks[task_id] = task
 
+        # Resolve LLM model
+        resolved_model = llm_model or config.llm_default_model
+
         # Launch background task
         async_task = asyncio.create_task(
-            self._run_optimization(
-                task_id, llm_api_url, llm_api_key, llm_model, param_keys,
-            )
+            self._run_optimization(task_id, resolved_model, param_keys)
         )
         self._running[task_id] = async_task
         return task_id
@@ -357,8 +356,6 @@ class AIOptimizer:
     async def _run_optimization(
         self,
         task_id: str,
-        llm_api_url: str,
-        llm_api_key: str,
         llm_model: str,
         param_keys: list[str],
     ) -> None:
@@ -403,7 +400,7 @@ class AIOptimizer:
                 # Call LLM
                 try:
                     raw_response = await _call_llm(
-                        llm_api_url, llm_api_key, llm_model,
+                        config.llm_api_url, config.llm_api_key, llm_model,
                         system_prompt, user_prompt,
                     )
                 except Exception as e:

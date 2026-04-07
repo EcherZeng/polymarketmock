@@ -30,6 +30,15 @@ class StrategyEngineConfig(BaseSettings):
     server_port: int = 8072
     server_host: str = "0.0.0.0"
 
+    # LLM (DeepSeek / OpenAI-compatible)
+    llm_api_url: str = "https://api.deepseek.com/v1/chat/completions"
+    llm_api_key: str = ""
+    llm_default_model: str = "deepseek-chat"
+    llm_available_models: list[str] = [
+        "deepseek-chat",
+        "deepseek-reasoner",
+    ]
+
     model_config = {"env_prefix": "STRATEGY_"}
 
 

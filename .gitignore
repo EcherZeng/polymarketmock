@@ -52,6 +52,7 @@ backend/data/prices/*
 # Strategy results
 Strategy/results/*.json
 Strategy/results/batches/*.json
+Strategy/results/portfolios/*.json
 !backend/data/orderbooks/.gitkeep
 !backend/data/prices/.gitkeep
 

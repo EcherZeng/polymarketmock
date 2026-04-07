@@ -11,12 +11,15 @@ import DataCleanupPage from "@/pages/DataCleanupPage"
 import ResultsCleanupPage from "@/pages/ResultsCleanupPage"
 import PortfoliosPage from "@/pages/PortfoliosPage"
 import PortfolioDetailPage from "@/pages/PortfolioDetailPage"
+import AiOptimizePage from "@/pages/AiOptimizePage"
+import AiOptimizeDetailPage from "@/pages/AiOptimizeDetailPage"
 
 const navItems = [
   { to: "/", label: "策略回测" },
   { to: "/batch", label: "批量回测" },
   { to: "/results", label: "回测结果" },
   { to: "/portfolios", label: "数据组合" },
+  { to: "/ai-optimize", label: "AI 优化" },
   { to: "/dashboard", label: "仪表盘" },
   { to: "/cleanup", label: "数据清理" },
   { to: "/results-cleanup", label: "结果清理" },
@@ -43,6 +46,7 @@ export default function App() {
                   location.pathname === item.to
                     || (item.to === "/batch" && location.pathname.startsWith("/batch"))
                     || (item.to === "/portfolios" && location.pathname.startsWith("/portfolios"))
+                    || (item.to === "/ai-optimize" && location.pathname.startsWith("/ai-optimize"))
                     ? "text-foreground font-medium"
                     : "text-muted-foreground",
                 )}
@@ -62,6 +66,8 @@ export default function App() {
           <Route path="/results/:sessionId" element={<ResultDetailPage />} />
           <Route path="/portfolios" element={<PortfoliosPage />} />
           <Route path="/portfolios/:portfolioId" element={<PortfolioDetailPage />} />
+          <Route path="/ai-optimize" element={<AiOptimizePage />} />
+          <Route path="/ai-optimize/:taskId" element={<AiOptimizeDetailPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/cleanup" element={<DataCleanupPage />} />
           <Route path="/results-cleanup" element={<ResultsCleanupPage />} />

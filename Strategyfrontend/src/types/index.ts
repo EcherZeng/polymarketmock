@@ -290,3 +290,69 @@ export interface Portfolio {
   updated_at: string
   items: PortfolioItem[]
 }
+
+// ── AI Optimize ─────────────────────────────────────────────────────────────
+
+export interface AiOptimizeRequest {
+  strategy: string
+  slugs: string[]
+  base_config: Record<string, unknown>
+  optimize_target: string
+  max_rounds: number
+  runs_per_round: number
+  initial_balance: number
+  param_keys?: string[]
+  settlement_result?: Record<string, number>
+  llm_model: string
+}
+
+export interface AiModelsResponse {
+  models: string[]
+  default_model: string
+  api_key_configured: boolean
+}
+
+export interface AiOptimizeTask {
+  task_id: string
+  strategy: string
+  slugs: string[]
+  status: string
+  optimize_target: string
+  max_rounds: number
+  current_round: number
+  completed_runs: number
+  total_runs: number
+  best_metric: number | null
+  created_at: string
+}
+
+export interface AiOptimizeConfigResult {
+  config_index: number
+  config: Record<string, unknown>
+  slug_count: number
+  avg_metrics: Record<string, number>
+}
+
+export interface AiOptimizeRound {
+  round: number
+  configs_count: number
+  runs_completed: number
+  best_metric_value: number
+  ai_reasoning: string
+  duration_ms: number
+  configs_results: AiOptimizeConfigResult[]
+}
+
+export interface AiOptimizeTaskDetail extends AiOptimizeTask {
+  error: string
+  best_config: Record<string, unknown>
+  best_session_id: string
+  market_profiles: Record<string, unknown>
+  rounds: AiOptimizeRound[]
+  ai_messages: Array<{
+    round: number
+    role: string
+    content_length: number
+    timestamp: string
+  }>
+}
