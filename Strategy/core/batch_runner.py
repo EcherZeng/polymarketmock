@@ -1,8 +1,16 @@
-"""Batch runner — workflow-style parallel backtest scheduling with step logging."""
+"""Batch runner — workflow-style parallel backtest scheduling with step logging.
+
+Optimised for large batches:
+- Per-slug timeout (config.slug_timeout) prevents runaway backtests
+- Chunked gather (config.batch_chunk_size) avoids creating all coroutines at once
+- Sessions are released from memory after persisting to disk (only summary kept)
+- Data cache is evicted per-chunk to limit peak memory
+"""
 
 from __future__ import annotations
 
 import asyncio
+import gc
 import logging
 import traceback
 import uuid
@@ -65,6 +73,23 @@ class SlugWorkflow:
 
 
 @dataclass
+class ResultSummary:
+    """Lightweight summary kept in memory after session is persisted to disk."""
+
+    session_id: str
+    status: str
+    initial_balance: float
+    final_equity: float
+    total_return_pct: float
+    sharpe_ratio: float
+    total_trades: int
+    win_rate: float
+    max_drawdown: float
+    avg_slippage: float
+    profit_factor: float
+
+
+@dataclass
 class BatchTask:
     """Tracks a batch of backtest runs."""
 
@@ -79,8 +104,27 @@ class BatchTask:
     total: int = 0
     completed_count: int = 0
     results: dict[str, BacktestSession] = field(default_factory=dict)
+    results_summary: dict[str, ResultSummary] = field(default_factory=dict)
     errors: dict[str, str] = field(default_factory=dict)
     workflows: dict[str, SlugWorkflow] = field(default_factory=dict)
+
+
+def _extract_summary(session: BacktestSession) -> ResultSummary:
+    """Extract lightweight summary from a BacktestSession."""
+    m = session.metrics
+    return ResultSummary(
+        session_id=session.session_id,
+        status=session.status,
+        initial_balance=session.initial_balance,
+        final_equity=session.final_equity,
+        total_return_pct=m.total_return_pct,
+        sharpe_ratio=m.sharpe_ratio,
+        total_trades=m.total_trades,
+        win_rate=m.win_rate,
+        max_drawdown=m.max_drawdown,
+        avg_slippage=m.avg_slippage,
+        profit_factor=m.profit_factor,
+    )
 
 
 class BatchRunner:
@@ -129,10 +173,16 @@ class BatchRunner:
         return batch_id
 
     async def _run_batch(self, batch_id: str) -> None:
-        """Execute all backtests in a batch with concurrency control."""
-        task = self._tasks[batch_id]
+        """Execute all backtests in a batch with concurrency control.
 
-        # Pre-load data (same slug only loaded once)
+        Slugs are processed in chunks to limit peak memory. Within each chunk
+        asyncio.gather runs up to max_concurrency tasks in parallel.
+        """
+        task = self._tasks[batch_id]
+        slug_timeout = config.slug_timeout
+        chunk_size = config.batch_chunk_size
+
+        # Per-chunk data cache (evicted between chunks)
         data_cache: dict[str, ArchiveData] = {}
         _lock = asyncio.Lock()
 
@@ -198,16 +248,31 @@ class BatchRunner:
                 # ── Step 2: Run backtest (strategy init + tick loop) ─────
                 t1 = time.monotonic()
                 try:
-                    session = await asyncio.to_thread(
-                        run_backtest,
-                        self._registry,
-                        task.strategy,
-                        slug,
-                        task.config,
-                        task.initial_balance,
-                        data,
-                        task.settlement_result,
+                    session = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            run_backtest,
+                            self._registry,
+                            task.strategy,
+                            slug,
+                            task.config,
+                            task.initial_balance,
+                            data,
+                            task.settlement_result,
+                        ),
+                        timeout=slug_timeout,
                     )
+                except asyncio.TimeoutError:
+                    wf.log(
+                        "tick_loop", "fail",
+                        f"Backtest timed out after {slug_timeout}s",
+                    )
+                    wf.status = "failed"
+                    wf.error = f"[tick_loop] Timed out after {slug_timeout}s"
+                    task.errors[slug] = wf.error
+                    logger.error("Batch %s slug %s timed out after %ds", batch_id, slug, slug_timeout)
+                    async with _lock:
+                        task.completed_count += 1
+                    return
                 except Exception as e:
                     tb = traceback.format_exc()
                     wf.log("tick_loop", "fail", f"Backtest execution error: {e}", detail=tb)
@@ -270,8 +335,20 @@ class BatchRunner:
                     duration_ms=dt_eval,
                 )
 
-                # ── Done ─────────────────────────────────────────────────
+                # ── Persist result immediately ───────────────────────────
+                if self._on_result:
+                    try:
+                        self._on_result(session)
+                    except Exception as e:
+                        logger.error("on_result callback failed for %s: %s", slug, e)
+
+                # ── Keep only lightweight summary, release full session ──
+                summary = _extract_summary(session)
+                task.results_summary[slug] = summary
+                # Store in results temporarily for on_batch_complete access
+                # but do NOT keep large curves in memory
                 task.results[slug] = session
+
                 wf.status = "completed"
                 wf.log(
                     "done", "ok",
@@ -284,17 +361,33 @@ class BatchRunner:
                     metrics.total_return_pct, session.duration_seconds,
                 )
 
-                # Immediately store result for /results + Dashboard visibility
-                if self._on_result:
-                    try:
-                        self._on_result(session)
-                    except Exception as e:
-                        logger.error("on_result callback failed for %s: %s", slug, e)
-
                 async with _lock:
                     task.completed_count += 1
 
-        await asyncio.gather(*(run_one(slug) for slug in task.slugs))
+        # ── Process slugs in chunks to limit peak memory ─────────────────
+        slugs = task.slugs
+        for chunk_start in range(0, len(slugs), chunk_size):
+            if task.status == "cancelled":
+                break
+            chunk = slugs[chunk_start : chunk_start + chunk_size]
+            await asyncio.gather(*(run_one(slug) for slug in chunk))
+
+            # Release full sessions from previous chunk — summaries are kept
+            for slug in chunk:
+                task.results.pop(slug, None)
+
+            # Evict data cache for completed slugs (next chunk may need different data)
+            completed_slugs = {s for s in chunk if task.workflows[s].status in ("completed", "failed", "skipped")}
+            for s in completed_slugs:
+                data_cache.pop(s, None)
+
+            # Periodic GC to reclaim memory between chunks
+            gc.collect()
+            logger.info(
+                "Batch %s chunk %d-%d done (%d/%d total)",
+                batch_id, chunk_start, chunk_start + len(chunk),
+                task.completed_count, task.total,
+            )
 
         if task.status != "cancelled":
             task.status = "completed"

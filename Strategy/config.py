@@ -19,6 +19,8 @@ class StrategyEngineConfig(BaseSettings):
     # Parallel backtest
     max_concurrency: int = 4
     tick_batch_size: int = 1000
+    slug_timeout: int = 600  # per-slug timeout in seconds (10 min)
+    batch_chunk_size: int = 20  # max slugs to gather concurrently at once
 
     # Strategy loading
     strategies_dir: Path = _STRATEGY_DIR / "strategies"

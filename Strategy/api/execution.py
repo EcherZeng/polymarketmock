@@ -161,6 +161,23 @@ async def get_task(batch_id: str):
                 store_session(session)
             results_summary[slug] = _build_result_summary(session)
 
+        # Also include summaries from already-released sessions (chunked batch)
+        for slug, summary in task.results_summary.items():
+            if slug not in results_summary:
+                results_summary[slug] = {
+                    "session_id": summary.session_id,
+                    "status": summary.status,
+                    "initial_balance": summary.initial_balance,
+                    "final_equity": summary.final_equity,
+                    "total_return_pct": summary.total_return_pct,
+                    "sharpe_ratio": summary.sharpe_ratio,
+                    "total_trades": summary.total_trades,
+                    "win_rate": summary.win_rate,
+                    "max_drawdown": summary.max_drawdown,
+                    "avg_slippage": summary.avg_slippage,
+                    "profit_factor": summary.profit_factor,
+                }
+
         # Serialize workflow step logs
         workflows: dict[str, dict] = {}
         for slug, wf in task.workflows.items():

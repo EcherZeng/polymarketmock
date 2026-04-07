@@ -19,7 +19,7 @@ import type {
   PortfolioItem,
 } from "@/types"
 
-const api = axios.create({ baseURL: "/strategy" })
+const api = axios.create({ baseURL: "/strategy", timeout: 300_000 })
 
 // ── Strategies ──────────────────────────────────────────────────────────────
 

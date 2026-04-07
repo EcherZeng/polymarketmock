@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 import api.state as state
 from api.result_store import BatchStore, PortfolioStore, ResultStore
@@ -51,8 +52,14 @@ async def lifespan(app: FastAPI):
         if state.batch_store is None:
             return
         results_summary: dict[str, dict] = {}
+        # Use full sessions if still in memory
         for slug, session in task.results.items():
             results_summary[slug] = _build_result_summary(session)
+        # Fill in from lightweight summaries (sessions already released)
+        for slug, summary in task.results_summary.items():
+            if slug not in results_summary:
+                from dataclasses import asdict
+                results_summary[slug] = asdict(summary)
         workflows: dict[str, dict] = {}
         for slug, wf in task.workflows.items():
             workflows[slug] = _serialize_workflow(wf)
@@ -94,6 +101,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Compress large JSON responses (batch task details can be several MB)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Import routers after app is created to avoid circular imports
 from api.strategies import router as strategies_router
