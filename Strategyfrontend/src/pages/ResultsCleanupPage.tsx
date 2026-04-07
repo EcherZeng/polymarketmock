@@ -24,7 +24,8 @@ function fmtTime(iso: string) {
 }
 
 function fmtPct(v: number) {
-  return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`
+  const pct = v * 100
+  return `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`
 }
 
 type Tab = "results" | "batches"

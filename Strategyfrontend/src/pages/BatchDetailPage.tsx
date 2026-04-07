@@ -86,14 +86,14 @@ export default function BatchDetailPage() {
     return {
       count: results.length,
       failCount: workflows.filter(([, w]) => w.status === "failed").length,
-      avgReturn: returns.reduce((a, b) => a + b, 0) / returns.length,
+      avgReturn: returns.reduce((a, b) => a + b, 0) / returns.length * 100,
       winRate: (winCount / results.length) * 100,
-      bestReturn: Math.max(...returns),
-      worstReturn: Math.min(...returns),
+      bestReturn: Math.max(...returns) * 100,
+      worstReturn: Math.min(...returns) * 100,
       avgSharpe:
         results.reduce((a, [, r]) => a + r.sharpe_ratio, 0) / results.length,
       avgDrawdown:
-        results.reduce((a, [, r]) => a + r.max_drawdown, 0) / results.length,
+        results.reduce((a, [, r]) => a + r.max_drawdown, 0) / results.length * 100,
       totalTrades: results.reduce((a, [, r]) => a + r.total_trades, 0),
     }
   }, [results, workflows])
@@ -319,7 +319,7 @@ export default function BatchDetailPage() {
                       )}
                     >
                       {result.total_return_pct >= 0 ? "+" : ""}
-                      {result.total_return_pct.toFixed(2)}%
+                      {(result.total_return_pct * 100).toFixed(2)}%
                     </span>
                   )}
                   {result && (
@@ -476,16 +476,16 @@ export default function BatchDetailPage() {
                       )}
                     >
                       {r.total_return_pct >= 0 ? "+" : ""}
-                      {r.total_return_pct.toFixed(2)}%
+                      {(r.total_return_pct * 100).toFixed(2)}%
                     </td>
                     <td className="px-3 py-2 text-right font-mono">
                       {r.sharpe_ratio.toFixed(4)}
                     </td>
                     <td className="px-3 py-2 text-right font-mono">
-                      {r.win_rate.toFixed(1)}%
+                      {(r.win_rate * 100).toFixed(1)}%
                     </td>
                     <td className="px-3 py-2 text-right font-mono text-red-500">
-                      {r.max_drawdown.toFixed(2)}%
+                      {(r.max_drawdown * 100).toFixed(2)}%
                     </td>
                     <td className="px-3 py-2 text-right font-mono">
                       {r.profit_factor === Infinity
@@ -496,7 +496,7 @@ export default function BatchDetailPage() {
                       {r.total_trades}
                     </td>
                     <td className="px-3 py-2 text-right font-mono">
-                      {r.avg_slippage.toFixed(4)}%
+                      {(r.avg_slippage * 100).toFixed(4)}%
                     </td>
                     <td className="px-3 py-2 text-right">
                       <Link

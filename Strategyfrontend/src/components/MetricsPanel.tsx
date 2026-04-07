@@ -94,15 +94,15 @@ export default function MetricsPanel({ metrics }: MetricsPanelProps) {
     },
     {
       label: "收益率",
-      value: `${metrics.total_return_pct >= 0 ? "+" : ""}${metrics.total_return_pct.toFixed(2)}%`,
+      value: `${metrics.total_return_pct >= 0 ? "+" : ""}${(metrics.total_return_pct * 100).toFixed(2)}%`,
       color: metrics.total_return_pct >= 0 ? "green" : "red",
     },
     {
       label: "胜率",
-      value: `${metrics.win_rate.toFixed(1)}%`,
-      color: metrics.win_rate >= 50 ? "green" : "red",
+      value: `${(metrics.win_rate * 100).toFixed(1)}%`,
+      color: metrics.win_rate >= 0.5 ? "green" : "red",
     },
-    { label: "最大回撤", value: `${metrics.max_drawdown.toFixed(2)}%`, color: "red" },
+    { label: "最大回撤", value: `${(metrics.max_drawdown * 100).toFixed(2)}%`, color: "red" },
     {
       label: "Sharpe",
       value: metrics.sharpe_ratio.toFixed(4),
@@ -116,7 +116,7 @@ export default function MetricsPanel({ metrics }: MetricsPanelProps) {
     { label: "总交易数", value: `${metrics.total_trades}` },
     {
       label: "平均滑点",
-      value: `${metrics.avg_slippage.toFixed(4)}%`,
+      value: `${(metrics.avg_slippage * 100).toFixed(4)}%`,
     },
   ]
 
@@ -134,7 +134,7 @@ export default function MetricsPanel({ metrics }: MetricsPanelProps) {
     },
     {
       label: "持有到期比例",
-      value: `${metrics.hold_to_settlement_ratio.toFixed(1)}%`,
+      value: `${(metrics.hold_to_settlement_ratio * 100).toFixed(1)}%`,
     },
     {
       label: "平均入场价",
@@ -160,7 +160,7 @@ export default function MetricsPanel({ metrics }: MetricsPanelProps) {
     },
     {
       label: "年化收益",
-      value: `${metrics.annualized_return.toFixed(2)}%`,
+      value: `${(metrics.annualized_return * 100).toFixed(2)}%`,
       color: metrics.annualized_return >= 0 ? "green" : "red",
     },
     {

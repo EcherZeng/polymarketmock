@@ -369,7 +369,7 @@ export default function AddItemsToPortfolioDialog({
                           )}
                         >
                           {item.total_return_pct >= 0 ? "+" : ""}
-                          {item.total_return_pct.toFixed(2)}%
+                          {(item.total_return_pct * 100).toFixed(2)}%
                         </span>
                       </label>
                     )

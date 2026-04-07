@@ -30,12 +30,12 @@ export default function DashboardPage() {
     const winCount = returns.filter((r) => r > 0).length
     return {
       count: filtered.length,
-      avgReturn: returns.reduce((a, b) => a + b, 0) / returns.length,
+      avgReturn: returns.reduce((a, b) => a + b, 0) / returns.length * 100,
       winRate: (winCount / returns.length) * 100,
-      bestReturn: Math.max(...returns),
-      worstReturn: Math.min(...returns),
+      bestReturn: Math.max(...returns) * 100,
+      worstReturn: Math.min(...returns) * 100,
       avgSharpe: filtered.reduce((a, b) => a + b.metrics.sharpe_ratio, 0) / filtered.length,
-      avgDrawdown: filtered.reduce((a, b) => a + b.metrics.max_drawdown, 0) / filtered.length,
+      avgDrawdown: filtered.reduce((a, b) => a + b.metrics.max_drawdown, 0) / filtered.length * 100,
       totalTrades: filtered.reduce((a, b) => a + b.metrics.total_trades, 0),
     }
   }, [filtered])
@@ -135,16 +135,16 @@ export default function DashboardPage() {
                         "px-3 py-2 text-right font-mono",
                         r.metrics.total_return_pct >= 0 ? "text-emerald-600" : "text-red-500",
                       )}>
-                        {r.metrics.total_return_pct >= 0 ? "+" : ""}{r.metrics.total_return_pct.toFixed(2)}%
+                        {r.metrics.total_return_pct >= 0 ? "+" : ""}{(r.metrics.total_return_pct * 100).toFixed(2)}%
                       </td>
                       <td className="px-3 py-2 text-right font-mono">{r.metrics.sharpe_ratio.toFixed(4)}</td>
-                      <td className="px-3 py-2 text-right font-mono">{r.metrics.win_rate.toFixed(1)}%</td>
-                      <td className="px-3 py-2 text-right font-mono text-red-500">{r.metrics.max_drawdown.toFixed(2)}%</td>
+                      <td className="px-3 py-2 text-right font-mono">{(r.metrics.win_rate * 100).toFixed(1)}%</td>
+                      <td className="px-3 py-2 text-right font-mono text-red-500">{(r.metrics.max_drawdown * 100).toFixed(2)}%</td>
                       <td className="px-3 py-2 text-right font-mono">
                         {r.metrics.profit_factor === Infinity ? "∞" : r.metrics.profit_factor.toFixed(2)}
                       </td>
                       <td className="px-3 py-2 text-right font-mono">{r.metrics.total_trades}</td>
-                      <td className="px-3 py-2 text-right font-mono">{r.metrics.avg_slippage.toFixed(4)}%</td>
+                      <td className="px-3 py-2 text-right font-mono">{(r.metrics.avg_slippage * 100).toFixed(4)}%</td>
                       <td className="px-3 py-2 text-right">
                         <Link
                           to={`/results/${r.session_id}`}

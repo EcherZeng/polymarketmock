@@ -52,6 +52,13 @@ const statusColor: Record<string, string> = {
   failed: "bg-red-100 text-red-700",
 }
 
+const PCT_METRICS = new Set(["total_return_pct", "win_rate", "max_drawdown", "hold_to_settlement_ratio", "annualized_return"])
+
+function fmtMetric(target: string, value: number): string {
+  if (PCT_METRICS.has(target)) return `${(value * 100).toFixed(2)}%`
+  return value.toFixed(4)
+}
+
 const optimizeTargets = [
   { value: "sharpe_ratio", label: "Sharpe Ratio", desc: "风险调整后收益指标。每承担 1 单位波动率获得的超额回报，值越高说明收益/风险比越优。通常 >1 为可接受，>2 为优秀。" },
   { value: "total_return_pct", label: "总收益率 %", desc: "回测期间总盈亏占初始本金的百分比。" },
@@ -255,7 +262,7 @@ export default function AiOptimizePage() {
 
                 {t.best_metric !== null && (
                   <div className="mt-1 text-sm">
-                    最优 {t.optimize_target}: <span className="font-medium text-emerald-600">{t.best_metric.toFixed(4)}</span>
+                    最优 {t.optimize_target}: <span className="font-medium text-emerald-600">{fmtMetric(t.optimize_target, t.best_metric)}</span>
                   </div>
                 )}
 

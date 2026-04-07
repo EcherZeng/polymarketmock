@@ -20,7 +20,7 @@ def evaluate(session: BacktestSession) -> EvaluationMetrics:
     # ── Returns ──────────────────────────────────────────────────────────────
 
     m.total_pnl = round(final - initial, 6)
-    m.total_return_pct = round((final - initial) / initial * 100, 4) if initial else 0.0
+    m.total_return_pct = round((final - initial) / initial, 6) if initial else 0.0
 
     # Duration for annualization
     duration_secs = _duration_seconds(equity_curve)
@@ -72,7 +72,7 @@ def evaluate(session: BacktestSession) -> EvaluationMetrics:
     losers = [p for p in all_pnls if p < 0]
 
     if all_pnls:
-        m.win_rate = round(len(winners) / len(all_pnls) * 100, 2)
+        m.win_rate = round(len(winners) / len(all_pnls), 4)
         m.best_trade = round(max(all_pnls), 6)
         m.worst_trade = round(min(all_pnls), 6)
     if winners:
@@ -168,7 +168,7 @@ def evaluate(session: BacktestSession) -> EvaluationMetrics:
 
         # Hold-to-settlement ratio
         if total_bought > 0:
-            m.hold_to_settlement_ratio = round(total_held_at_end / total_bought * 100, 2)
+            m.hold_to_settlement_ratio = round(total_held_at_end / total_bought, 4)
         else:
             m.hold_to_settlement_ratio = 0.0
 
@@ -204,7 +204,7 @@ def compute_drawdown_curve(equity_curve: list[dict]) -> list[dict]:
         eq = pt["equity"]
         if eq > peak:
             peak = eq
-        dd_pct = round((peak - eq) / peak * 100, 4) if peak > 0 else 0.0
+        dd_pct = round((peak - eq) / peak, 6) if peak > 0 else 0.0
         result.append({"timestamp": pt["timestamp"], "drawdown_pct": dd_pct})
     return result
 
@@ -290,12 +290,12 @@ def _max_drawdown(equities: list[float]) -> tuple[float, float]:
         if eq > peak:
             peak = eq
             dd_start = i
-        dd = (peak - eq) / peak * 100 if peak > 0 else 0.0
+        dd = (peak - eq) / peak if peak > 0 else 0.0
         if dd > max_dd:
             max_dd = dd
             max_dd_dur = float(i - dd_start)
 
-    return round(max_dd, 4), max_dd_dur
+    return round(max_dd, 6), max_dd_dur
 
 
 def _compute_returns(equities: list[float]) -> list[float]:
@@ -343,7 +343,7 @@ def compute_drawdown_events(equity_curve: list[dict]) -> list[dict]:
         if eq >= peak:
             # Recovery or new high
             if in_drawdown and trough < peak:
-                dd_pct = round((peak - trough) / peak * 100, 4) if peak > 0 else 0.0
+                dd_pct = round((peak - trough) / peak, 6) if peak > 0 else 0.0
                 start_dt = datetime.fromisoformat(peak_ts)
                 trough_dt = datetime.fromisoformat(trough_ts)
                 recovery_dt = datetime.fromisoformat(ts)
@@ -370,7 +370,7 @@ def compute_drawdown_events(equity_curve: list[dict]) -> list[dict]:
 
     # Handle unrecovered drawdown at end
     if in_drawdown and trough < peak:
-        dd_pct = round((peak - trough) / peak * 100, 4) if peak > 0 else 0.0
+        dd_pct = round((peak - trough) / peak, 6) if peak > 0 else 0.0
         start_dt = datetime.fromisoformat(peak_ts)
         trough_dt = datetime.fromisoformat(trough_ts)
         end_dt = datetime.fromisoformat(equity_curve[-1]["timestamp"])
