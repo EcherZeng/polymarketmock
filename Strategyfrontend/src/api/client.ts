@@ -144,6 +144,79 @@ export async function clearResults(): Promise<void> {
   await api.delete("/results")
 }
 
+// ── Results Cleanup ─────────────────────────────────────────────────────────
+
+export interface ResultStatItem {
+  session_id: string
+  strategy: string
+  slug: string
+  created_at: string
+  final_equity: number
+  total_return_pct: number
+  total_trades: number
+  size_kb: number
+}
+
+export interface BatchStatItem {
+  batch_id: string
+  strategy: string
+  status: string
+  total: number
+  completed: number
+  created_at: string
+  slugs_count: number
+  results_count: number
+  size_kb: number
+}
+
+export interface ResultsStatsResponse {
+  results_count: number
+  results_total_size_mb: number
+  results: ResultStatItem[]
+  batches_count: number
+  batches_total_size_mb: number
+  batches: BatchStatItem[]
+  runner_tasks_in_memory: number
+  runner_tasks_running: number
+}
+
+export async function fetchResultsStats(): Promise<ResultsStatsResponse> {
+  const { data } = await api.get<ResultsStatsResponse>("/results-stats")
+  return data
+}
+
+export async function cleanupResultsBulk(
+  sessionIds: string[],
+): Promise<CleanupResponse> {
+  const { data } = await api.post<CleanupResponse>("/results-cleanup", {
+    session_ids: sessionIds,
+  })
+  return data
+}
+
+export async function cleanupByBatch(
+  batchId: string,
+): Promise<{ batch_id: string; results_deleted_count: number }> {
+  const { data } = await api.post(`/results-cleanup/by-batch/${batchId}`)
+  return data
+}
+
+export async function cleanupBatchesBulk(
+  batchIds: string[],
+): Promise<{ deleted_batches_count: number; deleted_results_count: number }> {
+  const { data } = await api.post("/results-cleanup/batches", {
+    batch_ids: batchIds,
+  })
+  return data
+}
+
+export async function purgeRunnerMemory(): Promise<{ purged: number }> {
+  const { data } = await api.post<{ purged: number }>(
+    "/results-cleanup/purge-memory",
+  )
+  return data
+}
+
 // ── Data Cleanup ────────────────────────────────────────────────────────────
 
 export interface IncompleteItem {

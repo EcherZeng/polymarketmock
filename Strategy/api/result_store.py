@@ -144,8 +144,26 @@ class BatchStore:
     def values(self) -> list[dict]:
         return list(self._data.values())
 
+    def delete(self, batch_id: str) -> bool:
+        if batch_id not in self._data:
+            return False
+        del self._data[batch_id]
+        path = self._dir / f"{batch_id}.json"
+        path.unlink(missing_ok=True)
+        return True
+
+    def clear(self) -> int:
+        count = len(self._data)
+        self._data.clear()
+        for f in self._dir.glob("*.json"):
+            f.unlink(missing_ok=True)
+        return count
+
     def __contains__(self, batch_id: str) -> bool:
         return batch_id in self._data
+
+    def __len__(self) -> int:
+        return len(self._data)
 
 
 class PortfolioStore:

@@ -424,3 +424,25 @@ class BatchRunner:
 
     def list_tasks(self) -> list[BatchTask]:
         return list(self._tasks.values())
+
+    def purge_task(self, batch_id: str) -> bool:
+        """Remove a completed/cancelled task from in-memory registry."""
+        task = self._tasks.get(batch_id)
+        if task is None:
+            return False
+        if task.status == "running":
+            return False  # do not purge running tasks
+        del self._tasks[batch_id]
+        self._running.pop(batch_id, None)
+        return True
+
+    def purge_completed(self) -> int:
+        """Remove all completed/cancelled/failed tasks from memory."""
+        to_remove = [
+            bid for bid, t in self._tasks.items()
+            if t.status in ("completed", "cancelled")
+        ]
+        for bid in to_remove:
+            del self._tasks[bid]
+            self._running.pop(bid, None)
+        return len(to_remove)

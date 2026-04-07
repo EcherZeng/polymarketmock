@@ -8,6 +8,7 @@ import DashboardPage from "@/pages/DashboardPage"
 import BatchDashboardPage from "@/pages/BatchDashboardPage"
 import BatchDetailPage from "@/pages/BatchDetailPage"
 import DataCleanupPage from "@/pages/DataCleanupPage"
+import ResultsCleanupPage from "@/pages/ResultsCleanupPage"
 import PortfoliosPage from "@/pages/PortfoliosPage"
 import PortfolioDetailPage from "@/pages/PortfolioDetailPage"
 
@@ -18,6 +19,7 @@ const navItems = [
   { to: "/portfolios", label: "数据组合" },
   { to: "/dashboard", label: "仪表盘" },
   { to: "/cleanup", label: "数据清理" },
+  { to: "/results-cleanup", label: "结果清理" },
 ]
 
 export default function App() {
@@ -62,6 +64,7 @@ export default function App() {
           <Route path="/portfolios/:portfolioId" element={<PortfolioDetailPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/cleanup" element={<DataCleanupPage />} />
+          <Route path="/results-cleanup" element={<ResultsCleanupPage />} />
         </Routes>
       </main>
     </div>

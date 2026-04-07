@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 import api.state as state
 from api.result_store import sanitize_floats
@@ -129,6 +131,182 @@ async def clear_results():
     store = _get_store()
     count = store.clear()
     return {"deleted": count}
+
+
+# ── Results Cleanup ──────────────────────────────────────────────────────────
+
+
+@router.get("/results-stats")
+async def results_stats():
+    """Get statistics about stored results and batch records for the cleanup page."""
+    store = _get_store()
+    from config import config
+
+    all_results = store.values()
+
+    # Per-result size on disk
+    results_dir = config.results_dir
+    result_items: list[dict] = []
+    total_size_bytes = 0
+    for r in all_results:
+        sid = r.get("session_id", "")
+        fpath = results_dir / f"{sid}.json"
+        size_bytes = 0
+        if fpath.exists():
+            size_bytes = fpath.stat().st_size
+        total_size_bytes += size_bytes
+        result_items.append({
+            "session_id": sid,
+            "strategy": r.get("strategy", ""),
+            "slug": r.get("slug", ""),
+            "created_at": r.get("created_at", ""),
+            "final_equity": r.get("final_equity", 0),
+            "total_return_pct": r.get("metrics", {}).get("total_return_pct", 0),
+            "total_trades": r.get("metrics", {}).get("total_trades", 0),
+            "size_kb": round(size_bytes / 1024, 1),
+        })
+
+    # Batch records
+    batch_items: list[dict] = []
+    batch_total_size = 0
+    if state.batch_store is not None:
+        batches_dir = config.results_dir / "batches"
+        for b in state.batch_store.values():
+            bid = b.get("batch_id", "")
+            fpath = batches_dir / f"{bid}.json"
+            size_bytes = 0
+            if fpath.exists():
+                size_bytes = fpath.stat().st_size
+            batch_total_size += size_bytes
+            batch_items.append({
+                "batch_id": bid,
+                "strategy": b.get("strategy", ""),
+                "status": b.get("status", ""),
+                "total": b.get("total", 0),
+                "completed": b.get("completed", 0),
+                "created_at": b.get("created_at", ""),
+                "slugs_count": len(b.get("slugs", [])),
+                "results_count": len(b.get("results", {})),
+                "size_kb": round(size_bytes / 1024, 1),
+            })
+
+    # In-memory batch runner tasks count
+    runner_tasks_count = 0
+    runner_running_count = 0
+    if state.batch_runner is not None:
+        for t in state.batch_runner.list_tasks():
+            runner_tasks_count += 1
+            if t.status == "running":
+                runner_running_count += 1
+
+    return {
+        "results_count": len(result_items),
+        "results_total_size_mb": round(total_size_bytes / (1024 * 1024), 2),
+        "results": result_items,
+        "batches_count": len(batch_items),
+        "batches_total_size_mb": round(batch_total_size / (1024 * 1024), 2),
+        "batches": batch_items,
+        "runner_tasks_in_memory": runner_tasks_count,
+        "runner_tasks_running": runner_running_count,
+    }
+
+
+class BulkDeleteRequest(BaseModel):
+    session_ids: list[str] = Field(default_factory=list)
+
+
+@router.post("/results-cleanup")
+async def cleanup_results(req: BulkDeleteRequest):
+    """Delete multiple results by session_ids."""
+    store = _get_store()
+    deleted: list[str] = []
+    not_found: list[str] = []
+    for sid in req.session_ids:
+        if store.delete(sid):
+            deleted.append(sid)
+        else:
+            not_found.append(sid)
+    return {
+        "deleted": deleted,
+        "not_found": not_found,
+        "deleted_count": len(deleted),
+    }
+
+
+@router.post("/results-cleanup/by-batch/{batch_id}")
+async def cleanup_by_batch(batch_id: str):
+    """Delete all results associated with a batch, plus the batch record itself."""
+    store = _get_store()
+
+    # Find session_ids from batch record
+    batch_data = state.batch_store.get(batch_id) if state.batch_store else None
+    if batch_data is None:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    results_map: dict = batch_data.get("results", {})
+    deleted: list[str] = []
+    for slug, summary in results_map.items():
+        sid = summary.get("session_id", "")
+        if sid and store.delete(sid):
+            deleted.append(sid)
+
+    # Delete batch record
+    batch_deleted = False
+    if state.batch_store is not None:
+        batch_deleted = state.batch_store.delete(batch_id)
+
+    # Purge from batch runner memory
+    if state.batch_runner is not None:
+        state.batch_runner.purge_task(batch_id)
+
+    return {
+        "batch_id": batch_id,
+        "batch_deleted": batch_deleted,
+        "results_deleted": deleted,
+        "results_deleted_count": len(deleted),
+    }
+
+
+class BatchBulkDeleteRequest(BaseModel):
+    batch_ids: list[str] = Field(default_factory=list)
+
+
+@router.post("/results-cleanup/batches")
+async def cleanup_batches(req: BatchBulkDeleteRequest):
+    """Delete multiple batch records and their associated results."""
+    store = _get_store()
+    deleted_batches: list[str] = []
+    deleted_results: list[str] = []
+
+    for batch_id in req.batch_ids:
+        batch_data = state.batch_store.get(batch_id) if state.batch_store else None
+        if batch_data is None:
+            continue
+        results_map: dict = batch_data.get("results", {})
+        for slug, summary in results_map.items():
+            sid = summary.get("session_id", "")
+            if sid and store.delete(sid):
+                deleted_results.append(sid)
+        if state.batch_store is not None and state.batch_store.delete(batch_id):
+            deleted_batches.append(batch_id)
+        if state.batch_runner is not None:
+            state.batch_runner.purge_task(batch_id)
+
+    return {
+        "deleted_batches": deleted_batches,
+        "deleted_batches_count": len(deleted_batches),
+        "deleted_results": deleted_results,
+        "deleted_results_count": len(deleted_results),
+    }
+
+
+@router.post("/results-cleanup/purge-memory")
+async def purge_runner_memory():
+    """Purge completed/cancelled batch tasks from the in-memory runner registry."""
+    if state.batch_runner is None:
+        return {"purged": 0}
+    count = state.batch_runner.purge_completed()
+    return {"purged": count}
 
 
 # ── BTC Kline (Binance) ─────────────────────────────────────────────────────
