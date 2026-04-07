@@ -19,21 +19,6 @@ const statusColor: Record<string, string> = {
   failed: "bg-red-100 text-red-700",
 }
 
-const metricLabels: Record<string, string> = {
-  total_return_pct: "收益率 %",
-  sharpe_ratio: "Sharpe",
-  win_rate: "胜率",
-  max_drawdown: "最大回撤 %",
-  profit_factor: "盈亏比",
-  total_trades: "交易次数",
-  avg_slippage: "平均滑点 %",
-}
-
-function formatMetric(key: string, val: number): string {
-  if (key === "total_trades") return String(val)
-  return val.toFixed(4)
-}
-
 export default function AiOptimizeDetailPage() {
   const { taskId } = useParams<{ taskId: string }>()
   const queryClient = useQueryClient()
