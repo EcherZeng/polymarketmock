@@ -1,8 +1,8 @@
 # 单独构建/更新 strategy 服务
 # 用法: cd Strategy && docker compose up -d --build
-#
-# 注意: 依赖 backend 服务提供的数据卷 (backend_data)
-# 需确保 backend 已运行并创建了数据卷
+# 与根目录 docker-compose.yml 共享项目名，可直接替换容器
+
+name: polymarketmock
 
 services:
   strategy:
@@ -32,5 +32,5 @@ networks:
 volumes:
   backend_data:
     external: true
-    name: polymarketmock_backend_data
   strategy_results:
+    external: true

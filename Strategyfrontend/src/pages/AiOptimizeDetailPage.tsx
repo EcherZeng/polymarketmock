@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { useParams, Link } from "react-router-dom"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
@@ -121,6 +121,9 @@ export default function AiOptimizeDetailPage() {
           <p className="mt-2 text-sm text-red-500">错误: {task.error}</p>
         )}
       </div>
+
+      {/* ── Errors ───────────────────────────────────────────────────── */}
+      <ErrorsSection errors={task.errors} persistErrors={task.persist_errors} />
 
       {/* ── Best result ──────────────────────────────────────────────── */}
       {task.best_config && Object.keys(task.best_config).length > 0 && (
@@ -273,6 +276,85 @@ export default function AiOptimizeDetailPage() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+
+// ── Errors section (collapsible) ────────────────────────────────────────────
+
+const phaseLabel: Record<string, string> = {
+  llm_call: "LLM 调用",
+  parse: "响应解析",
+  backtest: "回测执行",
+  unknown: "未知",
+}
+
+function ErrorsSection({
+  errors,
+  persistErrors,
+}: {
+  errors?: Array<{
+    round: number
+    phase: string
+    message: string
+    detail: string
+    timestamp: string
+    config_index?: number
+    slug?: string
+  }>
+  persistErrors?: string[]
+}) {
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
+  const hasErrors = (errors && errors.length > 0) || (persistErrors && persistErrors.length > 0)
+  if (!hasErrors) return null
+
+  return (
+    <div className="rounded-lg border border-red-200">
+      <div className="flex items-center gap-2 border-b border-red-100 bg-red-50/50 px-4 py-2.5">
+        <span className="text-sm font-semibold text-red-700">
+          错误日志 ({(errors?.length ?? 0) + (persistErrors?.length ?? 0)})
+        </span>
+      </div>
+      <div className="max-h-80 divide-y overflow-y-auto">
+        {errors?.map((err, i) => (
+          <div key={i} className="px-4 py-2">
+            <button
+              className="flex w-full items-center gap-2 text-left text-xs"
+              onClick={() => setExpandedIdx(expandedIdx === i ? null : i)}
+            >
+              <span className="font-mono text-red-400">✗</span>
+              <span className="rounded bg-red-100 px-1.5 py-0.5 text-red-700">
+                R{err.round} · {phaseLabel[err.phase] ?? err.phase}
+              </span>
+              {err.slug && (
+                <span className="font-mono text-muted-foreground">{err.slug}</span>
+              )}
+              {err.config_index != null && (
+                <span className="text-muted-foreground">config#{err.config_index + 1}</span>
+              )}
+              <span className="ml-auto text-muted-foreground">
+                {err.timestamp.replace("T", " ").slice(11, 19)}
+              </span>
+            </button>
+            <p className="mt-1 text-xs text-red-600">{err.message}</p>
+            {expandedIdx === i && err.detail && (
+              <pre className="mt-2 max-h-48 overflow-auto rounded bg-muted p-2 text-xs text-muted-foreground">
+                {err.detail}
+              </pre>
+            )}
+          </div>
+        ))}
+        {persistErrors?.map((msg, i) => (
+          <div key={`p-${i}`} className="px-4 py-2">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="font-mono text-amber-500">⚠</span>
+              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-700">持久化失败</span>
+            </div>
+            <p className="mt-1 text-xs text-amber-600">{msg}</p>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

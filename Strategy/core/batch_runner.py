@@ -106,6 +106,7 @@ class BatchTask:
     results: dict[str, BacktestSession] = field(default_factory=dict)
     results_summary: dict[str, ResultSummary] = field(default_factory=dict)
     errors: dict[str, str] = field(default_factory=dict)
+    persist_errors: list[str] = field(default_factory=list)  # callback persistence failures
     workflows: dict[str, SlugWorkflow] = field(default_factory=dict)
 
 
@@ -340,7 +341,10 @@ class BatchRunner:
                     try:
                         self._on_result(session)
                     except Exception as e:
+                        err_msg = f"[{slug}] persist failed: {e}"
                         logger.error("on_result callback failed for %s: %s", slug, e)
+                        task.persist_errors.append(err_msg)
+                        wf.log("persist", "fail", err_msg)
 
                 # ── Keep only lightweight summary, release full session ──
                 summary = _extract_summary(session)
@@ -398,7 +402,9 @@ class BatchRunner:
             try:
                 self._on_batch_complete(task)
             except Exception as e:
+                err_msg = f"batch_complete persist failed: {e}"
                 logger.error("on_batch_complete callback failed for %s: %s", batch_id, e)
+                task.persist_errors.append(err_msg)
 
         # Summary log
         ok_count = sum(1 for w in task.workflows.values() if w.status == "completed")

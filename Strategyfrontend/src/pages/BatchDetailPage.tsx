@@ -249,6 +249,21 @@ export default function BatchDetailPage() {
         </div>
       )}
 
+      {/* Persist errors */}
+      {task.persist_errors && task.persist_errors.length > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4">
+          <h3 className="text-sm font-semibold text-amber-800">
+            持久化警告 ({task.persist_errors.length})
+          </h3>
+          <p className="mt-1 text-xs text-amber-600">以下结果可能未成功保存到磁盘</p>
+          <div className="mt-2 max-h-32 divide-y divide-amber-100 overflow-y-auto">
+            {task.persist_errors.map((msg, i) => (
+              <p key={i} className="py-1 text-xs text-amber-700">{msg}</p>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Workflow overview — all slugs with step progress */}
       <div className="rounded-lg border">
         <div className="border-b bg-muted/50 px-4 py-2">

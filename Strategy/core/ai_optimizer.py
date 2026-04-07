@@ -73,7 +73,9 @@ class OptimizeTask:
     best_config: dict = field(default_factory=dict)
     best_metric: float = float("-inf")
     best_session_id: str = ""
-    error: str = ""
+    error: str = ""  # kept for backward compat (last fatal error)
+    errors: list[dict] = field(default_factory=list)  # accumulated structured errors
+    persist_errors: list[str] = field(default_factory=list)  # callback persistence failures
 
     # AI interaction log
     ai_messages: list[dict] = field(default_factory=list)
@@ -404,8 +406,17 @@ class AIOptimizer:
                         system_prompt, user_prompt,
                     )
                 except Exception as e:
+                    tb = traceback.format_exc()
+                    err_msg = f"[round_{round_num}] LLM error: {e}"
                     logger.error("AI optimizer %s round %d LLM call failed: %s", task_id, round_num, e)
-                    task.error = f"[round_{round_num}] LLM error: {e}"
+                    task.errors.append({
+                        "round": round_num,
+                        "phase": "llm_call",
+                        "message": err_msg,
+                        "detail": tb,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
+                    task.error = err_msg
                     task.status = "failed"
                     break
 
@@ -420,14 +431,31 @@ class AIOptimizer:
                 try:
                     configs, reason = _parse_ai_configs(raw_response, param_schema, task.runs_per_round)
                 except Exception as e:
+                    tb = traceback.format_exc()
+                    err_msg = f"[round_{round_num}] Parse error: {e}"
                     logger.error("AI optimizer %s round %d parse failed: %s", task_id, round_num, e)
-                    task.error = f"[round_{round_num}] Parse error: {e}"
+                    task.errors.append({
+                        "round": round_num,
+                        "phase": "parse",
+                        "message": err_msg,
+                        "detail": tb,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
+                    task.error = err_msg
                     task.status = "failed"
                     break
 
                 if not configs:
+                    err_msg = f"[round_{round_num}] AI produced no valid configs"
                     logger.warning("AI optimizer %s round %d produced no configs", task_id, round_num)
-                    task.error = f"[round_{round_num}] AI produced no valid configs"
+                    task.errors.append({
+                        "round": round_num,
+                        "phase": "parse",
+                        "message": err_msg,
+                        "detail": "",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
+                    task.error = err_msg
                     task.status = "failed"
                     break
 
@@ -476,7 +504,9 @@ class AIOptimizer:
                                     try:
                                         self._on_result(session)
                                     except Exception as e:
+                                        err_msg = f"[round_{round_num}] persist failed for config {cfg_idx} slug {slug}: {e}"
                                         logger.error("on_result callback failed: %s", e)
+                                        task.persist_errors.append(err_msg)
 
                                 # Extract digest (compact)
                                 digest = digest_session(session)
@@ -493,15 +523,36 @@ class AIOptimizer:
                                     task.best_session_id = session.session_id
 
                             except asyncio.TimeoutError:
+                                err_msg = f"[round_{round_num}] config {cfg_idx} slug {slug} timed out after {config.slug_timeout}s"
                                 logger.warning(
                                     "AI optimizer %s round %d config %d slug %s timed out",
                                     task_id, round_num, cfg_idx, slug,
                                 )
+                                task.errors.append({
+                                    "round": round_num,
+                                    "phase": "backtest",
+                                    "config_index": cfg_idx,
+                                    "slug": slug,
+                                    "message": err_msg,
+                                    "detail": "",
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                })
                             except Exception as e:
+                                tb = traceback.format_exc()
+                                err_msg = f"[round_{round_num}] config {cfg_idx} slug {slug} error: {e}"
                                 logger.error(
                                     "AI optimizer %s round %d config %d slug %s error: %s",
                                     task_id, round_num, cfg_idx, slug, e,
                                 )
+                                task.errors.append({
+                                    "round": round_num,
+                                    "phase": "backtest",
+                                    "config_index": cfg_idx,
+                                    "slug": slug,
+                                    "message": err_msg,
+                                    "detail": tb,
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                })
 
                         task.completed_runs += 1
 
@@ -531,6 +582,13 @@ class AIOptimizer:
             logger.error("AI optimizer %s failed: %s\n%s", task_id, e, tb)
             task.status = "failed"
             task.error = str(e)
+            task.errors.append({
+                "round": task.current_round,
+                "phase": "unknown",
+                "message": str(e),
+                "detail": tb,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
 
         self._running.pop(task_id, None)
 

@@ -176,6 +176,8 @@ async def get_optimization_task(task_id: str):
         "total_runs": task.total_runs,
         "created_at": task.created_at,
         "error": task.error,
+        "errors": task.errors,
+        "persist_errors": task.persist_errors,
         "best_config": task.best_config,
         "best_metric": task.best_metric if task.best_metric != float("-inf") else None,
         "best_session_id": task.best_session_id,

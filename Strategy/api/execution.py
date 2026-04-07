@@ -193,6 +193,7 @@ async def get_task(batch_id: str):
             "created_at": task.created_at,
             "results": results_summary,
             "errors": task.errors,
+            "persist_errors": task.persist_errors,
             "workflows": workflows,
         }
 

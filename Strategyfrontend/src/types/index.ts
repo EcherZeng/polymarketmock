@@ -263,6 +263,7 @@ export interface SlugWorkflow {
 export interface BatchTaskDetail extends BatchTask {
   results: Record<string, BatchResultSummary>
   errors: Record<string, string>
+  persist_errors: string[]
   workflows: Record<string, SlugWorkflow>
 }
 
@@ -343,8 +344,20 @@ export interface AiOptimizeRound {
   configs_results: AiOptimizeConfigResult[]
 }
 
+export interface AiOptimizeError {
+  round: number
+  phase: string
+  message: string
+  detail: string
+  timestamp: string
+  config_index?: number
+  slug?: string
+}
+
 export interface AiOptimizeTaskDetail extends AiOptimizeTask {
   error: string
+  errors: AiOptimizeError[]
+  persist_errors: string[]
   best_config: Record<string, unknown>
   best_session_id: string
   market_profiles: Record<string, unknown>

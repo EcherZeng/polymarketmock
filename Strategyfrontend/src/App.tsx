@@ -1,6 +1,8 @@
 import { Routes, Route, Link, useLocation } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { Toaster } from "@/components/ui/sonner"
+import { useConnectionStatus } from "@/hooks/useConnectionStatus"
 import StrategyPage from "@/pages/StrategyPage"
 import ResultsListPage from "@/pages/ResultsListPage"
 import ResultDetailPage from "@/pages/ResultDetailPage"
@@ -27,6 +29,7 @@ const navItems = [
 
 export default function App() {
   const location = useLocation()
+  useConnectionStatus()
 
   return (
     <TooltipProvider>
@@ -74,6 +77,7 @@ export default function App() {
         </Routes>
       </main>
     </div>
+    <Toaster richColors position="top-right" />
     </TooltipProvider>
   )
 }

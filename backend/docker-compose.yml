@@ -1,8 +1,8 @@
-# 单独构建/更新 backend 服务
-# 用法: cd backend && docker compose up -d --build
-#
-# 注意: 依赖主项目的 redis 服务，需确保 redis 已在运行
-# 或使用根目录: docker compose up -d --build backend
+# 单独构建/更新 backend 服务 (含 redis)
+# 用法: cd backend && docker compose up -d --build backend
+# 与根目录 docker-compose.yml 共享项目名，可直接替换容器
+
+name: polymarketmock
 
 services:
   redis:
@@ -12,9 +12,9 @@ services:
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
-    restart: unless-stopped
     networks:
       - polymarket
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -57,4 +57,6 @@ networks:
 
 volumes:
   redis_data:
+    external: true
   backend_data:
+    external: true
