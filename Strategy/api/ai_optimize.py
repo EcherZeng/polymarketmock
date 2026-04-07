@@ -133,6 +133,7 @@ async def get_optimization_task(task_id: str):
                 if d.get("config_index") == i
             ]
             avg_metrics: dict = {}
+            slug_metrics: list[dict] = []
             if cfg_digests:
                 # Average metrics across slugs for this config
                 metric_keys = [
@@ -147,11 +148,25 @@ async def get_optimization_task(task_id: str):
                     ]
                     avg_metrics[mk] = round(sum(vals) / len(vals), 4) if vals else 0
 
+                # Per-slug breakdown
+                for d in cfg_digests:
+                    m = d.get("metrics", {})
+                    slug_metrics.append({
+                        "slug": d.get("slug", ""),
+                        "session_id": d.get("session_id", ""),
+                        "total_return_pct": round(m.get("total_return_pct", 0), 4),
+                        "sharpe_ratio": round(m.get("sharpe_ratio", 0), 4),
+                        "win_rate": round(m.get("win_rate", 0), 4),
+                        "max_drawdown": round(m.get("max_drawdown", 0), 4),
+                        "total_trades": m.get("total_trades", 0),
+                    })
+
             configs_results.append({
                 "config_index": i,
                 "config": cfg,
                 "slug_count": len(cfg_digests),
                 "avg_metrics": avg_metrics,
+                "slug_metrics": slug_metrics,
             })
 
         rounds_summary.append({

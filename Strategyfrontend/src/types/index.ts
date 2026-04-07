@@ -332,6 +332,17 @@ export interface AiOptimizeConfigResult {
   config: Record<string, unknown>
   slug_count: number
   avg_metrics: Record<string, number>
+  slug_metrics: AiOptimizeSlugMetric[]
+}
+
+export interface AiOptimizeSlugMetric {
+  slug: string
+  session_id: string
+  total_return_pct: number
+  sharpe_ratio: number
+  win_rate: number
+  max_drawdown: number
+  total_trades: number
 }
 
 export interface AiOptimizeRound {
@@ -366,6 +377,7 @@ export interface AiOptimizeTaskDetail extends AiOptimizeTask {
     round: number
     role: string
     content_length: number
+    content?: string
     timestamp: string
   }>
 }

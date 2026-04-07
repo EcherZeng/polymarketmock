@@ -2,8 +2,16 @@ import { useMemo, useState } from "react"
 import { useParams, Link } from "react-router-dom"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
-import { fetchAiOptimizeTask, stopAiOptimize } from "@/api/client"
-import type { AiOptimizeTaskDetail } from "@/types"
+import { fetchAiOptimizeTask, stopAiOptimize, fetchPresets, savePreset } from "@/api/client"
+import type { AiOptimizeTaskDetail, PresetsResponse } from "@/types"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 
 const statusLabel: Record<string, string> = {
   running: "运行中",
@@ -23,6 +31,11 @@ export default function AiOptimizeDetailPage() {
   const { taskId } = useParams<{ taskId: string }>()
   const queryClient = useQueryClient()
 
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [presetName, setPresetName] = useState("")
+  const [expandedRoundSlugs, setExpandedRoundSlugs] = useState<Record<string, boolean>>({})
+  const [expandedAiMsgIdx, setExpandedAiMsgIdx] = useState<number | null>(null)
+
   const { data: task, isLoading, isError } = useQuery<AiOptimizeTaskDetail>({
     queryKey: ["aiOptimizeTask", taskId],
     queryFn: () => fetchAiOptimizeTask(taskId!),
@@ -33,10 +46,34 @@ export default function AiOptimizeDetailPage() {
     },
   })
 
+  const { data: presets } = useQuery<PresetsResponse>({
+    queryKey: ["presets"],
+    queryFn: fetchPresets,
+  })
+
   const stopMutation = useMutation({
     mutationFn: () => stopAiOptimize(taskId!),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["aiOptimizeTask", taskId] }),
   })
+
+  const createPresetMutation = useMutation({
+    mutationFn: (name: string) =>
+      savePreset(name, { description: `AI 优化最优参数 (${task?.task_id})`, params: task?.best_config ?? {} }),
+    onSuccess: () => {
+      setCreateDialogOpen(false)
+      setPresetName("")
+      queryClient.invalidateQueries({ queryKey: ["presets"] })
+    },
+  })
+
+  // ── Param schema lookup ─────────────────────────────────────────────
+  const paramSchema = presets?.param_schema ?? {}
+
+  const getParamLabel = (key: string): string => {
+    const schema = paramSchema[key]
+    if (schema?.label?.zh) return schema.label.zh
+    return key
+  }
 
   // ── Best config display ───────────────────────────────────────────────
   const bestConfigEntries = useMemo(() => {
@@ -45,6 +82,20 @@ export default function AiOptimizeDetailPage() {
       ([, v]) => typeof v === "number" || typeof v === "boolean",
     )
   }, [task])
+
+  // ── Best config as JSON ───────────────────────────────────────────────
+  const bestConfigJson = useMemo(() => {
+    if (!task?.best_config) return ""
+    const filtered: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(task.best_config)) {
+      if (typeof v === "number" || typeof v === "boolean") {
+        filtered[k] = v
+      }
+    }
+    return JSON.stringify(filtered, null, 2)
+  }, [task])
+
+  const [showJson, setShowJson] = useState(false)
 
   if (isLoading) {
     return <div className="py-12 text-center text-muted-foreground">加载中...</div>
@@ -128,29 +179,91 @@ export default function AiOptimizeDetailPage() {
       {/* ── Best result ──────────────────────────────────────────────── */}
       {task.best_config && Object.keys(task.best_config).length > 0 && (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-4">
-          <h3 className="text-sm font-semibold text-emerald-800">
-            当前最优: {task.optimize_target} = {task.best_metric?.toFixed(4) ?? "N/A"}
-          </h3>
-          {task.best_session_id && (
-            <Link
-              to={`/results/${task.best_session_id}`}
-              className="text-xs text-emerald-700 underline"
-            >
-              查看详细结果 →
-            </Link>
-          )}
-          <div className="mt-3 grid grid-cols-4 gap-2">
-            {bestConfigEntries.map(([key, val]) => (
-              <div key={key} className="text-xs">
-                <span className="text-muted-foreground">{key}:</span>{" "}
-                <span className="font-mono font-medium">
-                  {typeof val === "boolean" ? (val ? "true" : "false") : Number(val).toFixed(4)}
-                </span>
-              </div>
-            ))}
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-emerald-800">
+              当前最优: {task.optimize_target} = {task.best_metric?.toFixed(4) ?? "N/A"}
+            </h3>
+            <div className="flex items-center gap-2">
+              {task.best_session_id && (
+                <Link
+                  to={`/results/${task.best_session_id}`}
+                  className="text-xs text-emerald-700 underline"
+                >
+                  查看详细结果 →
+                </Link>
+              )}
+              <button
+                onClick={() => setShowJson((v) => !v)}
+                className="rounded border border-emerald-300 px-2 py-0.5 text-xs text-emerald-700 hover:bg-emerald-100"
+              >
+                {showJson ? "参数视图" : "JSON 视图"}
+              </button>
+              <button
+                onClick={() => {
+                  setPresetName(`ai_opt_${task.task_id}`)
+                  setCreateDialogOpen(true)
+                }}
+                className="rounded bg-emerald-600 px-2.5 py-0.5 text-xs font-medium text-white hover:bg-emerald-700"
+              >
+                一键创建策略
+              </button>
+            </div>
           </div>
+
+          {showJson ? (
+            <pre className="mt-3 max-h-64 overflow-auto rounded bg-white/80 p-3 text-xs font-mono text-emerald-900 border border-emerald-100">
+              {bestConfigJson}
+            </pre>
+          ) : (
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {bestConfigEntries.map(([key, val]) => (
+                <div key={key} className="rounded bg-white/60 px-2 py-1.5 text-xs border border-emerald-100">
+                  <span className="text-emerald-700">{getParamLabel(key)}</span>
+                  <div className="font-mono font-medium mt-0.5">
+                    {typeof val === "boolean" ? (val ? "是" : "否") : Number(val).toFixed(4)}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground font-mono">{key}</div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
+
+      {/* ── Create preset dialog ─────────────────────────────────────── */}
+      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>创建策略预设</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 py-4">
+            <label className="text-sm text-muted-foreground">策略名称</label>
+            <Input
+              value={presetName}
+              onChange={(e) => setPresetName(e.target.value)}
+              placeholder="输入自定义名称"
+            />
+            <p className="text-xs text-muted-foreground">
+              将使用 AI 优化得到的最优参数创建新的策略预设
+            </p>
+          </div>
+          <DialogFooter>
+            <button
+              onClick={() => setCreateDialogOpen(false)}
+              className="rounded border px-3 py-1.5 text-sm hover:bg-muted"
+            >
+              取消
+            </button>
+            <button
+              disabled={!presetName.trim() || createPresetMutation.isPending}
+              onClick={() => createPresetMutation.mutate(presetName.trim())}
+              className="rounded bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {createPresetMutation.isPending ? "创建中..." : "创建"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Rounds ───────────────────────────────────────────────────── */}
       <div>
@@ -202,34 +315,79 @@ export default function AiOptimizeDetailPage() {
                     <tbody>
                       {round.configs_results.map((cr) => {
                         const m = cr.avg_metrics
+                        const slugKey = `${round.round}-${cr.config_index}`
+                        const isSlugExpanded = expandedRoundSlugs[slugKey] ?? false
+                        const slugMetrics = (cr as unknown as { slug_metrics?: Array<{ slug: string; session_id: string; total_return_pct: number; sharpe_ratio: number; win_rate: number; max_drawdown: number; total_trades: number }> }).slug_metrics ?? []
                         return (
-                          <tr key={cr.config_index} className="border-b last:border-0 hover:bg-muted/10">
-                            <td className="px-4 py-2 font-mono text-xs">{cr.config_index + 1}</td>
-                            <td className="px-4 py-2 max-w-xs">
-                              <div className="flex flex-wrap gap-1">
-                                {Object.entries(cr.config).slice(0, 6).map(([k, v]) => (
-                                  <span key={k} className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                                    {k}={typeof v === "number" ? v.toFixed(3) : String(v)}
-                                  </span>
-                                ))}
-                                {Object.keys(cr.config).length > 6 && (
-                                  <span className="text-xs text-muted-foreground">
-                                    +{Object.keys(cr.config).length - 6}
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-                            <td className={cn(
-                              "px-4 py-2 text-right font-mono",
-                              (m.total_return_pct ?? 0) >= 0 ? "text-emerald-600" : "text-red-500",
-                            )}>
-                              {(m.total_return_pct ?? 0).toFixed(2)}%
-                            </td>
-                            <td className="px-4 py-2 text-right font-mono">{(m.sharpe_ratio ?? 0).toFixed(3)}</td>
-                            <td className="px-4 py-2 text-right font-mono">{((m.win_rate ?? 0) * 100).toFixed(1)}%</td>
-                            <td className="px-4 py-2 text-right font-mono">{(m.max_drawdown ?? 0).toFixed(2)}%</td>
-                            <td className="px-4 py-2 text-right font-mono">{m.total_trades ?? 0}</td>
-                          </tr>
+                          <>
+                            <tr
+                              key={cr.config_index}
+                              className={cn(
+                                "border-b last:border-0 hover:bg-muted/10 cursor-pointer",
+                                isSlugExpanded && "bg-muted/5",
+                              )}
+                              onClick={() =>
+                                setExpandedRoundSlugs((prev) => ({
+                                  ...prev,
+                                  [slugKey]: !prev[slugKey],
+                                }))
+                              }
+                            >
+                              <td className="px-4 py-2 font-mono text-xs">
+                                <span className="mr-1 text-muted-foreground">{isSlugExpanded ? "▾" : "▸"}</span>
+                                {cr.config_index + 1}
+                              </td>
+                              <td className="px-4 py-2 max-w-xs">
+                                <div className="flex flex-wrap gap-1">
+                                  {Object.entries(cr.config).slice(0, 6).map(([k, v]) => (
+                                    <span key={k} className="rounded bg-muted px-1.5 py-0.5 text-xs" title={k}>
+                                      {getParamLabel(k)}={typeof v === "number" ? v.toFixed(3) : String(v)}
+                                    </span>
+                                  ))}
+                                  {Object.keys(cr.config).length > 6 && (
+                                    <span className="text-xs text-muted-foreground">
+                                      +{Object.keys(cr.config).length - 6}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className={cn(
+                                "px-4 py-2 text-right font-mono",
+                                (m.total_return_pct ?? 0) >= 0 ? "text-emerald-600" : "text-red-500",
+                              )}>
+                                {(m.total_return_pct ?? 0).toFixed(2)}%
+                              </td>
+                              <td className="px-4 py-2 text-right font-mono">{(m.sharpe_ratio ?? 0).toFixed(3)}</td>
+                              <td className="px-4 py-2 text-right font-mono">{((m.win_rate ?? 0) * 100).toFixed(1)}%</td>
+                              <td className="px-4 py-2 text-right font-mono">{(m.max_drawdown ?? 0).toFixed(2)}%</td>
+                              <td className="px-4 py-2 text-right font-mono">{m.total_trades ?? 0}</td>
+                            </tr>
+                            {isSlugExpanded && slugMetrics.length > 0 && slugMetrics.map((sm) => (
+                              <tr key={`${cr.config_index}-${sm.slug}`} className="border-b bg-muted/10 last:border-0">
+                                <td className="px-4 py-1.5" />
+                                <td className="px-4 py-1.5 text-xs">
+                                  <span className="font-mono text-muted-foreground">└</span>{" "}
+                                  {sm.session_id ? (
+                                    <Link to={`/results/${sm.session_id}`} className="text-primary underline">
+                                      {sm.slug}
+                                    </Link>
+                                  ) : (
+                                    <span className="font-mono">{sm.slug}</span>
+                                  )}
+                                </td>
+                                <td className={cn(
+                                  "px-4 py-1.5 text-right font-mono text-xs",
+                                  sm.total_return_pct >= 0 ? "text-emerald-600" : "text-red-500",
+                                )}>
+                                  {sm.total_return_pct.toFixed(2)}%
+                                </td>
+                                <td className="px-4 py-1.5 text-right font-mono text-xs">{sm.sharpe_ratio.toFixed(3)}</td>
+                                <td className="px-4 py-1.5 text-right font-mono text-xs">{(sm.win_rate * 100).toFixed(1)}%</td>
+                                <td className="px-4 py-1.5 text-right font-mono text-xs">{sm.max_drawdown.toFixed(2)}%</td>
+                                <td className="px-4 py-1.5 text-right font-mono text-xs">{sm.total_trades}</td>
+                              </tr>
+                            ))}
+                          </>
                         )
                       })}
                     </tbody>
@@ -257,20 +415,34 @@ export default function AiOptimizeDetailPage() {
       {task.ai_messages.length > 0 && (
         <div>
           <h2 className="mb-2 text-sm font-medium text-muted-foreground">AI 通信日志</h2>
-          <div className="rounded-lg border divide-y max-h-48 overflow-y-auto">
+          <div className="rounded-lg border divide-y max-h-[600px] overflow-y-auto">
             {task.ai_messages.map((msg, i) => (
-              <div key={i} className="flex items-center gap-3 px-4 py-2 text-xs">
-                <span className="font-mono text-muted-foreground">R{msg.round}</span>
-                <span className={cn(
-                  "rounded px-1.5 py-0.5 font-medium",
-                  msg.role === "user" ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700",
-                )}>
-                  {msg.role === "user" ? "→ LLM" : "← LLM"}
-                </span>
-                <span className="text-muted-foreground">{msg.content_length.toLocaleString()} chars</span>
-                <span className="ml-auto text-muted-foreground">
-                  {msg.timestamp.replace("T", " ").slice(11, 19)}
-                </span>
+              <div key={i} className="px-4 py-2">
+                <button
+                  className="flex w-full items-center gap-3 text-xs text-left"
+                  onClick={() => setExpandedAiMsgIdx(expandedAiMsgIdx === i ? null : i)}
+                >
+                  <span className="text-muted-foreground">{expandedAiMsgIdx === i ? "▾" : "▸"}</span>
+                  <span className="font-mono text-muted-foreground">R{msg.round}</span>
+                  <span className={cn(
+                    "rounded px-1.5 py-0.5 font-medium",
+                    msg.role === "user" ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700",
+                  )}>
+                    {msg.role === "user" ? "→ LLM (提问)" : "← LLM (回复)"}
+                  </span>
+                  <span className="text-muted-foreground">{msg.content_length.toLocaleString()} chars</span>
+                  <span className="ml-auto text-muted-foreground">
+                    {msg.timestamp.replace("T", " ").slice(11, 19)}
+                  </span>
+                </button>
+                {expandedAiMsgIdx === i && msg.content && (
+                  <pre className="mt-2 max-h-96 overflow-auto rounded bg-muted p-3 text-xs whitespace-pre-wrap break-words font-mono">
+                    {msg.content}
+                  </pre>
+                )}
+                {expandedAiMsgIdx === i && !msg.content && (
+                  <p className="mt-2 text-xs text-muted-foreground italic">内容未记录</p>
+                )}
               </div>
             ))}
           </div>

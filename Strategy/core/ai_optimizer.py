@@ -396,6 +396,7 @@ class AIOptimizer:
                     "round": round_num,
                     "role": "user",
                     "content_length": len(user_prompt),
+                    "content": user_prompt,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 })
 
@@ -424,6 +425,7 @@ class AIOptimizer:
                     "round": round_num,
                     "role": "assistant",
                     "content_length": len(raw_response),
+                    "content": raw_response,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 })
 
