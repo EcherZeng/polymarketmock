@@ -169,11 +169,11 @@
     "exit_use_orderbook_mode": {
       "group": "risk",
       "label": {
-        "zh": "退出使用挂单减仓模式",
+        "zh": "平仓时按盘口深度撮合",
         "en": "Exit via Orderbook Reduction"
       },
       "desc": {
-        "zh": "关闭（默认）= 理想卖出：按触发时中间价直接成交，无滑点。\n开启 = 挂单减仓：通过 orderbook 深度 VWAP 撮合卖出，支持最低卖出价保护和每 tick 减仓比例控制。深度不足时部分成交，剩余仓位下一个 tick 继续尝试。",
+        "zh": "关闭（默认）= 理想卖出：触发止盈/止损/强平时，按中间价直接成交，无滑点。\n开启 = 盘口撮合卖出：通过 orderbook 买方深度按 VWAP 撮合，模拟真实滑点。支持最低卖出价保护和每 tick 减仓比例控制；深度不足时部分成交，剩余仓位下一 tick 继续尝试。",
         "en": "OFF (default) = Ideal sell: fill at mid price instantly, no slippage.\nON = Orderbook reduction: sell via VWAP against bid depth with min price floor and per-tick reduction ratio. Partial fills when depth insufficient; remainder retried next tick."
       },
       "type": "bool",

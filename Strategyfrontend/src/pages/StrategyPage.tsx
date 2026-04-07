@@ -863,7 +863,7 @@ export default function StrategyPage() {
 
       {/* ── Create Strategy Dialog ─────────────────────────────────────── */}
       <Dialog open={createStrategyOpen} onOpenChange={setCreateStrategyOpen}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>创建策略</DialogTitle>
             <DialogDescription>
