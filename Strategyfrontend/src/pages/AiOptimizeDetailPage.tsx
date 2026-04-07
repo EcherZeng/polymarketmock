@@ -272,7 +272,14 @@ export default function AiOptimizeDetailPage() {
                 {/* Round header */}
                 <div className="flex items-center justify-between border-b px-4 py-3">
                   <div className="flex items-center gap-3">
-                    <span className="text-sm font-semibold">Round {round.round}</span>
+                    <span className="text-sm font-semibold">
+                      {round.round === 0 ? "基准 (Baseline)" : `Round ${round.round}`}
+                    </span>
+                    {round.round === 0 && (
+                      <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
+                        原始参数
+                      </span>
+                    )}
                     <span className="text-xs text-muted-foreground">
                       {round.runs_completed} 次回测 · {(round.duration_ms / 1000).toFixed(1)}s
                     </span>
@@ -283,7 +290,7 @@ export default function AiOptimizeDetailPage() {
                 </div>
 
                 {/* AI reasoning */}
-                {round.ai_reasoning && (
+                {round.ai_reasoning && round.round > 0 && (
                   <div className="border-b bg-muted/30 px-4 py-2">
                     <p className="text-xs text-muted-foreground">
                       <span className="font-medium">AI 推理:</span> {round.ai_reasoning}
@@ -296,8 +303,8 @@ export default function AiOptimizeDetailPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b bg-muted/20">
-                        <th className="px-4 py-2 text-left font-medium">#</th>
-                        <th className="px-4 py-2 text-left font-medium">参数变化</th>
+                        <th className="px-4 py-2 text-left font-medium">{round.round === 0 ? "#" : "组"}</th>
+                        <th className="px-4 py-2 text-left font-medium">{round.round === 0 ? "基准参数" : "参数变化"}</th>
                         <th className="px-4 py-2 text-right font-medium">收益率</th>
                         <th className="px-4 py-2 text-right font-medium">Sharpe</th>
                         <th className="px-4 py-2 text-right font-medium">胜率</th>

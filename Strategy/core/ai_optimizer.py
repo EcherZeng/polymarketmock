@@ -400,6 +400,185 @@ def _build_round_prompt(
     return "\n".join(parts)
 
 
+def _build_group_prompt(
+    round_number: int,
+    param_schema: dict,
+    base_config: dict,
+    market_profiles: dict[str, dict],
+    optimize_target: str,
+    runs_per_round: int,
+    baseline_digests: list[dict],
+    prev_round_digests: list[dict],
+    prev_round_number: int,
+    param_keys: list[str],
+) -> str:
+    """Build AI prompt with per-group tracking from the previous round.
+
+    Instead of dumping all accumulated history, this prompt shows:
+    1. Baseline results as reference
+    2. Previous round's per-group results (params + metrics)
+    3. Asks AI to adjust each group individually
+    """
+    # Parameter schema
+    schema_lines: list[str] = []
+    for name, info in param_schema.items():
+        if name not in param_keys:
+            continue
+        ptype = info.get("type", "float")
+        pmin = info.get("min", "")
+        pmax = info.get("max", "")
+        step = info.get("step", "")
+        schema_lines.append(f"  {name}: {ptype} [{pmin}, {pmax}] step={step}")
+    schema_text = "\n".join(schema_lines)
+
+    # Market characteristics (compact)
+    market_lines: list[str] = []
+    market_items = list(market_profiles.items())
+    if len(market_items) > 10:
+        market_items = market_items[:10]
+        market_lines.append(f"  (共 {len(market_profiles)} 个数据源，仅展示前 10 个)")
+    for slug, profile in market_items:
+        duration = profile.get("duration_seconds", 0)
+        token_count = profile.get("token_count", 0)
+        tokens_info: list[str] = []
+        for tid, tdata in profile.get("tokens", {}).items():
+            short_id = tid[:8] + "..." if len(tid) > 12 else tid
+            tokens_info.append(
+                f"    {short_id}: price=[{tdata['price_min']:.4f}, {tdata['price_max']:.4f}], "
+                f"vol={tdata['volatility']:.6f}, spread={tdata['avg_spread']:.4f}"
+            )
+        market_lines.append(
+            f"  {slug}: duration={duration:.0f}s, tokens={token_count}\n"
+            + "\n".join(tokens_info)
+        )
+    market_text = "\n".join(market_lines)
+
+    # Base config (only tunable keys)
+    base_text = json.dumps(
+        {k: v for k, v in base_config.items() if k in param_keys},
+        indent=2,
+        ensure_ascii=False,
+    )
+
+    parts: list[str] = [
+        f"## 优化轮次 {round_number}",
+        f"优化目标: {optimize_target} (越高越好)",
+        f"每轮生成: {runs_per_round} 组参数（每组独立调整）",
+        "",
+        "## 可调参数范围",
+        schema_text,
+        "",
+        "## 数据源特征",
+        market_text,
+        "",
+        "## 基准参数",
+        base_text,
+    ]
+
+    # Baseline results (round 0)
+    if baseline_digests:
+        bl_metrics = _avg_metrics_across_slugs(baseline_digests)
+        parts.extend([
+            "",
+            "## 基准结果 (Round 0 — 策略原始参数)",
+            _fmt_metrics_compact(bl_metrics),
+        ])
+
+    # Previous round's per-group results
+    if prev_round_digests:
+        # Group by config_index
+        groups: dict[int, list[dict]] = {}
+        for d in prev_round_digests:
+            idx = d.get("config_index", 0)
+            groups.setdefault(idx, []).append(d)
+
+        if prev_round_number == 0:
+            parts.extend([
+                "",
+                "## 首轮优化 — 请基于基准结果生成参数变体",
+                "[重要] 生成的每组参数应探索不同方向，不要生成雷同配置。",
+                "表现好的参数可以微调深入探索，同时尝试不同策略方向。",
+            ])
+        else:
+            parts.extend(["", f"## 上一轮 (Round {prev_round_number}) 各组结果"])
+            for idx in sorted(groups.keys()):
+                group_digests = groups[idx]
+                avg_m = _avg_metrics_across_slugs(group_digests)
+                # Extract the config used
+                cfg = group_digests[0].get("config", {})
+                cfg_tunable = {k: v for k, v in cfg.items() if k in param_keys}
+                cfg_text = ", ".join(
+                    f"{k}={v:.4f}" if isinstance(v, float) else f"{k}={v}"
+                    for k, v in cfg_tunable.items()
+                )
+                parts.extend([
+                    f"\n### 组 {idx + 1}",
+                    f"参数: {cfg_text}",
+                    _fmt_metrics_compact(avg_m),
+                ])
+            parts.extend([
+                "",
+                "[要求] 基于各组各自的表现分别调整参数：",
+                "- 表现好的组：微调参数深入探索",
+                "- 表现差的组：改变方向尝试新策略",
+                "- 保持组数不变，每组输出对应调整后的参数",
+            ])
+    else:
+        parts.extend([
+            "",
+            "## 无历史结果 (首轮探索)",
+            "[重要] 首轮请使用偏宽松的参数组合，确保策略能产生交易。",
+        ])
+
+    parts.extend([
+        "",
+        f"请生成 {runs_per_round} 组参数（JSON 格式），目标是最大化 {optimize_target}。",
+        "输出格式: {\"configs\": [{组1参数}, {组2参数}, ...], \"reason\": \"调整理由\"}",
+    ])
+
+    return "\n".join(parts)
+
+
+def _avg_metrics_across_slugs(digests: list[dict]) -> dict:
+    """Average key metrics across multiple slug digests for a single config."""
+    if not digests:
+        return {}
+    metric_keys = [
+        "total_return_pct", "sharpe_ratio", "win_rate",
+        "max_drawdown", "profit_factor", "total_trades", "total_pnl",
+    ]
+    result: dict = {}
+    for mk in metric_keys:
+        vals = [
+            d.get("metrics", {}).get(mk, 0)
+            for d in digests
+            if d.get("metrics")
+        ]
+        if vals:
+            if mk == "total_trades":
+                result[mk] = sum(vals)
+            elif mk == "max_drawdown":
+                result[mk] = max(vals)
+            else:
+                result[mk] = round(sum(vals) / len(vals), 4)
+    return result
+
+
+def _fmt_metrics_compact(metrics: dict) -> str:
+    """Format metrics dict as a single compact line."""
+    parts: list[str] = []
+    for k in ["total_return_pct", "sharpe_ratio", "win_rate",
+              "max_drawdown", "profit_factor", "total_trades", "total_pnl"]:
+        v = metrics.get(k)
+        if v is None:
+            continue
+        if isinstance(v, float):
+            parts.append(f"{k}={v:.4f}")
+        else:
+            parts.append(f"{k}={v}")
+    return "  " + ", ".join(parts) if parts else "  (无数据)"
+
+
 # ── LLM caller ───────────────────────────────────────────────────────────────
 
 
@@ -599,11 +778,10 @@ class AIOptimizer:
         # Resolve param_keys: which parameters AI can tune
         if not param_keys:
             schema = self._registry.get_param_schema()
-            # Exclude toggles and risk params by default — focus on entry/volatility/position
+            # Default: all non-bool params (entry/volatility/position/risk)
             param_keys = [
                 k for k, v in schema.items()
-                if v.get("group") in ("entry", "volatility", "position")
-                and v.get("type") != "bool"
+                if v.get("type") != "bool"
             ]
 
         task = OptimizeTask(
@@ -617,7 +795,7 @@ class AIOptimizer:
             initial_balance=initial_balance,
             settlement_result=settlement_result,
             created_at=datetime.now(timezone.utc).isoformat(),
-            total_runs=max_rounds * runs_per_round * len(slugs),
+            total_runs=1 * len(slugs) + max_rounds * runs_per_round * len(slugs),
         )
         self._tasks[task_id] = task
 
@@ -649,93 +827,122 @@ class AIOptimizer:
                 data_cache[slug] = data
                 task.market_profiles[slug] = profile_market(slug, data)
 
-            # ── Phase 2: Iterative rounds (shared HTTP client) ───────────
+            # ── Phase 2: Baseline (round 0) + AI rounds (shared HTTP client) ─
             async with httpx.AsyncClient(timeout=120) as llm_client:
-              for round_num in range(1, task.max_rounds + 1):
+              for round_num in range(0, task.max_rounds + 1):
                 if task.status == "cancelled":
                     break
 
                 task.current_round = round_num
                 t_round = time.monotonic()
 
-                # Build AI context
-                history_table = digest_for_ai_table(task.all_digests, param_keys)
-                user_prompt = _build_round_prompt(
-                    round_num, param_schema, task.base_config,
-                    task.market_profiles, task.optimize_target,
-                    task.runs_per_round, history_table, param_keys,
-                )
-
-                # Log AI interaction
-                task.ai_messages.append({
-                    "round": round_num,
-                    "role": "user",
-                    "content_length": len(user_prompt),
-                    "content": user_prompt,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                })
-
-                # Call LLM
-                try:
-                    raw_response = await _call_llm(
-                        llm_client,
-                        config.llm_api_url, config.llm_api_key, llm_model,
-                        _SYSTEM_PROMPT, user_prompt,
+                if round_num == 0:
+                    # ── Round 0: Baseline — run user's original config ───
+                    baseline_params = {
+                        k: task.base_config[k]
+                        for k in param_keys
+                        if k in task.base_config
+                    }
+                    configs = [baseline_params]
+                    reason = "基准测试 — 使用策略原始参数建立 baseline"
+                    task.ai_messages.append({
+                        "round": round_num,
+                        "role": "system",
+                        "content_length": 0,
+                        "content": reason,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
+                else:
+                    # ── AI round: build per-group prompt ──────────────────
+                    # Collect baseline metrics (round 0)
+                    baseline_digests = [
+                        d for d in task.all_digests if d.get("round") == 0
+                    ]
+                    # Collect previous round's per-group results
+                    prev_round = round_num - 1
+                    prev_digests = [
+                        d for d in task.all_digests if d.get("round") == prev_round
+                    ]
+                    user_prompt = _build_group_prompt(
+                        round_number=round_num,
+                        param_schema=param_schema,
+                        base_config=task.base_config,
+                        market_profiles=task.market_profiles,
+                        optimize_target=task.optimize_target,
+                        runs_per_round=task.runs_per_round,
+                        baseline_digests=baseline_digests,
+                        prev_round_digests=prev_digests,
+                        prev_round_number=prev_round,
+                        param_keys=param_keys,
                     )
-                except Exception as e:
-                    tb = traceback.format_exc()
-                    err_msg = f"[round_{round_num}] LLM error: {e}"
-                    logger.error("AI optimizer %s round %d LLM call failed: %s", task_id, round_num, e)
-                    task.errors.append({
+
+                    task.ai_messages.append({
                         "round": round_num,
-                        "phase": "llm_call",
-                        "message": err_msg,
-                        "detail": tb,
+                        "role": "user",
+                        "content_length": len(user_prompt),
+                        "content": user_prompt,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
-                    task.error = err_msg
-                    task.status = "failed"
-                    break
 
-                task.ai_messages.append({
-                    "round": round_num,
-                    "role": "assistant",
-                    "content_length": len(raw_response),
-                    "content": raw_response,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                })
+                    try:
+                        raw_response = await _call_llm(
+                            llm_client,
+                            config.llm_api_url, config.llm_api_key, llm_model,
+                            _SYSTEM_PROMPT, user_prompt,
+                        )
+                    except Exception as e:
+                        tb = traceback.format_exc()
+                        err_msg = f"[round_{round_num}] LLM error: {e}"
+                        logger.error("AI optimizer %s round %d LLM call failed: %s", task_id, round_num, e)
+                        task.errors.append({
+                            "round": round_num,
+                            "phase": "llm_call",
+                            "message": err_msg,
+                            "detail": tb,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        })
+                        task.error = err_msg
+                        task.status = "failed"
+                        break
 
-                # Parse AI response
-                try:
-                    configs, reason = _parse_ai_configs(raw_response, param_schema, task.runs_per_round)
-                except Exception as e:
-                    tb = traceback.format_exc()
-                    err_msg = f"[round_{round_num}] Parse error: {e}"
-                    logger.error("AI optimizer %s round %d parse failed: %s", task_id, round_num, e)
-                    task.errors.append({
+                    task.ai_messages.append({
                         "round": round_num,
-                        "phase": "parse",
-                        "message": err_msg,
-                        "detail": tb,
+                        "role": "assistant",
+                        "content_length": len(raw_response),
+                        "content": raw_response,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
-                    task.error = err_msg
-                    task.status = "failed"
-                    break
 
-                if not configs:
-                    err_msg = f"[round_{round_num}] AI produced no valid configs"
-                    logger.warning("AI optimizer %s round %d produced no configs", task_id, round_num)
-                    task.errors.append({
-                        "round": round_num,
-                        "phase": "parse",
-                        "message": err_msg,
-                        "detail": "",
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    })
-                    task.error = err_msg
-                    task.status = "failed"
-                    break
+                    try:
+                        configs, reason = _parse_ai_configs(raw_response, param_schema, task.runs_per_round)
+                    except Exception as e:
+                        tb = traceback.format_exc()
+                        err_msg = f"[round_{round_num}] Parse error: {e}"
+                        logger.error("AI optimizer %s round %d parse failed: %s", task_id, round_num, e)
+                        task.errors.append({
+                            "round": round_num,
+                            "phase": "parse",
+                            "message": err_msg,
+                            "detail": tb,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        })
+                        task.error = err_msg
+                        task.status = "failed"
+                        break
+
+                    if not configs:
+                        err_msg = f"[round_{round_num}] AI produced no valid configs"
+                        logger.warning("AI optimizer %s round %d produced no configs", task_id, round_num)
+                        task.errors.append({
+                            "round": round_num,
+                            "phase": "parse",
+                            "message": err_msg,
+                            "detail": "",
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        })
+                        task.error = err_msg
+                        task.status = "failed"
+                        break
 
                 # ── Run backtests for this round ─────────────────────────
                 round_result = RoundResult(

@@ -116,7 +116,7 @@ export default function AiOptimizePage() {
   // Tunable params grouped by param_schema group (exclude bool toggles)
   const tunableParams = useMemo(() => {
     return Object.entries(paramSchema)
-      .filter(([, info]) => info.type !== "bool" && info.group !== "risk")
+      .filter(([, info]) => info.type !== "bool")
       .map(([key, info]) => ({ key, ...info }))
   }, [paramSchema])
 
@@ -147,9 +147,11 @@ export default function AiOptimizePage() {
     if (!selectedStrategy && strategies.length > 0) {
       setSelectedStrategy(strategies[0].name)
     }
-    // Pre-select tunable params
+    // Pre-select tunable params (risk params available but not pre-selected)
     if (selectedParamKeys.size === 0 && tunableParams.length > 0) {
-      setSelectedParamKeys(new Set(tunableParams.map((p) => p.key)))
+      setSelectedParamKeys(
+        new Set(tunableParams.filter((p) => p.group !== "risk").map((p) => p.key)),
+      )
     }
     // Pre-select default model
     if (!llmModel && modelsData) {
@@ -404,8 +406,8 @@ export default function AiOptimizePage() {
             </div>
 
             <p className="text-xs text-muted-foreground">
-              预计总回测次数: {maxRounds * runsPerRound * portfolioSlugs.length} 次
-              ({maxRounds} 轮 × {runsPerRound} 组参数 × {portfolioSlugs.length} 数据源)
+              预计总回测次数: {portfolioSlugs.length + maxRounds * runsPerRound * portfolioSlugs.length} 次
+              (基准 1×{portfolioSlugs.length} + AI {maxRounds} 轮×{runsPerRound} 组×{portfolioSlugs.length} 数据源)
             </p>
 
             {/* Tunable parameters */}

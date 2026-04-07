@@ -232,16 +232,16 @@
         "en": "Entry Min Price"
       },
       "desc": {
-        "zh": "只在中间价高于此阈值的标的上入场，用于过滤价格过低、流动性差的尾盘标的。区间为 [0.5, 1.0]。",
-        "en": "Only consider tokens whose mid price is above this threshold, filtering out illiquid low-priced markets. Range [0.5, 1.0]."
+        "zh": "只在中间价高于此阈值的标的上入场，用于过滤价格过低、流动性差的尾盘标的。区间为 [0.01, 1.0]。",
+        "en": "Only consider tokens whose mid price is above this threshold, filtering out illiquid low-priced markets. Range [0.01, 1.0]."
       },
-      "disable_value": 0.5,
+      "disable_value": 0.01,
       "disable_note": {
-        "zh": "设为 0.5（最小值）：所有入场候选均可通过，价格过滤实际失效",
-        "en": "Set to 0.5 (min): all entry candidates pass, price filter effectively disabled"
+        "zh": "设为 0.01（最小值）：所有入场候选均可通过，价格过滤实际失效",
+        "en": "Set to 0.01 (min): all entry candidates pass, price filter effectively disabled"
       },
       "type": "float",
-      "min": 0.5,
+      "min": 0.01,
       "max": 1.0,
       "step": 0.01,
       "unit": "",
