@@ -30,6 +30,9 @@ class StrategyEngineConfig(BaseSettings):
     server_port: int = 8072
     server_host: str = "0.0.0.0"
 
+    # Backend API (for data deletion — data volume is read-only)
+    backend_url: str = "http://localhost:8071"
+
     # LLM (DeepSeek / OpenAI-compatible)
     llm_api_url: str = "https://api.deepseek.com/v1/chat/completions"
     llm_api_key: str = ""

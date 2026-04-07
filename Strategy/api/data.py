@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
@@ -117,38 +117,43 @@ class DeleteRequest(BaseModel):
 
 @router.post("/data/cleanup")
 async def cleanup_incomplete(req: DeleteRequest):
-    """删除指定的不完整数据源目录（硬删 session 目录）。"""
+    """删除指定的不完整数据源目录（代理到 Backend 执行删除）。"""
     deleted: list[str] = []
     not_found: list[str] = []
-    sessions_dir = config.data_dir / "sessions"
-    for slug in req.slugs:
-        # Validate slug format to prevent path traversal
-        if not re.match(r"^[\w\-]+$", slug):
-            continue
-        session_dir = sessions_dir / slug
-        if session_dir.is_dir():
-            shutil.rmtree(session_dir)
-            deleted.append(slug)
-        else:
-            not_found.append(slug)
-    return {
+    errors: list[str] = []
+    async with httpx.AsyncClient(base_url=config.backend_url, timeout=30) as client:
+        for slug in req.slugs:
+            if not re.match(r"^[\w\-]+$", slug):
+                continue
+            resp = await client.delete(f"/api/archives/{slug}")
+            if resp.status_code == 200:
+                deleted.append(slug)
+            elif resp.status_code == 404:
+                not_found.append(slug)
+            else:
+                errors.append(slug)
+    result: dict = {
         "deleted": deleted,
         "not_found": not_found,
         "deleted_count": len(deleted),
     }
+    if errors:
+        result["errors"] = errors
+    return result
 
 
 @router.delete("/data/archives/{slug}")
 async def delete_single_archive(slug: str):
-    """删除单个数据源目录。"""
+    """删除单个数据源目录（代理到 Backend 执行删除）。"""
     if not re.match(r"^[\w\-]+$", slug):
         raise HTTPException(status_code=400, detail="Invalid slug format")
-    sessions_dir = config.data_dir / "sessions"
-    session_dir = sessions_dir / slug
-    if not session_dir.is_dir():
+    async with httpx.AsyncClient(base_url=config.backend_url, timeout=30) as client:
+        resp = await client.delete(f"/api/archives/{slug}")
+    if resp.status_code == 404:
         raise HTTPException(status_code=404, detail=f"Session '{slug}' not found")
-    shutil.rmtree(session_dir)
-    return {"deleted": slug}
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="Backend delete failed")
+    return resp.json()
 
 
 # ── Track data source for git commit ─────────────────────────────────────────
