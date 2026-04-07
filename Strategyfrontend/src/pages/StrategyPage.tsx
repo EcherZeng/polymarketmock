@@ -62,6 +62,10 @@ export default function StrategyPage() {
   const [batchSize, setBatchSize] = useState<number>(0) // 0 = all
   const [savePresetName, setSavePresetName] = useState("")
   const [savePresetDesc, setSavePresetDesc] = useState("")
+  const [createStrategyOpen, setCreateStrategyOpen] = useState(false)
+  const [newStrategyName, setNewStrategyName] = useState("")
+  const [newStrategyDesc, setNewStrategyDesc] = useState("")
+  const [newStrategyValues, setNewStrategyValues] = useState<Record<string, unknown>>({})
   const [dataTab, setDataTab] = useState<"archives" | "portfolios">("archives")
   const [portfolioSearch, setPortfolioSearch] = useState("")
   const [selectedPortfolioId, setSelectedPortfolioId] = useState<string>("")
@@ -349,6 +353,19 @@ export default function StrategyPage() {
                   )}
                 </button>
               ))}
+              <button
+                onClick={() => {
+                  // Initialize with first strategy's defaults if available
+                  const base = strategies[0]?.default_config ?? {}
+                  setNewStrategyValues({ ...base })
+                  setNewStrategyName("")
+                  setNewStrategyDesc("")
+                  setCreateStrategyOpen(true)
+                }}
+                className="rounded-lg border border-dashed border-muted-foreground/30 p-4 text-center text-sm text-muted-foreground hover:border-primary/50 hover:text-foreground transition-colors"
+              >
+                + 创建策略
+              </button>
             </div>
           )}
 
@@ -841,6 +858,79 @@ export default function StrategyPage() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Create Strategy Dialog ─────────────────────────────────────── */}
+      <Dialog open={createStrategyOpen} onOpenChange={setCreateStrategyOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>创建策略</DialogTitle>
+            <DialogDescription>
+              设置名称、描述和参数，保存为自定义策略预设
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-sm text-muted-foreground">策略名称 <span className="text-destructive">*</span></label>
+                <input
+                  type="text"
+                  placeholder="输入策略名称"
+                  value={newStrategyName}
+                  onChange={(e) => setNewStrategyName(e.target.value)}
+                  className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-sm text-muted-foreground">描述</label>
+                <input
+                  type="text"
+                  placeholder="策略描述（可选）"
+                  value={newStrategyDesc}
+                  onChange={(e) => setNewStrategyDesc(e.target.value)}
+                  className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                />
+              </div>
+            </div>
+
+            <StrategyConfigForm
+              values={newStrategyValues}
+              onChange={setNewStrategyValues}
+              paramSchema={paramSchema}
+              paramGroups={paramGroups}
+              visibleKeys={new Set(Object.keys(paramSchema))}
+            />
+
+            <div className="flex items-center justify-end gap-2 border-t pt-4">
+              <button
+                onClick={() => setCreateStrategyOpen(false)}
+                className="h-9 rounded-md border px-4 text-sm hover:bg-muted"
+              >
+                取消
+              </button>
+              <button
+                disabled={!newStrategyName.trim() || savePresetMutation.isPending}
+                onClick={() => {
+                  savePresetMutation.mutate(
+                    {
+                      name: newStrategyName.trim(),
+                      desc: newStrategyDesc.trim(),
+                      params: { ...newStrategyValues },
+                    },
+                    { onSuccess: () => setCreateStrategyOpen(false) },
+                  )
+                }}
+                className={cn(
+                  "h-9 rounded-md px-4 text-sm font-medium transition-colors",
+                  "bg-primary text-primary-foreground hover:bg-primary/90",
+                  "disabled:pointer-events-none disabled:opacity-50",
+                )}
+              >
+                {savePresetMutation.isPending ? "创建中..." : "创建策略"}
+              </button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
