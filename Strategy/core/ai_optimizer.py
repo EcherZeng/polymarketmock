@@ -87,18 +87,224 @@ class OptimizeTask:
 
 
 _SYSTEM_PROMPT = (
-    "你是一个量化策略参数优化专家。你的任务是根据回测结果调整策略参数，"
-    "使目标指标最优化。\n\n"
-    "规则：\n"
-    "1. 输出必须是严格的 JSON 数组，每个元素是一组参数配置\n"
+    "你是一个 Polymarket 预测市场量化策略参数优化专家。\n\n"
+    "## Polymarket 市场特征（与股票市场的关键差异）\n"
+    "Polymarket 是二元事件预测市场，与传统股票市场有本质区别：\n"
+    "- **价格区间 [0, 1]**：每个 token 价格代表事件发生的概率，$0.75 = 75% 概率\n"
+    "- **二元结算**：市场到期后，赢家 token → $1.00，输家 token → $0.00\n"
+    "- **互补定价**：Yes_price + No_price ≈ $1.00，买 Yes@0.70 等价于卖 No@0.30\n"
+    "- **有限生命周期**：每个市场有明确的到期/结算时间，不像股票可以无限期持有\n"
+    "- **收益上限已知**：最大利润 = (1.0 - 买入价) × 数量，不存在无限上涨空间\n"
+    "- **价格趋势特征**：接近结算时，高概率事件价格趋近 1.0（加速上涨），"
+    "低概率事件趋近 0.0（加速下跌），这是正常的结算收敛而非泡沫\n"
+    "- **波动率特征**：波动率通常远低于股票（价格被限制在 0-1 内），"
+    "std=0.01 在预测市场中已属显著波动，不要用股票市场的波动率标准\n"
+    "- **流动性特征**：spread 通常在 0.01-0.05 之间，>0.05 已属较差流动性\n"
+    "- **价格>0.85 的 token**：胜率高但利润空间小（最多赚 0.15/份），"
+    "需要较大仓位才能获得有意义的收益\n"
+    "- **价格 0.50-0.85 的 token**：利润空间与风险的最佳平衡区间\n\n"
+    "## 参数调优核心原则\n"
+    "⚠️ **最重要：避免过度过滤导致无法入场！**\n"
+    "- 多个严格条件的交集会导致几乎不可能入场（AND 逻辑的乘法效应）\n"
+    "- 首轮探索应使用宽松参数：先确保有足够交易次数（≥10 笔），再逐步收紧\n"
+    "- 如果上一轮 total_trades=0 或 <5，必须大幅放宽过滤条件\n"
+    "- 每次只收紧 1-2 个参数，保持其他参数宽松\n\n"
+    "## 各参数在预测市场中的影响\n"
+    "- **min_price [0.5-1.0]**: 买入价格下限。设 >0.85 会排除大部分市场机会，"
+    "建议首轮 0.55-0.65，逐步上调\n"
+    "- **max_spread [0.01-1.0]**: 价差过滤。预测市场 spread 通常较小，"
+    "设 <0.02 会过滤大量时刻，建议 ≥0.03\n"
+    "- **max_ask_deviation [0.01-1.0]**: ask 偏离锚定价。建议 ≥0.05，"
+    "过小会几乎不允许入场\n"
+    "- **min_profit_room [0-0.5]**: 利润空间要求。对于高概率 token (>0.85)，"
+    "利润空间天然 <0.15，设 >0.10 会完全排除此类标的\n"
+    "- **momentum_min [0-0.1]**: 动量阈值。预测市场价格变动缓慢，"
+    "0.005 已是显著动量，建议 ≤0.01\n"
+    "- **amplitude_min/max**: 振幅范围。预测市场振幅很小，"
+    "amplitude_min 建议 ≤0.005，amplitude_max 建议 ≥0.1\n"
+    "- **max_std [0-1.0]**: 标准差上限。预测市场 std 通常 <0.05，"
+    "设 <0.01 过严，建议 ≥0.02\n"
+    "- **max_drawdown [0-1.0]**: 回撤上限。建议 ≥0.05，预测市场回撤有限\n"
+    "- **position_min_pct / position_max_pct**: 仓位比例。"
+    "高概率 token 利润空间小，需要较大仓位，建议 min≥0.1, max≥0.3\n"
+    "- **take_profit_price [0.5-1.0]**: 止盈价。对于买入>0.80的token，"
+    "TP 设 0.95-0.98 更合理（接近结算值1.0）\n"
+    "- **stop_loss_pct [0-1.0]**: 止损比例。预测市场波动小，"
+    "0.05-0.15 的止损已足够\n\n"
+    "## 规则\n"
+    "1. 输出必须是严格的 JSON，格式：{\"configs\": [...], \"reason\": \"调整理由\"}\n"
     "2. 所有参数值必须在 schema 规定的 min/max 范围内\n"
     "3. bool 类型参数只能是 true 或 false\n"
     "4. 每轮给出简短的调整理由（reason 字段）\n"
-    "5. 基于历史结果中表现好的参数方向进行收敛\n"
-    "6. 避免极端参数组合，优先探索表现好的参数邻域\n\n"
-    "输出格式：\n"
-    '{"configs": [...], "reason": "调整理由"}'
+    "5. 基于历史结果中表现好的参数方向进行收敛，但保持多样性探索\n"
+    "6. **首轮用宽松参数**，后续逐步收紧表现差的方向\n"
+    "7. 如果前几轮都是 0 交易，必须显著放宽多个过滤条件\n"
+    "8. 每组参数之间应有差异性，避免生成雷同配置"
 )
+
+
+def _fmt_table(rows: list[dict]) -> str:
+    """Build a compact markdown table from a list of dicts."""
+    if not rows:
+        return "(无)"
+    headers = list(rows[0].keys())
+    header_line = "| " + " | ".join(headers) + " |"
+    sep_line = "| " + " | ".join("---" for _ in headers) + " |"
+    lines: list[str] = [header_line, sep_line]
+    for row in rows:
+        cells = []
+        for h in headers:
+            v = row.get(h, "")
+            if isinstance(v, float):
+                cells.append(f"{v:.4f}")
+            else:
+                cells.append(str(v))
+        lines.append("| " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
+def _build_history_digest(
+    history_table: list[dict],
+    optimize_target: str,
+) -> tuple[str, str, str]:
+    """Build a structured history digest: summary + sampled rows + diagnostics.
+
+    Returns (summary_text, sample_table_text, diagnostic_text).
+    Instead of dumping all rows, we:
+      1. Compute aggregate statistics (avg/best/worst)
+      2. Categorize into profitable / losing / zero-trade
+      3. Sample top/bottom performers from each category
+    """
+    total = len(history_table)
+
+    # ── Categorize ───────────────────────────────────────────────────────
+    profitable: list[dict] = []
+    losing: list[dict] = []
+    zero_trade: list[dict] = []
+
+    for row in history_table:
+        trades = row.get("total_trades", 0)
+        pnl = row.get("total_pnl", 0.0)
+        if trades == 0:
+            zero_trade.append(row)
+        elif pnl > 0:
+            profitable.append(row)
+        else:
+            losing.append(row)
+
+    # ── Aggregate statistics (only from rows with trades) ────────────────
+    traded_rows = [r for r in history_table if r.get("total_trades", 0) > 0]
+    metric_keys = [
+        "total_return_pct", "sharpe_ratio", "win_rate",
+        "max_drawdown", "profit_factor", "total_trades",
+        "avg_slippage", "total_pnl",
+    ]
+
+    summary_lines: list[str] = [
+        f"## 历史结果统计 (共 {total} 次回测)",
+        f"- 盈利: {len(profitable)} 次 | 亏损: {len(losing)} 次 | 未出手(0笔交易): {len(zero_trade)} 次",
+    ]
+
+    if traded_rows:
+        stat_lines: list[str] = []
+        for mk in metric_keys:
+            vals = [r.get(mk, 0) for r in traded_rows]
+            if not vals:
+                continue
+            avg_v = sum(vals) / len(vals)
+            best_v = max(vals)
+            worst_v = min(vals)
+            stat_lines.append(
+                f"  {mk}: avg={avg_v:.4f}, best={best_v:.4f}, worst={worst_v:.4f}"
+            )
+        summary_lines.append("- 有交易回测的指标统计：")
+        summary_lines.extend(stat_lines)
+    else:
+        summary_lines.append("- ⚠️ 全部回测都没有产生交易")
+
+    summary_text = "\n".join(summary_lines)
+
+    # ── Sample representative rows ───────────────────────────────────────
+    # Sort each category by optimize_target; pick top & bottom
+    sample_parts: list[str] = ["## 代表性历史样本"]
+
+    def _sort_key(r: dict) -> float:
+        v = r.get(optimize_target, r.get("total_return_pct", 0.0))
+        return v if isinstance(v, (int, float)) else 0.0
+
+    max_per_cat = 5  # up to 5 from each category
+
+    if profitable:
+        profitable.sort(key=_sort_key, reverse=True)
+        top_profit = profitable[:max_per_cat]
+        sample_parts.append(
+            f"\n### 盈利 TOP {len(top_profit)} (共 {len(profitable)} 次盈利)"
+        )
+        sample_parts.append(_fmt_table(top_profit))
+
+    if losing:
+        losing.sort(key=_sort_key, reverse=True)
+        # Best of losing (closest to breakeven) + worst
+        best_losing = losing[:min(3, len(losing))]
+        worst_losing = losing[-min(2, len(losing)):] if len(losing) > 3 else []
+        combined_losing = best_losing + [r for r in worst_losing if r not in best_losing]
+        sample_parts.append(
+            f"\n### 亏损样本 (共 {len(losing)} 次亏损，选 {len(combined_losing)} 条)"
+        )
+        sample_parts.append(_fmt_table(combined_losing))
+
+    if zero_trade:
+        # Show a few zero-trade configs so AI sees which params to avoid
+        zt_sample = zero_trade[:min(3, len(zero_trade))]
+        sample_parts.append(
+            f"\n### 未出手样本 (共 {len(zero_trade)} 次零交易，选 {len(zt_sample)} 条)"
+        )
+        sample_parts.append(_fmt_table(zt_sample))
+
+    sample_text = "\n".join(sample_parts)
+
+    # ── Diagnostics ──────────────────────────────────────────────────────
+    diag_lines: list[str] = []
+
+    if zero_trade and len(zero_trade) > total // 3:
+        diag_lines.extend([
+            f"⚠️ 警告：{len(zero_trade)}/{total} 次回测产生 0 笔交易！",
+            "过滤条件过严导致策略无法入场。必须显著放宽以下参数：",
+            "- 降低 min_price（如 0.55）、增大 max_spread（如 0.05+）",
+            "- 增大 max_ask_deviation（如 0.10+）、降低 min_profit_room（如 0.01）",
+            "- 降低 momentum_min（如 0.002）、增大 amplitude_max（如 0.5+）",
+            "- 增大 max_std（如 0.1+）、增大 max_drawdown（如 0.2+）",
+        ])
+
+    low_trade_rows = [r for r in traded_rows if r.get("total_trades", 0) < 5]
+    if low_trade_rows and len(low_trade_rows) > len(traded_rows) // 2:
+        diag_lines.extend([
+            f"⚠️ 注意：{len(low_trade_rows)}/{len(traded_rows)} 次有交易的回测交易次数不足5笔。",
+            "建议适度放宽过滤条件以增加交易机会。",
+        ])
+
+    if profitable and losing:
+        # Hint: what parameters differ between best profitable and worst losing?
+        best = profitable[0]  # already sorted desc
+        worst = losing[-1]
+        diff_hints: list[str] = []
+        for k in best:
+            if k in ("total_return_pct", "sharpe_ratio", "win_rate",
+                      "max_drawdown", "profit_factor", "total_trades",
+                      "avg_slippage", "total_pnl"):
+                continue
+            bv, wv = best.get(k), worst.get(k)
+            if isinstance(bv, (int, float)) and isinstance(wv, (int, float)) and bv != wv:
+                diff_hints.append(f"  {k}: 最佳={bv}, 最差={wv}")
+        if diff_hints:
+            diag_lines.append(
+                "💡 最佳盈利 vs 最差亏损的参数差异："
+            )
+            diag_lines.extend(diff_hints[:8])
+
+    diag_text = "\n".join(diag_lines)
+
+    return summary_text, sample_text, diag_text
 
 
 def _build_round_prompt(
@@ -124,9 +330,13 @@ def _build_round_prompt(
         schema_lines.append(f"  {name}: {ptype} [{pmin}, {pmax}] step={step}")
     schema_text = "\n".join(schema_lines)
 
-    # Market characteristics
+    # Market characteristics (limit to 10 markets to control prompt size)
     market_lines: list[str] = []
-    for slug, profile in market_profiles.items():
+    market_items = list(market_profiles.items())
+    if len(market_items) > 10:
+        market_items = market_items[:10]
+        market_lines.append(f"  (共 {len(market_profiles)} 个数据源，仅展示前 10 个)")
+    for slug, profile in market_items:
         duration = profile.get("duration_seconds", 0)
         token_count = profile.get("token_count", 0)
         tokens_info: list[str] = []
@@ -165,28 +375,20 @@ def _build_round_prompt(
     ]
 
     if history_table:
-        # Build a markdown table of past results
-        headers = list(history_table[0].keys())
-        header_line = "| " + " | ".join(headers) + " |"
-        sep_line = "| " + " | ".join("---" for _ in headers) + " |"
-        rows: list[str] = []
-        for row in history_table:
-            cells = []
-            for h in headers:
-                v = row.get(h, "")
-                if isinstance(v, float):
-                    cells.append(f"{v:.4f}")
-                else:
-                    cells.append(str(v))
-            rows.append("| " + " | ".join(cells) + " |")
-        table_text = "\n".join([header_line, sep_line, *rows])
+        summary_text, sample_text, diag_text = _build_history_digest(
+            history_table, optimize_target,
+        )
+        parts.extend(["", summary_text, "", sample_text])
+        if diag_text:
+            parts.extend(["", diag_text])
+    else:
         parts.extend([
             "",
-            f"## 历史结果 (共 {len(history_table)} 次回测)",
-            table_text,
+            "## 无历史结果 (首轮探索)",
+            "⚠️ 首轮请使用偏宽松的参数组合，确保策略能产生交易。",
+            "建议：min_price≤0.60, max_spread≥0.04, momentum_min≤0.005, "
+            "min_profit_room≤0.02, position_min_pct≥0.10",
         ])
-    else:
-        parts.extend(["", "## 无历史结果 (首轮探索)"])
 
     parts.extend([
         "",
