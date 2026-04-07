@@ -82,6 +82,13 @@ async def lifespan(app: FastAPI):
         on_batch_complete=_on_batch_complete,
     )
 
+    # ── Init AI optimizer ────────────────────────────────────────────
+    from core.ai_optimizer import AIOptimizer
+    state.ai_optimizer = AIOptimizer(
+        state.registry,
+        on_result=_on_result,
+    )
+
     yield
 
     logger.info("Strategy engine shutting down")
@@ -112,6 +119,7 @@ from api.execution import router as execution_router
 from api.results import router as results_router
 from api.presets import router as presets_router
 from api.portfolios import router as portfolios_router
+from api.ai_optimize import router as ai_optimize_router
 
 app.include_router(strategies_router, tags=["Strategies"])
 app.include_router(data_router, tags=["Data"])
@@ -119,6 +127,7 @@ app.include_router(execution_router, tags=["Execution"])
 app.include_router(results_router, tags=["Results"])
 app.include_router(presets_router, tags=["Presets"])
 app.include_router(portfolios_router, tags=["Portfolios"])
+app.include_router(ai_optimize_router)
 
 
 @app.get("/health")
