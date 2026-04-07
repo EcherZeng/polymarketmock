@@ -127,6 +127,26 @@ class StrategyRegistry:
 
     # ── Query ────────────────────────────────────────────────────────────────
 
+    def normalize_config(self, config: dict) -> dict:
+        """Enforce disable_value for dependent params when their toggle is OFF.
+
+        Scans param_schema for params with ``depends_on``.  If the toggle key
+        is falsy in *config*, the dependent param is forced to its
+        ``disable_value`` (when defined).  Returns a **new** dict.
+        """
+        schema = self.get_param_schema()
+        result = dict(config)
+        for key, meta in schema.items():
+            toggle_key = meta.get("depends_on")
+            if not toggle_key:
+                continue
+            # Toggle is OFF → force disable_value
+            if not result.get(toggle_key):
+                disable_val = meta.get("disable_value")
+                if disable_val is not None:
+                    result[key] = disable_val
+        return result
+
     def list_strategies(self) -> list[dict]:
         strategies_map = self._presets.get("strategies", {})
         result = []
@@ -174,6 +194,8 @@ class StrategyRegistry:
 
     def save_preset(self, name: str, params: dict) -> None:
         """Create or update a preset. Rebuilds merged config. Persists to user file."""
+        # Normalize: force disable_value for toggled-off dependent params
+        params = self.normalize_config(params)
         strategies = self._presets.setdefault("strategies", {})
         strategies[name] = params
         # Rebuild merged config

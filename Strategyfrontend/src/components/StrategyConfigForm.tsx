@@ -167,7 +167,16 @@ export default function StrategyConfigForm({
 
   function handleChange(key: string, raw: string | boolean, schema: ParamSchemaItem) {
     if (schema.type === "bool") {
-      onChange({ ...values, [key]: raw as boolean })
+      const updated = { ...values, [key]: raw as boolean }
+      // When a toggle is turned OFF, reset dependent params to disable_value
+      if (!(raw as boolean)) {
+        for (const [depKey, depSchema] of Object.entries(paramSchema)) {
+          if (depSchema.depends_on === key && depSchema.disable_value != null) {
+            updated[depKey] = depSchema.disable_value
+          }
+        }
+      }
+      onChange(updated)
     } else {
       onChange({ ...values, [key]: Number(raw) })
     }

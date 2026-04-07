@@ -371,6 +371,7 @@ def run_backtest(
 
     # Init strategy
     merged_config = {**registry.get_default_config(strategy_name), **user_config}
+    merged_config = registry.normalize_config(merged_config)
     try:
         strategy.on_init(merged_config)
     except Exception as e:

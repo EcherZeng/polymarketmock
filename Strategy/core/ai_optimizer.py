@@ -750,6 +750,7 @@ class AIOptimizer:
 
                     # Merge: base_config overridden by AI-suggested params
                     merged_config = {**task.base_config, **ai_config}
+                    merged_config = self._registry.normalize_config(merged_config)
 
                     for slug in task.slugs:
                         if task.status == "cancelled":
