@@ -351,7 +351,7 @@ export default function AiOptimizeDetailPage() {
                                 {(m.total_return_pct ?? 0).toFixed(2)}%
                               </td>
                               <td className="px-4 py-2 text-right font-mono">{(m.sharpe_ratio ?? 0).toFixed(3)}</td>
-                              <td className="px-4 py-2 text-right font-mono">{((m.win_rate ?? 0) * 100).toFixed(1)}%</td>
+                              <td className="px-4 py-2 text-right font-mono">{(m.win_rate ?? 0).toFixed(1)}%</td>
                               <td className="px-4 py-2 text-right font-mono">{(m.max_drawdown ?? 0).toFixed(2)}%</td>
                               <td className="px-4 py-2 text-right font-mono">{m.total_trades ?? 0}</td>
                             </tr>
@@ -375,7 +375,7 @@ export default function AiOptimizeDetailPage() {
                                   {sm.total_return_pct.toFixed(2)}%
                                 </td>
                                 <td className="px-4 py-1.5 text-right font-mono text-xs">{sm.sharpe_ratio.toFixed(3)}</td>
-                                <td className="px-4 py-1.5 text-right font-mono text-xs">{(sm.win_rate * 100).toFixed(1)}%</td>
+                                <td className="px-4 py-1.5 text-right font-mono text-xs">{(sm.win_rate ?? 0).toFixed(1)}%</td>
                                 <td className="px-4 py-1.5 text-right font-mono text-xs">{sm.max_drawdown.toFixed(2)}%</td>
                                 <td className="px-4 py-1.5 text-right font-mono text-xs">{sm.total_trades}</td>
                               </tr>
