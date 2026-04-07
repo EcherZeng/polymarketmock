@@ -39,24 +39,56 @@ def evaluate(session: BacktestSession) -> EvaluationMetrics:
     # PnL per round trip (simplified: each SELL after BUY)
     trade_pnls = _compute_trade_pnls(trades)
 
-    winners = [p for p in trade_pnls if p > 0]
-    losers = [p for p in trade_pnls if p < 0]
+    # Include settlement outcomes for held positions as virtual close,
+    # so profit_factor / win_rate reflect the full trading outcome.
+    # Each outstanding BUY (not matched by a SELL) counts as one "bet",
+    # so win_rate reflects per-action outcomes, not per-token aggregates.
+    settlement_result = session.settlement_result
+    cost_basis_map: dict[str, float] = {}
+    settlement_pnls: list[float] = []
+    if settlement_result and session.final_positions:
+        cost_basis_map, _ = _compute_cost_basis(trades)
+        # Count BUY / SELL trades per token to determine outstanding bets
+        buy_counts: dict[str, int] = {}
+        sell_counts: dict[str, int] = {}
+        for t in trades:
+            if t.side == "BUY":
+                buy_counts[t.token_id] = buy_counts.get(t.token_id, 0) + 1
+            elif t.side == "SELL":
+                sell_counts[t.token_id] = sell_counts.get(t.token_id, 0) + 1
+        for tid, qty in session.final_positions.items():
+            if qty > 0:
+                settle_price = settlement_result.get(tid, 0.0)
+                avg_cost = cost_basis_map.get(tid, 0.0)
+                total_settle_pnl = round((settle_price - avg_cost) * qty, 6)
+                # Split into N entries: one per outstanding BUY trade
+                outstanding = max(1, buy_counts.get(tid, 1) - sell_counts.get(tid, 0))
+                per_entry = round(total_settle_pnl / outstanding, 6)
+                settlement_pnls.extend([per_entry] * outstanding)
 
-    if trade_pnls:
-        m.win_rate = round(len(winners) / len(trade_pnls) * 100, 2)
-        m.best_trade = round(max(trade_pnls), 6) if trade_pnls else 0.0
-        m.worst_trade = round(min(trade_pnls), 6) if trade_pnls else 0.0
+    all_pnls = trade_pnls + settlement_pnls
+
+    winners = [p for p in all_pnls if p > 0]
+    losers = [p for p in all_pnls if p < 0]
+
+    if all_pnls:
+        m.win_rate = round(len(winners) / len(all_pnls) * 100, 2)
+        m.best_trade = round(max(all_pnls), 6)
+        m.worst_trade = round(min(all_pnls), 6)
     if winners:
         m.avg_win = round(sum(winners) / len(winners), 6)
     if losers:
         m.avg_loss = round(sum(losers) / len(losers), 6)
 
-    # Profit factor
+    # Profit factor (capped at 999 to avoid misleading sentinel values)
     total_wins = sum(winners)
     total_losses = abs(sum(losers))
-    m.profit_factor = round(total_wins / total_losses, 4) if total_losses > 0 else (
-        9999.0 if total_wins > 0 else 0.0
-    )
+    if total_losses > 0:
+        m.profit_factor = round(min(total_wins / total_losses, 999.0), 4)
+    elif total_wins > 0:
+        m.profit_factor = 999.0
+    else:
+        m.profit_factor = 0.0
 
     # Average slippage
     slippages = [t.slippage_pct for t in trades if t.slippage_pct != 0]
@@ -79,10 +111,16 @@ def evaluate(session: BacktestSession) -> EvaluationMetrics:
         std_r = _std(returns)
         m.volatility = round(std_r, 6)
 
-        # Annualization factor — assume each sample is 1 second
-        N = 365 * 24 * 3600  # annualize from per-second
+        # Annualization factor based on actual sampling frequency.
+        # equity_curve is sampled every max(1, total_ticks//1000) seconds,
+        # NOT necessarily every 1 second.
+        if duration_secs > 0:
+            samples_per_year = len(returns) * (365 * 24 * 3600 / duration_secs)
+        else:
+            samples_per_year = 365 * 24 * 3600  # fallback: 1s per sample
+
         if std_r > 0:
-            m.sharpe_ratio = round(mean_r / std_r * math.sqrt(N), 4)
+            m.sharpe_ratio = round(mean_r / std_r * math.sqrt(samples_per_year), 4)
         else:
             m.sharpe_ratio = 0.0
 
@@ -91,7 +129,7 @@ def evaluate(session: BacktestSession) -> EvaluationMetrics:
         downside_std = _std(downside) if downside else 0.0
         m.downside_deviation = round(downside_std, 6)
         if downside_std > 0:
-            m.sortino_ratio = round(mean_r / downside_std * math.sqrt(N), 4)
+            m.sortino_ratio = round(mean_r / downside_std * math.sqrt(samples_per_year), 4)
         else:
             m.sortino_ratio = 0.0
 
@@ -103,10 +141,11 @@ def evaluate(session: BacktestSession) -> EvaluationMetrics:
 
     # ── BTC prediction market metrics ─────────────────────────────────────────
 
-    settlement_result = session.settlement_result
     if settlement_result:
         # Settlement PnL: (settlement_price - avg_cost) * held_amount for positions still held
-        cost_basis_map, held_map = _compute_cost_basis(trades)
+        # Reuse cost_basis_map computed earlier (or compute if not available yet)
+        if not cost_basis_map:
+            cost_basis_map, _ = _compute_cost_basis(trades)
         settlement_pnl = 0.0
         total_bought = 0.0
         total_held_at_end = 0.0

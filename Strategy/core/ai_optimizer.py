@@ -500,7 +500,7 @@ def _sanitize_floats(obj):
         if math.isnan(obj):
             return None
         if math.isinf(obj):
-            return 9999.0 if obj > 0 else -9999.0
+            return None
         return obj
     if isinstance(obj, dict):
         return {k: _sanitize_floats(v) for k, v in obj.items()}
