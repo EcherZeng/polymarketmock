@@ -7,7 +7,7 @@ import math
 from abc import abstractmethod
 
 from core.base_strategy import BaseStrategy
-from core.types import FillInfo, Signal, TickContext
+from core.types import FillInfo, Signal, TickContext, param_active
 
 logger = logging.getLogger(__name__)
 
@@ -22,18 +22,18 @@ class UnifiedBaseStrategy(BaseStrategy):
     # ── BaseStrategy interface ───────────────────────────────────────────────
 
     def on_init(self, config: dict) -> None:
-        # Unified rule parameters — absolute price mode
-        self._tp_price: float = config.get("take_profit_price", 0.99)
-        self._sl_price: float = config.get("stop_loss_price", 0.65)
-        # Relative pct mode — anchored to per-token entry price
-        self._tp_pct: float = config.get("take_profit_pct", 0) or 0
-        self._sl_pct: float = config.get("stop_loss_pct", 0) or 0
-        self._force_close_seconds: int = int(config.get("force_close_remaining_seconds", 30))
-        self._consec_loss_threshold: int = int(config.get("consecutive_loss_threshold", 3))
-        self._loss_reduction_pct: float = config.get("loss_position_reduction_pct", 0.5)
+        self._config = config
+        # Unified rule parameters — only set when activated
+        self._tp_price: float | None = config.get("take_profit_price") if param_active(config, "take_profit_price") else None
+        self._sl_price: float | None = config.get("stop_loss_price") if param_active(config, "stop_loss_price") else None
+        self._tp_pct: float | None = (config.get("take_profit_pct") or None) if param_active(config, "take_profit_pct") else None
+        self._sl_pct: float | None = (config.get("stop_loss_pct") or None) if param_active(config, "stop_loss_pct") else None
+        self._force_close_seconds: int | None = int(config["force_close_remaining_seconds"]) if param_active(config, "force_close_remaining_seconds") else None
+        self._consec_loss_threshold: int | None = int(config["consecutive_loss_threshold"]) if param_active(config, "consecutive_loss_threshold") else None
+        self._loss_reduction_pct: float = config.get("loss_position_reduction_pct", 0.5) if param_active(config, "loss_position_reduction_pct") else 0.0
 
         # Exit sell mode: ideal (mid price) vs orderbook (VWAP with protections)
-        self._exit_use_orderbook: bool = bool(config.get("exit_use_orderbook_mode", False))
+        self._exit_use_orderbook: bool = bool(config.get("exit_use_orderbook_mode", False)) if param_active(config, "exit_use_orderbook_mode") else False
         self._exit_min_sell_price: float = float(config.get("exit_min_sell_price", 0.0))
         self._exit_reduction_pct: float = float(config.get("exit_reduction_pct", 1.0))
 
@@ -68,9 +68,9 @@ class UnifiedBaseStrategy(BaseStrategy):
     def on_tick(self, ctx: TickContext) -> list[Signal]:
         signals: list[Signal] = []
 
-        # ── 1. Force close near expiry (remaining <= 30s) ───────────────────
+        # ── 1. Force close near expiry (remaining <= threshold) ──────────────
         remaining_seconds = ctx.total_ticks - ctx.index  # 1 tick ≈ 1 second
-        if remaining_seconds <= self._force_close_seconds:
+        if self._force_close_seconds is not None and remaining_seconds <= self._force_close_seconds:
             for token_id, qty in ctx.positions.items():
                 if qty > 0:
                     entry_side = self._entry_price_sides.get(token_id)
@@ -101,15 +101,15 @@ class UnifiedBaseStrategy(BaseStrategy):
 
             # Relative pct mode — anchored to entry price per token
             if entry is not None and entry > 0:
-                if self._tp_pct > 0 and effective_ref >= entry * (1 + self._tp_pct):
+                if self._tp_pct is not None and self._tp_pct > 0 and effective_ref >= entry * (1 + self._tp_pct):
                     should_close = True
-                if self._sl_pct > 0 and effective_ref <= entry * (1 - self._sl_pct):
+                if self._sl_pct is not None and self._sl_pct > 0 and effective_ref <= entry * (1 - self._sl_pct):
                     should_close = True
 
             # Absolute price mode
-            if effective_ref >= self._tp_price:
+            if self._tp_price is not None and effective_ref >= self._tp_price:
                 should_close = True
-            if self._sl_price > 0 and effective_ref <= self._sl_price:
+            if self._sl_price is not None and self._sl_price > 0 and effective_ref <= self._sl_price:
                 should_close = True
 
             if should_close:
@@ -142,7 +142,7 @@ class UnifiedBaseStrategy(BaseStrategy):
             if entry > 0:
                 if exit_effective_price < entry:
                     self._consecutive_losses += 1
-                    if self._consecutive_losses >= self._consec_loss_threshold:
+                    if self._consec_loss_threshold is not None and self._consecutive_losses >= self._consec_loss_threshold:
                         self._position_scale *= (1.0 - self._loss_reduction_pct)
                 else:
                     self._consecutive_losses = 0

@@ -156,7 +156,7 @@
   - 状态：维护 `activeParams: Set<string>` 记录用户主动添加的参数 key
   - 注意：`activeParams` 初始值 = preset 的 `default_config` 中所有 key（即当前已有可见参数），用户只能添加/移除 `advanced` 参数
 
-##### 1.3 Backend — 未激活参数完全剔除计算路径（方案 B）
+##### 1.3 Backend — 未激活参数完全剔除计算路径（方案 B） ✅ DONE
 - **涉及文件**：`Strategy/core/registry.py`、`Strategy/core/runner.py`、`Strategy/core/unified_base.py`、`Strategy/strategies/unified_strategy.py`
 - **方案**：未激活参数**完全不传给策略**，策略代码判断参数是否存在，缺失则跳过整个逻辑分支。
 - **任务**：

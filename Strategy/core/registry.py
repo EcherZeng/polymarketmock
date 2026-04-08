@@ -132,11 +132,14 @@ class StrategyRegistry:
 
         Scans param_schema for params with ``depends_on``.  If the toggle key
         is falsy in *config*, the dependent param is forced to its
-        ``disable_value`` (when defined).  Returns a **new** dict.
+        ``disable_value`` (when defined).  Only applies to keys already present
+        in *config* — never injects new keys.  Returns a **new** dict.
         """
         schema = self.get_param_schema()
         result = dict(config)
         for key, meta in schema.items():
+            if key not in result:
+                continue  # param not active — don't inject
             toggle_key = meta.get("depends_on")
             if not toggle_key:
                 continue

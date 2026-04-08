@@ -5,6 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
+# ── Param guard ──────────────────────────────────────────────────────────────
+
+def param_active(config: dict, key: str) -> bool:
+    """Return True if *key* is present in config (i.e. the user activated it)."""
+    return key in config
+
+
 @dataclass
 class Signal:
     """Trading signal produced by a strategy."""
