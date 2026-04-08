@@ -324,6 +324,7 @@ export interface AiOptimizeTask {
   completed_runs: number
   total_runs: number
   best_metric: number | null
+  best_total_trades: number
   created_at: string
 }
 

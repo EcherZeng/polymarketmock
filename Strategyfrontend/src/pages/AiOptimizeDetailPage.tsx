@@ -182,6 +182,9 @@ export default function AiOptimizeDetailPage() {
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-emerald-800">
               当前最优: {task.optimize_target} = {task.best_metric != null ? fmtMetric(task.optimize_target, task.best_metric) : "N/A"}
+              <span className="ml-2 text-xs font-normal text-emerald-600">
+                ({task.best_total_trades}笔交易{task.best_total_trades < 5 ? " · 低交易量，可信度低" : ""})
+              </span>
             </h3>
             <div className="flex items-center gap-2">
               {task.best_session_id && (

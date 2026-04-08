@@ -77,6 +77,7 @@ class OptimizeTask:
     best_config: dict = field(default_factory=dict)
     best_metric: float = float("-inf")
     best_session_id: str = ""
+    best_total_trades: int = 0
     error: str = ""  # kept for backward compat (last fatal error)
     errors: list[dict] = field(default_factory=list)  # accumulated structured errors
     persist_errors: list[str] = field(default_factory=list)  # callback persistence failures
@@ -411,6 +412,8 @@ def _build_group_prompt(
     prev_round_digests: list[dict],
     prev_round_number: int,
     param_keys: list[str],
+    best_metric: float = float("-inf"),
+    best_total_trades: int = 0,
 ) -> str:
     """Build AI prompt with per-group tracking from the previous round.
 
@@ -528,6 +531,15 @@ def _build_group_prompt(
             "",
             "## 无历史结果 (首轮探索)",
             "[重要] 首轮请使用偏宽松的参数组合，确保策略能产生交易。",
+        ])
+
+    # Current global best (across all rounds)
+    if best_metric != float("-inf") and round_number > 1:
+        reliability = "可信" if best_total_trades >= 5 else f"低交易量({best_total_trades}笔)，可信度低"
+        parts.extend([
+            "",
+            f"## 当前全局最优 ({optimize_target}={best_metric:.4f}, total_trades={best_total_trades}, {reliability})",
+            "[注意] 交易笔数极少(如<5笔)的高胜率不具参考价值，优化时应确保策略能产生足够交易。",
         ])
 
     parts.extend([
@@ -874,6 +886,8 @@ class AIOptimizer:
                         prev_round_digests=prev_digests,
                         prev_round_number=prev_round,
                         param_keys=param_keys,
+                        best_metric=task.best_metric,
+                        best_total_trades=task.best_total_trades,
                     )
 
                     task.ai_messages.append({
@@ -1001,12 +1015,31 @@ class AIOptimizer:
                                 round_result.digests.append(digest)
                                 task.all_digests.append(digest)
 
-                                # Track best
+                                # Track best — require minimum trades to avoid
+                                # low-volume flukes (e.g. 1 trade → win_rate=1.0)
+                                _MIN_TRADES_FOR_BEST = 5
                                 metric_val = getattr(metrics, task.optimize_target, None)
-                                if metric_val is not None and metric_val > task.best_metric:
-                                    task.best_metric = metric_val
-                                    task.best_config = merged_config
-                                    task.best_session_id = session.session_id
+                                if metric_val is not None:
+                                    new_enough = metrics.total_trades >= _MIN_TRADES_FOR_BEST
+                                    old_enough = task.best_total_trades >= _MIN_TRADES_FOR_BEST
+                                    should_update = False
+                                    if task.best_metric == float("-inf"):
+                                        # No best yet — accept anything
+                                        should_update = True
+                                    elif new_enough and not old_enough:
+                                        # New has sufficient trades, old doesn't — always replace
+                                        should_update = True
+                                    elif not new_enough and old_enough:
+                                        # Old is reliable, new is fluke — never replace
+                                        should_update = False
+                                    else:
+                                        # Both same reliability tier — use metric comparison
+                                        should_update = metric_val > task.best_metric
+                                    if should_update:
+                                        task.best_metric = metric_val
+                                        task.best_config = merged_config
+                                        task.best_session_id = session.session_id
+                                        task.best_total_trades = metrics.total_trades
 
                             except asyncio.TimeoutError:
                                 err_msg = f"[round_{round_num}] config {cfg_idx} slug {slug} timed out after {config.slug_timeout}s"

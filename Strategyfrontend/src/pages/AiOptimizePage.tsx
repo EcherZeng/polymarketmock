@@ -263,6 +263,9 @@ export default function AiOptimizePage() {
                 {t.best_metric !== null && (
                   <div className="mt-1 text-sm">
                     最优 {t.optimize_target}: <span className="font-medium text-emerald-600">{fmtMetric(t.optimize_target, t.best_metric)}</span>
+                    <span className="ml-1 text-xs text-muted-foreground">
+                      ({t.best_total_trades}笔{t.best_total_trades < 5 ? " · 低可信" : ""})
+                    </span>
                   </div>
                 )}
 
