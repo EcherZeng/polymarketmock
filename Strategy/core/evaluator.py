@@ -62,7 +62,13 @@ def evaluate(session: BacktestSession) -> EvaluationMetrics:
                 avg_cost = cost_basis_map.get(tid, 0.0)
                 total_settle_pnl = round((settle_price - avg_cost) * qty, 6)
                 # Split into N entries: one per outstanding BUY trade
-                outstanding = max(1, buy_counts.get(tid, 1) - sell_counts.get(tid, 0))
+                buys = buy_counts.get(tid, 0)
+                sells = sell_counts.get(tid, 0)
+                outstanding = buys - sells
+                if outstanding <= 0:
+                    # All buys matched by sells, yet qty > 0 (rounding or
+                    # external position).  Treat as a single settlement entry.
+                    outstanding = 1
                 per_entry = round(total_settle_pnl / outstanding, 6)
                 settlement_pnls.extend([per_entry] * outstanding)
 

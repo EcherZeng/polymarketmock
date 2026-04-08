@@ -69,6 +69,7 @@ export default function StrategyPage() {
   const [dataTab, setDataTab] = useState<"archives" | "portfolios">("archives")
   const [portfolioSearch, setPortfolioSearch] = useState("")
   const [selectedPortfolioId, setSelectedPortfolioId] = useState<string>("")
+  const [cumulativeCapital, setCumulativeCapital] = useState(false)
 
   const { data: strategies = [], isLoading: loadingStrategies } = useQuery<StrategyInfo[]>({
     queryKey: ["strategies"],
@@ -278,6 +279,7 @@ export default function StrategyPage() {
       initial_balance: balance,
       config: configValues,
       ...(settlement_result ? { settlement_result } : {}),
+      cumulative_capital: cumulativeCapital,
     })
   }
 
@@ -295,6 +297,7 @@ export default function StrategyPage() {
       initial_balance: balance,
       config: configValues,
       ...(settlement_result ? { settlement_result } : {}),
+      cumulative_capital: cumulativeCapital,
     })
   }
 
@@ -407,6 +410,20 @@ export default function StrategyPage() {
               >
                 {mutation.isPending ? "运行中..." : "运行回测"}
               </button>
+
+              {/* Cumulative capital toggle */}
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={cumulativeCapital}
+                  onChange={(e) => setCumulativeCapital(e.target.checked)}
+                  className="size-4 rounded border accent-emerald-600"
+                />
+                <span className="text-muted-foreground">累计本金模式</span>
+                {cumulativeCapital && (
+                  <span className="text-xs text-amber-600">(串行执行)</span>
+                )}
+              </label>
 
               {/* Batch run */}
               <button

@@ -45,7 +45,7 @@
   - ai_optimizer：传给 AI 的 prompt 中 best 展示需附带 total_trades，让 AI 自行判断可信度
   - 添加回归测试：模拟低交易量高 win_rate session，验证不会成为 best
 
-##### 3.2 胜率(win_rate)结算拆分逻辑审计
+##### 3.2 胜率(win_rate)结算拆分逻辑审计 ✅ DONE
 - **现状**：`evaluator.py` 中 settlement_pnls 按 `outstanding = max(1, buy_count - sell_count)` 拆分为虚拟 entry。边界情况（buy_count=0 fallback 到 1）逻辑存疑。
 - **涉及文件**：`Strategy/core/evaluator.py` L46-70
 - **任务**：
@@ -53,7 +53,7 @@
   - 修正 settlement_pnls 拆分策略，确保 outstanding 计数与实际买入笔数一致
   - 添加单元测试覆盖：纯持仓结算、部分卖出+结算、全部卖出无结算、0 笔交易等场景
 
-##### 3.3 其余指标交叉验证
+##### 3.3 其余指标交叉验证 ✅ DONE
 - **现状**：profit_factor、avg_win/avg_loss、sharpe/sortino 均依赖 all_pnls 或 equity_curve；3.1/3.2 修复后需全链路回归。
 - **涉及文件**：`Strategy/core/evaluator.py` 全文
 - **任务**：
@@ -66,7 +66,7 @@
 #### P1 — Req5: 本金累计模式
 **优先级理由**：核心功能缺陷，直接影响批量回测结果的真实性。修复后 Req4 的对照才有意义。
 
-##### 5.1 Backend — BatchRunner 累计本金模式
+##### 5.1 Backend — BatchRunner 累计本金模式 ✅ DONE
 - **现状**：`batch_runner.py` 中 `_run_batch` 对每个 slug 都传入相同的 `task.initial_balance`，无滚动资金逻辑。
 - **涉及文件**：`Strategy/core/batch_runner.py`、`Strategy/api/execution.py`
 - **任务**：
@@ -78,13 +78,13 @@
     - **当某 slug 结束后 final_equity ≤ 0 时，中止后续所有 slug**（标记为 "capital_exhausted"）
   - 当 `cumulative_capital=False` 时保持现有并行逻辑不变
 
-##### 5.2 Backend — 结果中记录资金链路
+##### 5.2 Backend — 结果中记录资金链路 ✅ DONE
 - **涉及文件**：`Strategy/core/types.py`、`Strategy/api/result_store.py`
 - **任务**：
   - `BacktestSession` / 结果 JSON 中增加 `capital_mode: "fixed" | "cumulative"` 字段
   - 累计模式下在 batch result 中记录每个 slug 的起始/结束资金链
 
-##### 5.3 Frontend — 累计本金开关
+##### 5.3 Frontend — 累计本金开关 ✅ DONE
 - **涉及文件**：`Strategyfrontend/src/pages/StrategyPage.tsx`、`Strategyfrontend/src/api/client.ts`、`Strategyfrontend/src/types/index.ts`
 - **任务**：
   - 批量执行区域新增 Switch/Checkbox "累计本金模式"

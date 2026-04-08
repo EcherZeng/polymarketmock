@@ -99,6 +99,7 @@ class BatchTask:
     config: dict
     initial_balance: float
     settlement_result: dict[str, float] | None = None
+    cumulative_capital: bool = False
     status: str = "running"  # "running" | "completed" | "cancelled"
     created_at: str = ""
     total: int = 0
@@ -108,6 +109,7 @@ class BatchTask:
     errors: dict[str, str] = field(default_factory=dict)
     persist_errors: list[str] = field(default_factory=list)  # callback persistence failures
     workflows: dict[str, SlugWorkflow] = field(default_factory=dict)
+    capital_chain: list[dict] = field(default_factory=list)  # cumulative mode: [{slug, start, end}]
 
 
 def _extract_summary(session: BacktestSession) -> ResultSummary:
@@ -152,6 +154,7 @@ class BatchRunner:
         user_config: dict,
         initial_balance: float,
         settlement_result: dict[str, float] | None = None,
+        cumulative_capital: bool = False,
     ) -> str:
         """Submit a batch of backtests. Returns batch_id."""
         batch_id = uuid.uuid4().hex[:12]
@@ -162,6 +165,7 @@ class BatchRunner:
             config=user_config,
             initial_balance=initial_balance,
             settlement_result=settlement_result,
+            cumulative_capital=cumulative_capital,
             created_at=datetime.now(timezone.utc).isoformat(),
             total=len(slugs),
             workflows={s: SlugWorkflow(slug=s) for s in slugs},
@@ -195,14 +199,15 @@ class BatchRunner:
                     )
             return data_cache[slug]
 
-        async def run_one(slug: str) -> None:
+        async def run_one(slug: str, override_balance: float | None = None) -> BacktestSession | None:
+            """Run a single slug backtest. Returns session on success (for cumulative mode)."""
             wf = task.workflows[slug]
             if task.status == "cancelled":
                 wf.status = "skipped"
                 wf.log("cancelled", "skip", "Batch was cancelled before this slug started")
                 async with _lock:
                     task.completed_count += 1
-                return
+                return None
 
             async with self._semaphore:
                 wf.status = "running"
@@ -221,7 +226,7 @@ class BatchRunner:
                     logger.error("Batch %s slug %s data_load failed: %s", batch_id, slug, e)
                     async with _lock:
                         task.completed_count += 1
-                    return
+                    return None
                 dt_load = (time.monotonic() - t0) * 1000
 
                 # Validate data
@@ -237,7 +242,7 @@ class BatchRunner:
                     logger.warning("Batch %s slug %s has empty archive", batch_id, slug)
                     async with _lock:
                         task.completed_count += 1
-                    return
+                    return None
 
                 wf.log(
                     "data_load", "ok",
@@ -247,6 +252,7 @@ class BatchRunner:
                 )
 
                 # ── Step 2: Run backtest (strategy init + tick loop) ─────
+                slug_balance = override_balance if override_balance is not None else task.initial_balance
                 t1 = time.monotonic()
                 try:
                     session = await asyncio.wait_for(
@@ -256,7 +262,7 @@ class BatchRunner:
                             task.strategy,
                             slug,
                             task.config,
-                            task.initial_balance,
+                            slug_balance,
                             data,
                             task.settlement_result,
                         ),
@@ -273,7 +279,7 @@ class BatchRunner:
                     logger.error("Batch %s slug %s timed out after %ds", batch_id, slug, slug_timeout)
                     async with _lock:
                         task.completed_count += 1
-                    return
+                    return None
                 except Exception as e:
                     tb = traceback.format_exc()
                     wf.log("tick_loop", "fail", f"Backtest execution error: {e}", detail=tb)
@@ -283,7 +289,7 @@ class BatchRunner:
                     logger.error("Batch %s slug %s tick_loop failed: %s\n%s", batch_id, slug, e, tb)
                     async with _lock:
                         task.completed_count += 1
-                    return
+                    return None
                 dt_run = (time.monotonic() - t1) * 1000
 
                 # Check if runner reported failure
@@ -299,7 +305,7 @@ class BatchRunner:
                     logger.warning("Batch %s slug %s runner returned failed", batch_id, slug)
                     async with _lock:
                         task.completed_count += 1
-                    return
+                    return None
 
                 wf.log(
                     "tick_loop", "ok",
@@ -308,6 +314,10 @@ class BatchRunner:
                     f"duration={session.duration_seconds:.2f}s",
                     duration_ms=dt_run,
                 )
+
+                # Tag capital mode
+                if task.cumulative_capital:
+                    session.capital_mode = "cumulative"
 
                 # ── Step 3: Evaluate metrics ─────────────────────────────
                 t2 = time.monotonic()
@@ -325,7 +335,7 @@ class BatchRunner:
                     logger.error("Batch %s slug %s evaluate failed: %s", batch_id, slug, e)
                     async with _lock:
                         task.completed_count += 1
-                    return
+                    return None
                 dt_eval = (time.monotonic() - t2) * 1000
 
                 wf.log(
@@ -368,13 +378,65 @@ class BatchRunner:
                 async with _lock:
                     task.completed_count += 1
 
-        # ── Process slugs in chunks to limit peak memory ─────────────────
+                return session
+
+        # ── Process slugs ────────────────────────────────────────────────
         slugs = task.slugs
-        for chunk_start in range(0, len(slugs), chunk_size):
-            if task.status == "cancelled":
-                break
-            chunk = slugs[chunk_start : chunk_start + chunk_size]
-            await asyncio.gather(*(run_one(slug) for slug in chunk))
+
+        if task.cumulative_capital:
+            # ── Cumulative capital mode: serial execution ─────────────────
+            current_balance = task.initial_balance
+            for slug in slugs:
+                if task.status == "cancelled":
+                    break
+                task.capital_chain.append({
+                    "slug": slug,
+                    "start_balance": round(current_balance, 6),
+                    "end_balance": None,
+                    "status": "pending",
+                })
+                session = await run_one(slug, override_balance=current_balance)
+                chain_entry = task.capital_chain[-1]
+                if session is not None and session.status == "completed":
+                    chain_entry["end_balance"] = round(session.final_equity, 6)
+                    chain_entry["status"] = "completed"
+                    current_balance = session.final_equity
+                    # Capital exhausted — stop all subsequent slugs
+                    if current_balance <= 0:
+                        chain_entry["status"] = "capital_exhausted"
+                        # Mark remaining slugs as skipped
+                        remaining_idx = slugs.index(slug) + 1
+                        for rem_slug in slugs[remaining_idx:]:
+                            wf_rem = task.workflows[rem_slug]
+                            wf_rem.status = "skipped"
+                            wf_rem.log(
+                                "cancelled", "skip",
+                                f"Capital exhausted after {slug} (balance={current_balance:.2f})",
+                            )
+                            task.capital_chain.append({
+                                "slug": rem_slug,
+                                "start_balance": 0.0,
+                                "end_balance": 0.0,
+                                "status": "capital_exhausted",
+                            })
+                            task.completed_count += 1
+                        break
+                else:
+                    chain_entry["end_balance"] = round(current_balance, 6)
+                    chain_entry["status"] = "failed"
+                    # On failure in cumulative mode, keep current_balance unchanged
+
+                # Release session from memory
+                task.results.pop(slug, None)
+                data_cache.pop(slug, None)
+                gc.collect()
+        else:
+            # ── Fixed capital mode: parallel chunked execution ────────────
+            for chunk_start in range(0, len(slugs), chunk_size):
+                if task.status == "cancelled":
+                    break
+                chunk = slugs[chunk_start : chunk_start + chunk_size]
+                await asyncio.gather(*(run_one(slug) for slug in chunk))
 
             # Release full sessions from previous chunk — summaries are kept
             for slug in chunk:

@@ -35,6 +35,7 @@ class BatchRequest(BaseModel):
     initial_balance: float = Field(default=10000, gt=0)
     config: dict = Field(default_factory=dict)
     settlement_result: dict[str, float] | None = None
+    cumulative_capital: bool = False
 
 
 # ── Result helpers ───────────────────────────────────────────────────────────
@@ -101,6 +102,7 @@ async def run_batch(req: BatchRequest):
 
     batch_id = await state.batch_runner.submit(
         req.strategy, req.slugs, req.config, req.initial_balance, req.settlement_result,
+        cumulative_capital=req.cumulative_capital,
     )
     return {"batch_id": batch_id, "total": len(req.slugs)}
 
@@ -191,6 +193,8 @@ async def get_task(batch_id: str):
             "total": task.total,
             "completed": task.completed_count,
             "created_at": task.created_at,
+            "cumulative_capital": task.cumulative_capital,
+            "capital_chain": task.capital_chain,
             "results": results_summary,
             "errors": task.errors,
             "persist_errors": task.persist_errors,

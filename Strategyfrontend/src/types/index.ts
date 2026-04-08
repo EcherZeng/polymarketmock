@@ -196,6 +196,7 @@ export interface BatchRequest {
   initial_balance: number
   config: Record<string, unknown>
   settlement_result?: Record<string, number>
+  cumulative_capital?: boolean
 }
 
 // ── BTC Kline (Binance) ────────────────────────────────────────────────────
@@ -260,7 +261,16 @@ export interface SlugWorkflow {
   steps: StepLog[]
 }
 
+export interface CapitalChainEntry {
+  slug: string
+  start_balance: number
+  end_balance: number | null
+  status: string
+}
+
 export interface BatchTaskDetail extends BatchTask {
+  cumulative_capital: boolean
+  capital_chain: CapitalChainEntry[]
   results: Record<string, BatchResultSummary>
   errors: Record<string, string>
   persist_errors: string[]
