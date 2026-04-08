@@ -116,7 +116,7 @@
   - `core/anchor_pricing.py` — `_weighted_micro_price()`、`_compute_anchor_price()` tiered 逻辑（~200行）
 - **原则**：tick 循环内调用签名不变，仅将辅助函数移至独立模块
 
-##### R.3 evaluator.py 按指标分类拆分（450行 → 3 个模块）
+##### R.3 evaluator.py 按指标分类拆分（450行 → 3 个模块） ✅ DONE
 - **现状**：returns/risk/trade/settlement 4 类 20+ 指标全在一个 `evaluate()` 函数中
 - **涉及文件**：`Strategy/core/evaluator.py`
 - **拆分目标**：
