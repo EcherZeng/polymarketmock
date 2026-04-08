@@ -139,7 +139,7 @@
 #### P2 — Req1: 参数添加减负
 **优先级理由**：高频交互 UX 改进，直接降低新建策略的认知负担，同时防止隐藏参数以默认值参与计算导致偏差。
 
-##### 1.1 param_schema 元数据扩展 — 标记核心/高级参数
+##### 1.1 param_schema 元数据扩展 — 标记核心/高级参数 ✅ DONE
 - **现状**：`strategy_presets.json` param_schema 有 group/label/desc/disable_value，但无"是否核心参数"标记。前端 visibleKeys 从 `default_config` key 集合决定可见性。
 - **涉及文件**：`Strategy/strategy_presets.json`
 - **任务**：
