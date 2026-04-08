@@ -147,7 +147,7 @@
   - 各 preset 的 default_config 保持不变（向后兼容）
   - 确保 registry.py 加载时正确传递 visibility 字段
 
-##### 1.2 Frontend — StrategyConfigForm 分层渲染 + Add Param
+##### 1.2 Frontend — StrategyConfigForm 分层渲染 + Add Param ✅ DONE
 - **涉及文件**：`Strategyfrontend/src/components/StrategyConfigForm.tsx`、`Strategyfrontend/src/types/index.ts`
 - **任务**：
   - 默认只渲染 `visibility=core` 的参数
