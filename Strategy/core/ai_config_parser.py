@@ -10,11 +10,13 @@ def parse_ai_configs(
     raw: str,
     param_schema: dict,
     runs_per_round: int,
+    active_params: set[str] | None = None,
 ) -> tuple[list[dict], str]:
     """Parse and validate AI-generated configs.
 
     Returns (configs, reason).
     Clamps values to schema min/max. Discards invalid entries.
+    If active_params is provided, discards keys not in active_params.
     """
     try:
         parsed = json.loads(raw)
@@ -62,6 +64,9 @@ def parse_ai_configs(
                 clamped[key] = round(v, 6)
             else:
                 clamped[key] = val
+        # Drop keys not in active_params (defense-in-depth for Method B)
+        if active_params is not None:
+            clamped = {k: v for k, v in clamped.items() if k in active_params}
         configs.append(clamped)
 
     return configs, reason

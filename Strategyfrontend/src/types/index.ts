@@ -314,6 +314,7 @@ export interface AiOptimizeRequest {
   runs_per_round: number
   initial_balance: number
   param_keys?: string[]
+  active_params?: string[]
   settlement_result?: Record<string, number>
   llm_model: string
 }

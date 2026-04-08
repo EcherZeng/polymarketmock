@@ -34,6 +34,8 @@ class OptimizeTask:
     runs_per_round: int
     initial_balance: float
     settlement_result: dict[str, float] | None = None
+    param_keys: list[str] = field(default_factory=list)
+    active_params: list[str] = field(default_factory=list)
 
     status: str = "running"  # "running" | "completed" | "cancelled" | "failed"
     created_at: str = ""

@@ -108,10 +108,16 @@ class AIOptimizer:
         initial_balance: float,
         llm_model: str | None = None,
         param_keys: list[str] | None = None,
+        active_params: list[str] | None = None,
         settlement_result: dict[str, float] | None = None,
     ) -> str:
         """Submit an AI optimization task. Returns task_id."""
         task_id = uuid.uuid4().hex[:12]
+
+        # Resolve active_params: which parameters exist in the config at all
+        if not active_params:
+            active_params = list(base_config.keys())
+        active_set = set(active_params)
 
         # Resolve param_keys: which parameters AI can tune
         if not param_keys:
@@ -121,6 +127,12 @@ class AIOptimizer:
                 k for k, v in schema.items()
                 if v.get("type") != "bool"
             ]
+
+        # Constrain param_keys to active params only
+        param_keys = [k for k in param_keys if k in active_set]
+
+        # Filter base_config to active params only
+        base_config = {k: v for k, v in base_config.items() if k in active_set}
 
         task = OptimizeTask(
             task_id=task_id,
@@ -132,6 +144,8 @@ class AIOptimizer:
             runs_per_round=runs_per_round,
             initial_balance=initial_balance,
             settlement_result=settlement_result,
+            param_keys=param_keys,
+            active_params=active_params,
             created_at=datetime.now(timezone.utc).isoformat(),
             total_runs=1 * len(slugs) + max_rounds * runs_per_round * len(slugs),
         )
@@ -156,6 +170,7 @@ class AIOptimizer:
         """Execute the multi-round optimization loop."""
         task = self._tasks[task_id]
         param_schema = self._registry.get_param_schema()
+        active_set = set(task.active_params)
 
         try:
             # ── Phase 1: Load data + build market profiles (once) ────────
@@ -254,7 +269,7 @@ class AIOptimizer:
                     })
 
                     try:
-                        configs, reason = parse_ai_configs(raw_response, param_schema, task.runs_per_round)
+                        configs, reason = parse_ai_configs(raw_response, param_schema, task.runs_per_round, active_set)
                     except Exception as e:
                         tb = traceback.format_exc()
                         err_msg = f"[round_{round_num}] Parse error: {e}"
@@ -296,7 +311,9 @@ class AIOptimizer:
                         break
 
                     # Merge: base_config overridden by AI-suggested params
+                    # Filter to active_params only — inactive params never enter
                     merged_config = {**task.base_config, **ai_config}
+                    merged_config = {k: v for k, v in merged_config.items() if k in active_set}
                     merged_config = self._registry.normalize_config(merged_config)
 
                     for slug in task.slugs:

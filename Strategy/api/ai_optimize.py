@@ -23,6 +23,7 @@ class OptimizeRequest(BaseModel):
     runs_per_round: int = Field(default=5, ge=1, le=20)
     initial_balance: float = Field(default=10000, gt=0)
     param_keys: list[str] | None = None
+    active_params: list[str] | None = None
     settlement_result: dict[str, float] | None = None
 
     # LLM configuration
@@ -74,6 +75,7 @@ async def submit_optimization(req: OptimizeRequest):
         initial_balance=req.initial_balance,
         llm_model=req.llm_model,
         param_keys=req.param_keys,
+        active_params=req.active_params,
         settlement_result=req.settlement_result,
     )
 

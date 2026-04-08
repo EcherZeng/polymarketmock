@@ -182,6 +182,7 @@ export default function AiOptimizePage() {
       runs_per_round: runsPerRound,
       initial_balance: balance,
       param_keys: [...selectedParamKeys],
+      active_params: Object.keys(baseConfig),
       llm_model: llmModel,
     }
 

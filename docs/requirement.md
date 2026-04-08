@@ -173,7 +173,7 @@
   - unified_strategy 中入场过滤条件（min_price/momentum/std 等）同理，参数缺失 = 不过滤（相当于该条件始终通过）
   - **不使用 disable_value 替代**，确保不存在的参数不会以任何默认值隐式参与计算
 
-##### 1.4 AI 优化适配 — 仅优化激活参数（方案 B）
+##### 1.4 AI 优化适配 — 仅优化激活参数（方案 B） ✅ DONE
 - **涉及文件**：`Strategy/core/ai_optimizer.py`、`Strategy/api/ai_optimize.py`
 - **任务**：
   - AI 优化请求携带 `active_params: list[str]`
