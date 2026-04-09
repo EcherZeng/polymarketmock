@@ -18,6 +18,7 @@ const statusLabel: Record<string, string> = {
   completed: "已完成",
   cancelled: "已停止",
   failed: "失败",
+  interrupted: "已中断",
 }
 
 const statusColor: Record<string, string> = {
@@ -25,6 +26,7 @@ const statusColor: Record<string, string> = {
   completed: "bg-emerald-100 text-emerald-700",
   cancelled: "bg-amber-100 text-amber-700",
   failed: "bg-red-100 text-red-700",
+  interrupted: "bg-orange-100 text-orange-700",
 }
 
 const PCT_METRICS = new Set(["total_return_pct", "win_rate", "max_drawdown", "hold_to_settlement_ratio", "annualized_return"])

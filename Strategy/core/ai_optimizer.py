@@ -151,6 +151,9 @@ class AIOptimizer:
         )
         self._tasks[task_id] = task
 
+        # Persist initial snapshot so the task is findable after a server restart.
+        self._persist_task(task)
+
         # Resolve LLM model
         resolved_model = llm_model or config.llm_default_model
 

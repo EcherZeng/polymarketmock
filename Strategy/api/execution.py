@@ -104,6 +104,28 @@ async def run_batch(req: BatchRequest):
         req.strategy, req.slugs, req.config, req.initial_balance, req.settlement_result,
         cumulative_capital=req.cumulative_capital,
     )
+
+    # Persist initial snapshot immediately so the task is always findable after a
+    # server restart, even if the detail page was never opened during the run.
+    if state.batch_store is not None:
+        task = state.batch_runner.get_task(batch_id)
+        if task is not None:
+            state.batch_store.put(batch_id, {
+                "batch_id": task.batch_id,
+                "strategy": task.strategy,
+                "slugs": task.slugs,
+                "config": task.config,
+                "status": task.status,
+                "total": task.total,
+                "completed": task.completed_count,
+                "created_at": task.created_at,
+                "cumulative_capital": task.cumulative_capital,
+                "capital_chain": task.capital_chain,
+                "results": {},
+                "errors": {},
+                "workflows": {s: _serialize_workflow(wf) for s, wf in task.workflows.items()},
+            })
+
     return {"batch_id": batch_id, "total": len(req.slugs)}
 
 

@@ -14,6 +14,7 @@ const statusLabel: Record<string, string> = {
   failed: "失败",
   pending: "等待中",
   skipped: "已跳过",
+  interrupted: "已中断",
 }
 
 const statusColor: Record<string, string> = {
@@ -23,6 +24,7 @@ const statusColor: Record<string, string> = {
   failed: "bg-red-100 text-red-700",
   pending: "bg-muted text-muted-foreground",
   skipped: "bg-amber-100 text-amber-700",
+  interrupted: "bg-orange-100 text-orange-700",
 }
 
 const stepLabel: Record<string, string> = {
@@ -49,7 +51,7 @@ export default function BatchDetailPage() {
   const [returnFilter, setReturnFilter] = useState<"all" | "positive" | "negative">("all")
   const [portfolioOpen, setPortfolioOpen] = useState(false)
 
-  const { data: task, isLoading } = useQuery<BatchTaskDetail>({
+  const { data: task, isLoading, isError } = useQuery<BatchTaskDetail>({
     queryKey: ["batchTask", batchId],
     queryFn: () => fetchBatchTask(batchId!),
     enabled: !!batchId,
@@ -152,8 +154,17 @@ export default function BatchDetailPage() {
       }))
   }, [results, selectedIds, task])
 
-  if (isLoading || !task) {
+  if (isLoading) {
     return <div className="py-12 text-center text-muted-foreground">加载中...</div>
+  }
+
+  if (isError || !task) {
+    return (
+      <div className="py-12 text-center text-muted-foreground">
+        批量任务不存在或已被清除 ·{" "}
+        <Link to="/batch" className="text-primary underline">返回列表</Link>
+      </div>
+    )
   }
 
   const progress = task.total > 0 ? (task.completed / task.total) * 100 : 0
