@@ -35,6 +35,7 @@ class BatchRequest(BaseModel):
     initial_balance: float = Field(default=10000, gt=0)
     config: dict = Field(default_factory=dict)
     settlement_result: dict[str, float] | None = None
+    cumulative_capital: bool = False
 
 
 # ── Result helpers ───────────────────────────────────────────────────────────
@@ -101,7 +102,30 @@ async def run_batch(req: BatchRequest):
 
     batch_id = await state.batch_runner.submit(
         req.strategy, req.slugs, req.config, req.initial_balance, req.settlement_result,
+        cumulative_capital=req.cumulative_capital,
     )
+
+    # Persist initial snapshot immediately so the task is always findable after a
+    # server restart, even if the detail page was never opened during the run.
+    if state.batch_store is not None:
+        task = state.batch_runner.get_task(batch_id)
+        if task is not None:
+            state.batch_store.put(batch_id, {
+                "batch_id": task.batch_id,
+                "strategy": task.strategy,
+                "slugs": task.slugs,
+                "config": task.config,
+                "status": task.status,
+                "total": task.total,
+                "completed": task.completed_count,
+                "created_at": task.created_at,
+                "cumulative_capital": task.cumulative_capital,
+                "capital_chain": task.capital_chain,
+                "results": {},
+                "errors": {},
+                "workflows": {s: _serialize_workflow(wf) for s, wf in task.workflows.items()},
+            })
+
     return {"batch_id": batch_id, "total": len(req.slugs)}
 
 
@@ -119,6 +143,7 @@ async def list_tasks():
                 "batch_id": t.batch_id,
                 "strategy": t.strategy,
                 "slugs": t.slugs,
+                "config": t.config,
                 "status": t.status,
                 "total": t.total,
                 "completed": t.completed_count,
@@ -133,6 +158,7 @@ async def list_tasks():
                     "batch_id": b["batch_id"],
                     "strategy": b.get("strategy", ""),
                     "slugs": b.get("slugs", []),
+                    "config": b.get("config", {}),
                     "status": b.get("status", "completed"),
                     "total": b.get("total", 0),
                     "completed": b.get("completed", b.get("total", 0)),
@@ -187,10 +213,13 @@ async def get_task(batch_id: str):
             "batch_id": task.batch_id,
             "strategy": task.strategy,
             "slugs": task.slugs,
+            "config": task.config,
             "status": task.status,
             "total": task.total,
             "completed": task.completed_count,
             "created_at": task.created_at,
+            "cumulative_capital": task.cumulative_capital,
+            "capital_chain": task.capital_chain,
             "results": results_summary,
             "errors": task.errors,
             "persist_errors": task.persist_errors,

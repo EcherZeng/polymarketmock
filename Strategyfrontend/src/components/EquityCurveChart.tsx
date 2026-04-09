@@ -21,9 +21,10 @@ export default function EquityCurveChart({ equityCurve, drawdownCurve }: EquityC
     // Build drawdown map from server data; fall back to client-side computation
     let ddMap: Map<string, number>
     if (drawdownCurve.length > 0) {
-      ddMap = new Map(drawdownCurve.map((d) => [d.timestamp, d.drawdown_pct]))
+      // Server values are ratios (0-1); convert to percentage for display
+      ddMap = new Map(drawdownCurve.map((d) => [d.timestamp, d.drawdown_pct * 100]))
     } else {
-      // Compute drawdown client-side from equity curve
+      // Compute drawdown client-side from equity curve (as percentage)
       ddMap = new Map()
       let peak = 0
       for (const pt of equityCurve) {

@@ -55,14 +55,14 @@ export default function PortfolioDetailPage() {
     const winCount = returns.filter((r) => r > 0).length
     return {
       count: items.length,
-      avgReturn: returns.reduce((a, b) => a + b, 0) / returns.length,
+      avgReturn: returns.reduce((a, b) => a + b, 0) / returns.length * 100,
       winRate: (winCount / items.length) * 100,
-      bestReturn: Math.max(...returns),
-      worstReturn: Math.min(...returns),
+      bestReturn: Math.max(...returns) * 100,
+      worstReturn: Math.min(...returns) * 100,
       avgSharpe:
         items.reduce((a, it) => a + it.sharpe_ratio, 0) / items.length,
       avgDrawdown:
-        items.reduce((a, it) => a + it.max_drawdown, 0) / items.length,
+        items.reduce((a, it) => a + it.max_drawdown, 0) / items.length * 100,
       totalTrades: items.reduce((a, it) => a + it.total_trades, 0),
     }
   }, [portfolio])
@@ -185,6 +185,26 @@ export default function PortfolioDetailPage() {
           返回列表
         </Link>
       </div>
+
+      {/* Strategy group header */}
+      {portfolio.is_strategy_group && portfolio.group_strategy && portfolio.group_config && (
+        <div className="rounded-lg border bg-muted/30 p-4">
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
+              策略组
+            </span>
+            <span className="text-sm font-semibold">{portfolio.group_strategy}</span>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+            {Object.entries(portfolio.group_config).map(([key, val]) => (
+              <div key={key} className="text-xs">
+                <span className="text-muted-foreground">{key}:</span>{" "}
+                <span className="font-mono">{String(val)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Aggregate stats */}
       {stats && (
@@ -316,16 +336,16 @@ export default function PortfolioDetailPage() {
                       )}
                     >
                       {it.total_return_pct >= 0 ? "+" : ""}
-                      {it.total_return_pct.toFixed(2)}%
+                      {(it.total_return_pct * 100).toFixed(2)}%
                     </td>
                     <td className="px-3 py-2 text-right font-mono">
                       {it.sharpe_ratio.toFixed(4)}
                     </td>
                     <td className="px-3 py-2 text-right font-mono">
-                      {it.win_rate.toFixed(1)}%
+                      {(it.win_rate * 100).toFixed(1)}%
                     </td>
                     <td className="px-3 py-2 text-right font-mono text-red-500">
-                      {it.max_drawdown.toFixed(2)}%
+                      {(it.max_drawdown * 100).toFixed(2)}%
                     </td>
                     <td className="px-3 py-2 text-right font-mono">
                       {it.profit_factor === Infinity
@@ -367,6 +387,7 @@ export default function PortfolioDetailPage() {
         portfolioId={portfolioId!}
         existingSessionIds={existingSessionIds}
         existingSlugs={existingSlugs}
+        groupStrategy={portfolio?.is_strategy_group ? (portfolio.group_strategy ?? undefined) : undefined}
       />
     </div>
   )

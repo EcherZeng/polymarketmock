@@ -37,6 +37,17 @@ async def lifespan(app: FastAPI):
     state.batch_store = BatchStore(config.results_dir / "batches")
     state.batch_store.load()
 
+    # Reconcile tasks that were "running" when the server last shut down.
+    # They can never complete now (asyncio tasks are gone), so mark them interrupted.
+    interrupted_count = 0
+    for b in state.batch_store.values():
+        if b.get("status") == "running":
+            b["status"] = "interrupted"
+            state.batch_store.put(b["batch_id"], b)
+            interrupted_count += 1
+    if interrupted_count:
+        logger.warning("Marked %d orphaned batch tasks as 'interrupted' after restart", interrupted_count)
+
     state.portfolio_store = PortfolioStore(config.results_dir / "portfolios")
     state.portfolio_store.load()
 
@@ -100,6 +111,20 @@ async def lifespan(app: FastAPI):
     )
     state.ai_optimizer.load_tasks()
 
+    # Reconcile AI tasks that were "running" when the server last shut down.
+    ai_interrupted = 0
+    for task in state.ai_optimizer.list_tasks():
+        if task.status == "running":
+            task.status = "interrupted"
+            state.ai_optimizer._persist_task(task)
+            ai_interrupted += 1
+    if ai_interrupted:
+        logger.warning("Marked %d orphaned AI optimize tasks as 'interrupted' after restart", ai_interrupted)
+
+    # ── Init sensitivity analyzer ────────────────────────────────────
+    from core.sensitivity import SensitivityAnalyzer
+    state.sensitivity_analyzer = SensitivityAnalyzer(state.registry)
+
     yield
 
     logger.info("Strategy engine shutting down")
@@ -131,6 +156,7 @@ from api.results import router as results_router
 from api.presets import router as presets_router
 from api.portfolios import router as portfolios_router
 from api.ai_optimize import router as ai_optimize_router
+from api.sensitivity import router as sensitivity_router
 
 app.include_router(strategies_router, tags=["Strategies"])
 app.include_router(data_router, tags=["Data"])
@@ -139,6 +165,7 @@ app.include_router(results_router, tags=["Results"])
 app.include_router(presets_router, tags=["Presets"])
 app.include_router(portfolios_router, tags=["Portfolios"])
 app.include_router(ai_optimize_router)
+app.include_router(sensitivity_router)
 
 
 @app.get("/health")

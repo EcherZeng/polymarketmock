@@ -1,8 +1,46 @@
 import { useMemo, useState, useRef, useCallback } from "react"
-import { InfoIcon, XIcon } from "lucide-react"
+import { InfoIcon, XIcon, PlusIcon, CheckIcon } from "lucide-react"
 import type { ParamSchemaItem, ParamGroupDef } from "@/types"
+import { cn } from "@/lib/utils"
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
+import { Badge } from "@/components/ui/badge"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 // ── helpers ─────────────────────────────────────────────────────────────────
+
+const WEIGHT_CONFIG: Record<string, { icon: string; color: string; tip: string }> = {
+  critical: { icon: "🔴", color: "text-red-500", tip: "本金安全 — 调整须极度谨慎" },
+  high:     { icon: "🟠", color: "text-orange-500", tip: "显著影响收益 — 谨慎调整" },
+  medium:   { icon: "🟡", color: "text-yellow-500", tip: "影响入场频率/质量" },
+  low:      { icon: "🟢", color: "text-green-500", tip: "微调类参数" },
+}
+
+function WeightBadge({ weight }: { weight?: string }) {
+  if (!weight) return null
+  const cfg = WEIGHT_CONFIG[weight]
+  if (!cfg) return null
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className={cn("cursor-default text-xs leading-none", cfg.color)} aria-label={`权重: ${weight}`}>
+            {cfg.icon}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="text-xs">
+          <span className="font-medium">{weight}</span> — {cfg.tip}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
 
 /** Get localised text — always zh for now, fallback to en */
 function t(label: { zh: string; en: string } | string): string {
@@ -128,6 +166,10 @@ interface StrategyConfigFormProps {
   paramGroups: Record<string, ParamGroupDef>
   /** Keys that exist in the current strategy default_config (to filter relevant params) */
   visibleKeys: Set<string>
+  /** Currently active param keys (core always included; advanced toggled by user) */
+  activeParams?: Set<string>
+  /** Called when user adds/removes advanced params */
+  onActiveParamsChange?: (params: Set<string>) => void
 }
 
 export default function StrategyConfigForm({
@@ -136,10 +178,13 @@ export default function StrategyConfigForm({
   paramSchema,
   paramGroups,
   visibleKeys,
+  activeParams,
+  onActiveParamsChange,
 }: StrategyConfigFormProps) {
   // Group params by group, sorted by group order, filtered to visible keys
-  const grouped = useMemo(() => {
+  const { grouped, inactiveByGroup } = useMemo(() => {
     const map = new Map<string, GroupedParam[]>()
+    const inactive = new Map<string, GroupedParam[]>()
 
     for (const [key, schema] of Object.entries(paramSchema)) {
       if (!visibleKeys.has(key)) continue
@@ -147,9 +192,20 @@ export default function StrategyConfigForm({
       if (schema.depends_on && !values[schema.depends_on]) continue
 
       const group = schema.group
+
+      // When activeParams is provided, advanced params not in activeParams go to inactive list
+      if (activeParams && onActiveParamsChange && schema.visibility === "advanced" && !activeParams.has(key)) {
+        if (!inactive.has(group)) inactive.set(group, [])
+        inactive.get(group)!.push({ key, schema })
+        continue
+      }
+
       if (!map.has(group)) map.set(group, [])
       map.get(group)!.push({ key, schema })
     }
+
+    // Also collect inactive params whose toggle is off but the toggle itself is inactive
+    // (these are already excluded above, which is correct)
 
     // Sort groups by order
     const sorted = [...map.entries()].sort((a, b) => {
@@ -158,8 +214,8 @@ export default function StrategyConfigForm({
       return orderA - orderB
     })
 
-    return sorted
-  }, [paramSchema, paramGroups, visibleKeys, values])
+    return { grouped: sorted, inactiveByGroup: inactive }
+  }, [paramSchema, paramGroups, visibleKeys, values, activeParams, onActiveParamsChange])
 
   if (grouped.length === 0) {
     return <p className="text-sm text-muted-foreground">该策略无可配置参数</p>
@@ -182,11 +238,54 @@ export default function StrategyConfigForm({
     }
   }
 
+  function handleAddParams(keys: string[]) {
+    if (!activeParams || !onActiveParamsChange) return
+    const next = new Set(activeParams)
+    const updatedValues = { ...values }
+    for (const key of keys) {
+      next.add(key)
+      // Initialise with schema default (min or disable_value) if not already set
+      if (updatedValues[key] === undefined) {
+        const schema = paramSchema[key]
+        if (schema) {
+          if (schema.type === "bool") {
+            updatedValues[key] = false
+          } else {
+            updatedValues[key] = schema.disable_value ?? schema.min ?? 0
+          }
+        }
+      }
+    }
+    onChange(updatedValues)
+    onActiveParamsChange(next)
+  }
+
+  function handleRemoveParam(key: string) {
+    if (!activeParams || !onActiveParamsChange) return
+    const next = new Set(activeParams)
+    next.delete(key)
+    // Also remove dependent params whose toggle is this key
+    for (const [depKey, depSchema] of Object.entries(paramSchema)) {
+      if (depSchema.depends_on === key) next.delete(depKey)
+    }
+    // Remove values for removed keys
+    const updatedValues = { ...values }
+    delete updatedValues[key]
+    for (const [depKey, depSchema] of Object.entries(paramSchema)) {
+      if (depSchema.depends_on === key) delete updatedValues[depKey]
+    }
+    onChange(updatedValues)
+    onActiveParamsChange(next)
+  }
+
+  const canManageParams = !!activeParams && !!onActiveParamsChange
+
   return (
     <div className="flex flex-col gap-5">
       {grouped.map(([groupKey, params]) => {
         const groupDef = paramGroups[groupKey]
         const groupLabel = groupDef ? t(groupDef) : groupKey
+        const inactiveParams = inactiveByGroup.get(groupKey) ?? []
 
         return (
           <div key={groupKey}>
@@ -197,6 +296,7 @@ export default function StrategyConfigForm({
               {params.map(({ key, schema }) => {
                 const currentVal = values[key]
                 const label = t(schema.label)
+                const isAdvanced = canManageParams && schema.visibility === "advanced"
 
                 if (schema.type === "bool") {
                   return (
@@ -211,10 +311,21 @@ export default function StrategyConfigForm({
                           onChange={(e) => handleChange(key, e.target.checked, schema)}
                           className="h-4 w-4 rounded accent-primary"
                         />
+                        <WeightBadge weight={schema.weight} />
                         <span className="text-sm">{label}</span>
                       </label>
                       {schema.desc && (
                         <ParamInfoPopup schema={schema} />
+                      )}
+                      {isAdvanced && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveParam(key)}
+                          className="ml-auto rounded p-0.5 text-muted-foreground/50 hover:text-destructive"
+                          aria-label="移除参数"
+                        >
+                          <XIcon className="size-3" />
+                        </button>
                       )}
                     </div>
                   )
@@ -223,11 +334,22 @@ export default function StrategyConfigForm({
                 return (
                   <div key={key} className="flex flex-col gap-1">
                     <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <WeightBadge weight={schema.weight} />
                       <span>{label}</span>
                       {schema.unit && (
                         <span className="text-muted-foreground/50">({schema.unit})</span>
                       )}
                       <ParamInfoPopup schema={schema} />
+                      {isAdvanced && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveParam(key)}
+                          className="ml-auto rounded p-0.5 text-muted-foreground/50 hover:text-destructive"
+                          aria-label="移除参数"
+                        >
+                          <XIcon className="size-3" />
+                        </button>
+                      )}
                     </label>
                     <input
                       type="number"
@@ -241,10 +363,132 @@ export default function StrategyConfigForm({
                   </div>
                 )
               })}
+
+              {/* Add advanced param button */}
+              {canManageParams && inactiveParams.length > 0 && (
+                <AddParamPopover
+                  inactiveParams={inactiveParams}
+                  onAdd={handleAddParams}
+                />
+              )}
             </div>
           </div>
         )
       })}
+
+      {/* Show groups that have ONLY inactive params (all advanced, none active) */}
+      {canManageParams && (() => {
+        const activeGroupKeys = new Set(grouped.map(([k]) => k))
+        const hiddenGroups = [...inactiveByGroup.entries()]
+          .filter(([gk, items]) => !activeGroupKeys.has(gk) && items.length > 0)
+          .sort((a, b) => (paramGroups[a[0]]?.order ?? 99) - (paramGroups[b[0]]?.order ?? 99))
+        if (hiddenGroups.length === 0) return null
+        return hiddenGroups.map(([groupKey, inactiveParams]) => {
+          const groupDef = paramGroups[groupKey]
+          const groupLabel = groupDef ? t(groupDef) : groupKey
+          return (
+            <div key={groupKey}>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                {groupLabel}
+              </h3>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <AddParamPopover
+                  inactiveParams={inactiveParams}
+                  onAdd={handleAddParams}
+                />
+              </div>
+            </div>
+          )
+        })
+      })()}
     </div>
+  )
+}
+
+// ── AddParamPopover ─────────────────────────────────────────────────────────
+
+interface AddParamPopoverProps {
+  inactiveParams: GroupedParam[]
+  onAdd: (keys: string[]) => void
+}
+
+function AddParamPopover({ inactiveParams, onAdd }: AddParamPopoverProps) {
+  const [open, setOpen] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+
+  function toggle(key: string) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  function handleConfirm() {
+    if (selected.size > 0) {
+      onAdd([...selected])
+      setSelected(new Set())
+    }
+    setOpen(false)
+  }
+
+  return (
+    <Popover open={open} onOpenChange={(v) => { setOpen(v); if (!v) setSelected(new Set()) }}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="flex h-8 items-center gap-1 rounded-md border border-dashed border-muted-foreground/30 px-3 text-xs text-muted-foreground hover:border-primary/50 hover:text-foreground transition-colors"
+        >
+          <PlusIcon className="size-3" />
+          添加参数
+          <Badge variant="secondary" className="ml-1 text-[10px]">
+            {inactiveParams.length}
+          </Badge>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-0" align="start">
+        <div className="border-b px-3 py-2">
+          <p className="text-xs font-medium">选择要添加的高级参数</p>
+        </div>
+        <ScrollArea className="max-h-60">
+          <div className="flex flex-col gap-0.5 p-2">
+            {inactiveParams.map(({ key, schema }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => toggle(key)}
+                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted transition-colors"
+              >
+                <Checkbox
+                  checked={selected.has(key)}
+                  onCheckedChange={() => toggle(key)}
+                  aria-label={t(schema.label)}
+                />
+                <WeightBadge weight={schema.weight} />
+                <span className="flex-1 truncate">{t(schema.label)}</span>
+              </button>
+            ))}
+          </div>
+        </ScrollArea>
+        <div className="flex items-center justify-end gap-2 border-t px-3 py-2">
+          <button
+            type="button"
+            onClick={() => { setOpen(false); setSelected(new Set()) }}
+            className="h-7 rounded-md px-3 text-xs hover:bg-muted"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            disabled={selected.size === 0}
+            onClick={handleConfirm}
+            className="h-7 rounded-md bg-primary px-3 text-xs text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            添加 {selected.size > 0 && `(${selected.size})`}
+          </button>
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }

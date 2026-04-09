@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 
-from core.types import Signal, TickContext
+from core.types import Signal, TickContext, param_active
 from core.unified_base import UnifiedBaseStrategy
 
 
@@ -25,22 +25,23 @@ class UnifiedStrategy(UnifiedBaseStrategy):
     version = "0.2.0"
 
     def init_strategy(self, config: dict) -> None:
-        # ── Price & time ──
-        self.min_price: float = config.get("min_price", 0.85)
-        self.time_remaining_ratio: float = config.get("time_remaining_ratio", 0.333)
+        self._cfg = config
+        # ── Price & time ── (None = filter disabled)
+        self.min_price: float | None = config.get("min_price") if param_active(config, "min_price") else None
+        self.time_remaining_ratio: float | None = config.get("time_remaining_ratio") if param_active(config, "time_remaining_ratio") else None
 
         # ── Spread / anchor gating ──
-        self.max_spread: float = config.get("max_spread", 0.15)
-        self.max_ask_deviation: float = config.get("max_ask_deviation", 0.10)
-        self.min_profit_room: float = config.get("min_profit_room", 0.05)
+        self.max_spread: float | None = config.get("max_spread") if param_active(config, "max_spread") else None
+        self.max_ask_deviation: float | None = config.get("max_ask_deviation") if param_active(config, "max_ask_deviation") else None
+        self.min_profit_room: float | None = config.get("min_profit_room") if param_active(config, "min_profit_room") else None
 
-        # ── Feature toggles ──
-        self.use_momentum: bool = config.get("use_momentum_check", True)
-        self.use_direction: bool = config.get("use_direction_check", False)
-        self.use_std: bool = config.get("use_std_check", True)
-        self.use_drawdown: bool = config.get("use_drawdown_check", True)
-        self.use_amplitude: bool = config.get("use_amplitude_check", True)
-        self.use_reverse: bool = config.get("use_reverse_check", True)
+        # ── Feature toggles — only active if key present AND True ──
+        self.use_momentum: bool = bool(config.get("use_momentum_check")) if param_active(config, "use_momentum_check") else False
+        self.use_direction: bool = bool(config.get("use_direction_check")) if param_active(config, "use_direction_check") else False
+        self.use_std: bool = bool(config.get("use_std_check")) if param_active(config, "use_std_check") else False
+        self.use_drawdown: bool = bool(config.get("use_drawdown_check")) if param_active(config, "use_drawdown_check") else False
+        self.use_amplitude: bool = bool(config.get("use_amplitude_check")) if param_active(config, "use_amplitude_check") else False
+        self.use_reverse: bool = bool(config.get("use_reverse_check")) if param_active(config, "use_reverse_check") else False
 
         # ── Momentum params ──
         self.momentum_window: int = int(config.get("momentum_window", 600))
@@ -74,10 +75,11 @@ class UnifiedStrategy(UnifiedBaseStrategy):
         if len(self._entered_tokens) >= len(ctx.tokens):
             return []
 
-        # 1. Time gate
-        remaining_ratio = (ctx.total_ticks - ctx.index) / ctx.total_ticks if ctx.total_ticks > 0 else 1.0
-        if remaining_ratio > self.time_remaining_ratio:
-            return []
+        # 1. Time gate — skip if param not active
+        if self.time_remaining_ratio is not None:
+            remaining_ratio = (ctx.total_ticks - ctx.index) / ctx.total_ticks if ctx.total_ticks > 0 else 1.0
+            if remaining_ratio > self.time_remaining_ratio:
+                return []
 
         # Minimum history: only require reverse_tick_window (30) as hard floor.
         # Individual checks (momentum, volatility, etc.) use slicing that
@@ -95,22 +97,23 @@ class UnifiedStrategy(UnifiedBaseStrategy):
 
             # Price filter: apply min_price to the token's actual market price.
             # Only buy tokens whose raw mid_price meets the minimum threshold.
-            if mid < self.min_price:
+            if self.min_price is not None and mid < self.min_price:
                 continue
 
             # Spread gating: skip if orderbook is too thin
-            if snapshot.spread > self.max_spread:
+            if self.max_spread is not None and snapshot.spread > self.max_spread:
                 continue
 
             # Ask deviation: skip if best_ask deviates too far from anchor
-            anchor = snapshot.anchor_price if snapshot.anchor_price > 0 else mid
-            if snapshot.best_ask > 0 and anchor > 0:
-                ask_dev = (snapshot.best_ask - anchor) / anchor
-                if ask_dev > self.max_ask_deviation:
-                    continue
+            if self.max_ask_deviation is not None:
+                anchor = snapshot.anchor_price if snapshot.anchor_price > 0 else mid
+                if snapshot.best_ask > 0 and anchor > 0:
+                    ask_dev = (snapshot.best_ask - anchor) / anchor
+                    if ask_dev > self.max_ask_deviation:
+                        continue
 
             # Profit room: skip if too close to $1.00 (not enough upside)
-            if snapshot.best_ask > 0 and (1.0 - snapshot.best_ask) < self.min_profit_room:
+            if self.min_profit_room is not None and snapshot.best_ask > 0 and (1.0 - snapshot.best_ask) < self.min_profit_room:
                 continue
 
             history = ctx.price_history.get(token_id, [])

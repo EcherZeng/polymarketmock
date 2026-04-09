@@ -23,6 +23,7 @@ class OptimizeRequest(BaseModel):
     runs_per_round: int = Field(default=5, ge=1, le=20)
     initial_balance: float = Field(default=10000, gt=0)
     param_keys: list[str] | None = None
+    active_params: list[str] | None = None
     settlement_result: dict[str, float] | None = None
 
     # LLM configuration
@@ -74,6 +75,7 @@ async def submit_optimization(req: OptimizeRequest):
         initial_balance=req.initial_balance,
         llm_model=req.llm_model,
         param_keys=req.param_keys,
+        active_params=req.active_params,
         settlement_result=req.settlement_result,
     )
 
@@ -105,6 +107,7 @@ async def list_optimization_tasks():
             "completed_runs": t.completed_runs,
             "total_runs": t.total_runs,
             "best_metric": t.best_metric if t.best_metric != float("-inf") else None,
+            "best_total_trades": t.best_total_trades,
             "created_at": t.created_at,
         }
         for t in tasks
@@ -204,6 +207,7 @@ async def get_optimization_task(task_id: str):
         "persist_errors": task.persist_errors,
         "best_config": task.best_config,
         "best_metric": task.best_metric if task.best_metric != float("-inf") else None,
+        "best_total_trades": task.best_total_trades,
         "best_session_id": task.best_session_id,
         "market_profiles": task.market_profiles,
         "rounds": rounds_summary,

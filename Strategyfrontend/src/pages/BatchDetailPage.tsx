@@ -14,6 +14,7 @@ const statusLabel: Record<string, string> = {
   failed: "失败",
   pending: "等待中",
   skipped: "已跳过",
+  interrupted: "已中断",
 }
 
 const statusColor: Record<string, string> = {
@@ -23,6 +24,7 @@ const statusColor: Record<string, string> = {
   failed: "bg-red-100 text-red-700",
   pending: "bg-muted text-muted-foreground",
   skipped: "bg-amber-100 text-amber-700",
+  interrupted: "bg-orange-100 text-orange-700",
 }
 
 const stepLabel: Record<string, string> = {
@@ -49,7 +51,7 @@ export default function BatchDetailPage() {
   const [returnFilter, setReturnFilter] = useState<"all" | "positive" | "negative">("all")
   const [portfolioOpen, setPortfolioOpen] = useState(false)
 
-  const { data: task, isLoading } = useQuery<BatchTaskDetail>({
+  const { data: task, isLoading, isError } = useQuery<BatchTaskDetail>({
     queryKey: ["batchTask", batchId],
     queryFn: () => fetchBatchTask(batchId!),
     enabled: !!batchId,
@@ -86,14 +88,14 @@ export default function BatchDetailPage() {
     return {
       count: results.length,
       failCount: workflows.filter(([, w]) => w.status === "failed").length,
-      avgReturn: returns.reduce((a, b) => a + b, 0) / returns.length,
+      avgReturn: returns.reduce((a, b) => a + b, 0) / returns.length * 100,
       winRate: (winCount / results.length) * 100,
-      bestReturn: Math.max(...returns),
-      worstReturn: Math.min(...returns),
+      bestReturn: Math.max(...returns) * 100,
+      worstReturn: Math.min(...returns) * 100,
       avgSharpe:
         results.reduce((a, [, r]) => a + r.sharpe_ratio, 0) / results.length,
       avgDrawdown:
-        results.reduce((a, [, r]) => a + r.max_drawdown, 0) / results.length,
+        results.reduce((a, [, r]) => a + r.max_drawdown, 0) / results.length * 100,
       totalTrades: results.reduce((a, [, r]) => a + r.total_trades, 0),
     }
   }, [results, workflows])
@@ -148,11 +150,21 @@ export default function BatchDetailPage() {
         avg_slippage: r.avg_slippage,
         initial_balance: r.initial_balance,
         final_equity: r.final_equity,
+        config: task?.config ?? {},
       }))
   }, [results, selectedIds, task])
 
-  if (isLoading || !task) {
+  if (isLoading) {
     return <div className="py-12 text-center text-muted-foreground">加载中...</div>
+  }
+
+  if (isError || !task) {
+    return (
+      <div className="py-12 text-center text-muted-foreground">
+        批量任务不存在或已被清除 ·{" "}
+        <Link to="/batch" className="text-primary underline">返回列表</Link>
+      </div>
+    )
   }
 
   const progress = task.total > 0 ? (task.completed / task.total) * 100 : 0
@@ -319,7 +331,7 @@ export default function BatchDetailPage() {
                       )}
                     >
                       {result.total_return_pct >= 0 ? "+" : ""}
-                      {result.total_return_pct.toFixed(2)}%
+                      {(result.total_return_pct * 100).toFixed(2)}%
                     </span>
                   )}
                   {result && (
@@ -476,16 +488,16 @@ export default function BatchDetailPage() {
                       )}
                     >
                       {r.total_return_pct >= 0 ? "+" : ""}
-                      {r.total_return_pct.toFixed(2)}%
+                      {(r.total_return_pct * 100).toFixed(2)}%
                     </td>
                     <td className="px-3 py-2 text-right font-mono">
                       {r.sharpe_ratio.toFixed(4)}
                     </td>
                     <td className="px-3 py-2 text-right font-mono">
-                      {r.win_rate.toFixed(1)}%
+                      {(r.win_rate * 100).toFixed(1)}%
                     </td>
                     <td className="px-3 py-2 text-right font-mono text-red-500">
-                      {r.max_drawdown.toFixed(2)}%
+                      {(r.max_drawdown * 100).toFixed(2)}%
                     </td>
                     <td className="px-3 py-2 text-right font-mono">
                       {r.profit_factor === Infinity
@@ -496,7 +508,7 @@ export default function BatchDetailPage() {
                       {r.total_trades}
                     </td>
                     <td className="px-3 py-2 text-right font-mono">
-                      {r.avg_slippage.toFixed(4)}%
+                      {(r.avg_slippage * 100).toFixed(4)}%
                     </td>
                     <td className="px-3 py-2 text-right">
                       <Link

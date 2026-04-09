@@ -11,6 +11,8 @@ export interface I18nLabel {
 
 export interface ParamSchemaItem {
   group: string
+  visibility?: "core" | "advanced"
+  weight?: "critical" | "high" | "medium" | "low"
   label: I18nLabel
   /** What this parameter does and how it affects the strategy */
   desc?: I18nLabel
@@ -196,6 +198,7 @@ export interface BatchRequest {
   initial_balance: number
   config: Record<string, unknown>
   settlement_result?: Record<string, number>
+  cumulative_capital?: boolean
 }
 
 // ── BTC Kline (Binance) ────────────────────────────────────────────────────
@@ -224,6 +227,7 @@ export interface BatchTask {
   batch_id: string
   strategy: string
   slugs: string[]
+  config: Record<string, unknown>
   status: string
   total: number
   completed: number
@@ -260,7 +264,16 @@ export interface SlugWorkflow {
   steps: StepLog[]
 }
 
+export interface CapitalChainEntry {
+  slug: string
+  start_balance: number
+  end_balance: number | null
+  status: string
+}
+
 export interface BatchTaskDetail extends BatchTask {
+  cumulative_capital: boolean
+  capital_chain: CapitalChainEntry[]
   results: Record<string, BatchResultSummary>
   errors: Record<string, string>
   persist_errors: string[]
@@ -282,6 +295,7 @@ export interface PortfolioItem {
   avg_slippage: number
   initial_balance: number
   final_equity: number
+  config: Record<string, unknown>
 }
 
 export interface Portfolio {
@@ -290,6 +304,9 @@ export interface Portfolio {
   created_at: string
   updated_at: string
   items: PortfolioItem[]
+  is_strategy_group: boolean
+  group_strategy: string | null
+  group_config: Record<string, unknown> | null
 }
 
 // ── AI Optimize ─────────────────────────────────────────────────────────────
@@ -303,6 +320,7 @@ export interface AiOptimizeRequest {
   runs_per_round: number
   initial_balance: number
   param_keys?: string[]
+  active_params?: string[]
   settlement_result?: Record<string, number>
   llm_model: string
 }
@@ -324,6 +342,7 @@ export interface AiOptimizeTask {
   completed_runs: number
   total_runs: number
   best_metric: number | null
+  best_total_trades: number
   created_at: string
 }
 

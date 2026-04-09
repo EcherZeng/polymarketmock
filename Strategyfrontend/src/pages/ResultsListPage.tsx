@@ -56,7 +56,8 @@ export default function ResultsListPage() {
   }
 
   function fmtPct(v: number) {
-    return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`
+    const pct = v * 100
+    return `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`
   }
 
   return (
@@ -138,9 +139,9 @@ export default function ResultsListPage() {
                     {fmtPct(r.metrics.total_return_pct)}
                   </td>
                   <td className="px-3 py-2">{r.metrics.sharpe_ratio.toFixed(2)}</td>
-                  <td className="px-3 py-2">{r.metrics.win_rate.toFixed(1)}%</td>
+                  <td className="px-3 py-2">{(r.metrics.win_rate * 100).toFixed(1)}%</td>
                   <td className="px-3 py-2">{r.metrics.total_trades}</td>
-                  <td className="px-3 py-2">{r.metrics.max_drawdown.toFixed(2)}%</td>
+                  <td className="px-3 py-2">{(r.metrics.max_drawdown * 100).toFixed(2)}%</td>
                   <td className="px-3 py-2 text-xs text-muted-foreground">
                     {r.created_at.slice(0, 19).replace("T", " ")}
                   </td>

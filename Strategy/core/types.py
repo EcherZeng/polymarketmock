@@ -5,6 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
+# ── Param guard ──────────────────────────────────────────────────────────────
+
+def param_active(config: dict, key: str) -> bool:
+    """Return True if *key* is present in config (i.e. the user activated it)."""
+    return key in config
+
+
 @dataclass
 class Signal:
     """Trading signal produced by a strategy."""
@@ -120,7 +127,7 @@ class EvaluationMetrics:
 
     # Risk
     max_drawdown: float = 0.0
-    max_drawdown_duration: float = 0.0  # seconds
+    max_drawdown_duration: float = 0.0  # ticks (equity curve sample points)
     volatility: float = 0.0
     downside_deviation: float = 0.0
 
@@ -176,3 +183,6 @@ class BacktestSession:
     # Settlement
     settlement_mode: str = "binary"
     settlement_result: dict[str, float] = field(default_factory=dict)
+
+    # Capital mode
+    capital_mode: str = "fixed"  # "fixed" | "cumulative"

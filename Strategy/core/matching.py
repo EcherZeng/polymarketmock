@@ -70,13 +70,13 @@ def calculate_vwap_from_levels(
 
 
 def calculate_slippage(mid_price: float, avg_price: float, side: str) -> float:
-    """Calculate slippage percentage relative to mid price."""
+    """Calculate slippage ratio relative to mid price (0-1 scale)."""
     if mid_price == 0:
         return 0.0
     if side == "BUY":
-        return round(((avg_price - mid_price) / mid_price) * 100, 4)
+        return round((avg_price - mid_price) / mid_price, 6)
     else:
-        return round(((mid_price - avg_price) / mid_price) * 100, 4)
+        return round((mid_price - avg_price) / mid_price, 6)
 
 
 def execute_signal(

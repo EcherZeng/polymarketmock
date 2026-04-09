@@ -28,6 +28,7 @@ class PortfolioItemBody(BaseModel):
     avg_slippage: float = 0.0
     initial_balance: float = 0.0
     final_equity: float = 0.0
+    config: dict = Field(default_factory=dict)
 
 
 class CreatePortfolioBody(BaseModel):
@@ -55,11 +56,33 @@ def _store():
     return state.portfolio_store
 
 
+def _enrich_portfolio(p: dict) -> dict:
+    """Derive strategy-group fields at query time (no extra storage)."""
+    items = p.get("items", [])
+    if not items:
+        p["is_strategy_group"] = False
+        p["group_strategy"] = None
+        p["group_config"] = None
+        return p
+
+    first_strategy = items[0].get("strategy", "")
+    first_config = items[0].get("config", {})
+
+    is_group = all(
+        it.get("strategy") == first_strategy and it.get("config", {}) == first_config
+        for it in items
+    )
+    p["is_strategy_group"] = is_group
+    p["group_strategy"] = first_strategy if is_group else None
+    p["group_config"] = first_config if is_group else None
+    return p
+
+
 # ── Routes ───────────────────────────────────────────────────────────────────
 
 @router.get("")
 async def list_portfolios():
-    return _store().values()
+    return [_enrich_portfolio(p) for p in _store().values()]
 
 
 @router.get("/{portfolio_id}")
@@ -67,7 +90,7 @@ async def get_portfolio(portfolio_id: str):
     p = _store().get(portfolio_id)
     if p is None:
         raise HTTPException(404, "Portfolio not found")
-    return p
+    return _enrich_portfolio(p)
 
 
 @router.post("", status_code=201)
@@ -83,7 +106,7 @@ async def create_portfolio(body: CreatePortfolioBody):
         "items": [it.model_dump(mode="json") for it in body.items],
     }
     store.put(portfolio_id, portfolio)
-    return portfolio
+    return _enrich_portfolio(portfolio)
 
 
 @router.put("/{portfolio_id}")
@@ -95,7 +118,7 @@ async def rename_portfolio(portfolio_id: str, body: RenameBody):
     p["name"] = body.name
     p["updated_at"] = datetime.now(timezone.utc).isoformat()
     store.put(portfolio_id, p)
-    return p
+    return _enrich_portfolio(p)
 
 
 @router.put("/{portfolio_id}/items")
@@ -105,7 +128,7 @@ async def add_items(portfolio_id: str, body: AddItemsBody):
     result = store.add_items(portfolio_id, items)
     if result is None:
         raise HTTPException(404, "Portfolio not found")
-    return result
+    return _enrich_portfolio(result)
 
 
 @router.delete("/{portfolio_id}/items")
@@ -114,7 +137,7 @@ async def remove_items(portfolio_id: str, body: RemoveItemsBody):
     result = store.remove_items(portfolio_id, body.session_ids)
     if result is None:
         raise HTTPException(404, "Portfolio not found")
-    return result
+    return _enrich_portfolio(result)
 
 
 @router.delete("/{portfolio_id}")

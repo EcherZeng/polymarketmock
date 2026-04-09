@@ -68,7 +68,7 @@ export default function DrawdownTable({ events }: DrawdownTableProps) {
                 "px-3 py-2 text-right font-mono font-semibold",
                 e.drawdown_pct === maxDd ? "text-red-600" : "text-red-500",
               )}>
-                {e.drawdown_pct.toFixed(2)}%
+                {(e.drawdown_pct * 100).toFixed(2)}%
               </td>
               <td className="px-3 py-2 text-right font-mono">
                 {formatDuration(e.duration_seconds)}

@@ -89,14 +89,14 @@ def cmd_run(args: argparse.Namespace) -> None:
     print(f"{'='*60}")
     print(f"  Initial:   ${session.initial_balance:,.2f}")
     print(f"  Final:     ${session.final_equity:,.2f}")
-    print(f"  PnL:       ${metrics.total_pnl:,.2f} ({metrics.total_return_pct:+.2f}%)")
+    print(f"  PnL:       ${metrics.total_pnl:,.2f} ({metrics.total_return_pct * 100:+.2f}%)")
     print(f"  Trades:    {metrics.total_trades} (Buy: {metrics.buy_count}, Sell: {metrics.sell_count})")
-    print(f"  Win Rate:  {metrics.win_rate:.1f}%")
+    print(f"  Win Rate:  {metrics.win_rate * 100:.1f}%")
     print(f"  Sharpe:    {metrics.sharpe_ratio:.4f}")
     print(f"  Sortino:   {metrics.sortino_ratio:.4f}")
-    print(f"  Max DD:    {metrics.max_drawdown:.2f}%")
+    print(f"  Max DD:    {metrics.max_drawdown * 100:.2f}%")
     print(f"  Profit F:  {metrics.profit_factor:.2f}")
-    print(f"  Avg Slip:  {metrics.avg_slippage:.4f}%")
+    print(f"  Avg Slip:  {metrics.avg_slippage * 100:.4f}%")
     print(f"{'='*60}\n")
 
 

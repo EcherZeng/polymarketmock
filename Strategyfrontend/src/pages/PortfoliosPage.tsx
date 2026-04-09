@@ -6,6 +6,8 @@ import { fetchPortfolios, deletePortfolio, createPortfolio } from "@/api/client"
 import type { Portfolio } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Badge } from "@/components/ui/badge"
 import {
   Dialog,
   DialogContent,
@@ -19,6 +21,7 @@ export default function PortfoliosPage() {
   const navigate = useNavigate()
   const [createOpen, setCreateOpen] = useState(false)
   const [newName, setNewName] = useState("")
+  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set())
 
   const { data: portfolios = [], isLoading } = useQuery<Portfolio[]>({
     queryKey: ["portfolios"],
@@ -46,6 +49,20 @@ export default function PortfoliosPage() {
     () => [...portfolios].sort((a, b) => b.created_at.localeCompare(a.created_at)),
     [portfolios],
   )
+
+  const toggleGroupSelect = (portfolioId: string) => {
+    setSelectedGroupIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(portfolioId)) next.delete(portfolioId)
+      else next.add(portfolioId)
+      return next
+    })
+  }
+
+  const handleCompare = () => {
+    const ids = [...selectedGroupIds].join(",")
+    navigate(`/comparison?ids=${ids}`)
+  }
 
   if (isLoading) {
     return <div className="py-12 text-center text-muted-foreground">加载中...</div>
@@ -106,6 +123,29 @@ export default function PortfoliosPage() {
 
       {createDialog}
 
+      {/* Comparison action bar */}
+      {selectedGroupIds.size > 0 && (
+        <div className="flex items-center gap-3 rounded-lg border bg-muted/50 px-4 py-2">
+          <span className="text-sm text-muted-foreground">
+            已选 {selectedGroupIds.size} 个策略组
+          </span>
+          <Button
+            size="sm"
+            disabled={selectedGroupIds.size < 2}
+            onClick={handleCompare}
+          >
+            参数对照
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setSelectedGroupIds(new Set())}
+          >
+            取消选择
+          </Button>
+        </div>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {sorted.map((p) => {
           const returns = p.items.map((it) => it.total_return_pct)
@@ -114,17 +154,38 @@ export default function PortfoliosPage() {
               ? returns.reduce((a, b) => a + b, 0) / returns.length
               : 0
           const positiveCount = returns.filter((r) => r > 0).length
+          const isGroup = p.is_strategy_group
+          const isChecked = selectedGroupIds.has(p.portfolio_id)
 
           return (
-            <div key={p.portfolio_id} className="rounded-lg border p-4 transition-colors hover:bg-muted/30">
+            <div key={p.portfolio_id} className={cn(
+              "rounded-lg border p-4 transition-colors hover:bg-muted/30",
+              isChecked && "ring-2 ring-primary/50",
+            )}>
               <div className="flex items-start justify-between">
-                <Link to={`/portfolios/${p.portfolio_id}`} className="flex-1">
-                  <h3 className="font-semibold">{p.name}</h3>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {p.items.length} 条数据源 · 创建于{" "}
-                    {p.created_at.replace("T", " ").slice(0, 10)}
-                  </p>
-                </Link>
+                <div className="flex items-start gap-2">
+                  {isGroup && (
+                    <Checkbox
+                      checked={isChecked}
+                      onCheckedChange={() => toggleGroupSelect(p.portfolio_id)}
+                      className="mt-1"
+                    />
+                  )}
+                  <Link to={`/portfolios/${p.portfolio_id}`} className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-semibold">{p.name}</h3>
+                      {isGroup && (
+                        <Badge variant="secondary" className="text-[10px]">
+                          策略组 · {p.group_strategy}
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {p.items.length} 条数据源 · 创建于{" "}
+                      {p.created_at.replace("T", " ").slice(0, 10)}
+                    </p>
+                  </Link>
+                </div>
                 <button
                   onClick={() => {
                     if (confirm(`确定删除组合「${p.name}」？`))

@@ -64,7 +64,7 @@ export default function ResultDetailPage() {
           </div>
           <div className={result.metrics.total_return_pct >= 0 ? "text-sm text-emerald-600" : "text-sm text-red-500"}>
             {result.metrics.total_return_pct >= 0 ? "+" : ""}
-            {result.metrics.total_return_pct.toFixed(2)}%
+            {(result.metrics.total_return_pct * 100).toFixed(2)}%
             {" "}(${result.metrics.total_pnl.toFixed(2)})
           </div>
         </div>

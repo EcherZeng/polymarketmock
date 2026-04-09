@@ -69,6 +69,9 @@ export default function StrategyPage() {
   const [dataTab, setDataTab] = useState<"archives" | "portfolios">("archives")
   const [portfolioSearch, setPortfolioSearch] = useState("")
   const [selectedPortfolioId, setSelectedPortfolioId] = useState<string>("")
+  const [cumulativeCapital, setCumulativeCapital] = useState(false)
+  const [configActiveParams, setConfigActiveParams] = useState<Set<string>>(new Set())
+  const [newStrategyActiveParams, setNewStrategyActiveParams] = useState<Set<string>>(new Set())
 
   const { data: strategies = [], isLoading: loadingStrategies } = useQuery<StrategyInfo[]>({
     queryKey: ["strategies"],
@@ -222,6 +225,7 @@ export default function StrategyPage() {
         Object.entries(s.default_config).map(([k, v]) => [k, v]),
       ),
     )
+    setConfigActiveParams(new Set(Object.keys(s.default_config)))
     setConfigDialogOpen(true)
   }
 
@@ -247,6 +251,16 @@ export default function StrategyPage() {
     setSelectedSlugs(new Set())
   }
 
+  /** Filter config to only include active params */
+  function activeConfig(): Record<string, unknown> {
+    if (configActiveParams.size === 0) return configValues
+    const result: Record<string, unknown> = {}
+    for (const key of configActiveParams) {
+      if (key in configValues) result[key] = configValues[key]
+    }
+    return result
+  }
+
   function handleRun() {
     if (!selectedStrategy || !selectedSlug) return
     const selectedArchive = archives.find((a) => a.slug === selectedSlug)
@@ -258,7 +272,7 @@ export default function StrategyPage() {
       strategy: selectedStrategy,
       slug: selectedSlug,
       initial_balance: balance,
-      config: configValues,
+      config: activeConfig(),
       ...(settlement_result ? { settlement_result } : {}),
     })
   }
@@ -276,8 +290,9 @@ export default function StrategyPage() {
       strategy: selectedStrategy,
       slugs: [...selectedSlugs],
       initial_balance: balance,
-      config: configValues,
+      config: activeConfig(),
       ...(settlement_result ? { settlement_result } : {}),
+      cumulative_capital: cumulativeCapital,
     })
   }
 
@@ -293,8 +308,9 @@ export default function StrategyPage() {
       strategy: selectedStrategy,
       slugs,
       initial_balance: balance,
-      config: configValues,
+      config: activeConfig(),
       ...(settlement_result ? { settlement_result } : {}),
+      cumulative_capital: cumulativeCapital,
     })
   }
 
@@ -358,6 +374,13 @@ export default function StrategyPage() {
                   // Initialize with first strategy's defaults if available
                   const base = strategies[0]?.default_config ?? {}
                   setNewStrategyValues({ ...base })
+                  // For new strategy, start with only core params active
+                  const coreKeys = new Set(
+                    Object.entries(paramSchema)
+                      .filter(([, s]) => s.visibility !== "advanced")
+                      .map(([k]) => k)
+                  )
+                  setNewStrategyActiveParams(coreKeys)
                   setNewStrategyName("")
                   setNewStrategyDesc("")
                   setCreateStrategyOpen(true)
@@ -407,6 +430,20 @@ export default function StrategyPage() {
               >
                 {mutation.isPending ? "运行中..." : "运行回测"}
               </button>
+
+              {/* Cumulative capital toggle */}
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={cumulativeCapital}
+                  onChange={(e) => setCumulativeCapital(e.target.checked)}
+                  className="size-4 rounded border accent-emerald-600"
+                />
+                <span className="text-muted-foreground">累计本金模式</span>
+                {cumulativeCapital && (
+                  <span className="text-xs text-amber-600">(串行执行)</span>
+                )}
+              </label>
 
               {/* Batch run */}
               <button
@@ -797,6 +834,8 @@ export default function StrategyPage() {
                 paramSchema={paramSchema}
                 paramGroups={paramGroups}
                 visibleKeys={visibleKeys}
+                activeParams={configActiveParams}
+                onActiveParamsChange={setConfigActiveParams}
               />
 
               {/* Save as preset */}
@@ -827,7 +866,7 @@ export default function StrategyPage() {
                         const name = savePresetName.trim() || selectedStrategy
                         // Strip unified rule keys out — only save strategy-specific params
                         const params: Record<string, unknown> = {}
-                        for (const [k, v] of Object.entries(configValues)) {
+                        for (const [k, v] of Object.entries(activeConfig())) {
                           params[k] = v
                         }
                         savePresetMutation.mutate({
@@ -900,6 +939,8 @@ export default function StrategyPage() {
               paramSchema={paramSchema}
               paramGroups={paramGroups}
               visibleKeys={new Set(Object.keys(paramSchema))}
+              activeParams={newStrategyActiveParams}
+              onActiveParamsChange={setNewStrategyActiveParams}
             />
 
             <div className="flex items-center justify-end gap-2 border-t pt-4">
@@ -912,11 +953,16 @@ export default function StrategyPage() {
               <button
                 disabled={!newStrategyName.trim() || savePresetMutation.isPending}
                 onClick={() => {
+                  // Filter to only active params for new strategy
+                  const filteredParams: Record<string, unknown> = {}
+                  for (const key of newStrategyActiveParams) {
+                    if (key in newStrategyValues) filteredParams[key] = newStrategyValues[key]
+                  }
                   savePresetMutation.mutate(
                     {
                       name: newStrategyName.trim(),
                       desc: newStrategyDesc.trim(),
-                      params: { ...newStrategyValues },
+                      params: filteredParams,
                     },
                     { onSuccess: () => setCreateStrategyOpen(false) },
                   )

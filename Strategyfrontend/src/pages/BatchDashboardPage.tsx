@@ -9,12 +9,14 @@ const statusLabel: Record<string, string> = {
   running: "运行中",
   completed: "已完成",
   cancelled: "已取消",
+  interrupted: "已中断",
 }
 
 const statusColor: Record<string, string> = {
   running: "bg-blue-100 text-blue-700",
   completed: "bg-emerald-100 text-emerald-700",
   cancelled: "bg-red-100 text-red-700",
+  interrupted: "bg-orange-100 text-orange-700",
 }
 
 export default function BatchDashboardPage() {
@@ -23,7 +25,10 @@ export default function BatchDashboardPage() {
   const { data: rawTasks = [], isLoading } = useQuery<BatchTask[]>({
     queryKey: ["batchTasks"],
     queryFn: fetchBatchTasks,
-    refetchInterval: 3000,
+    refetchInterval: (query) => {
+      const data = query.state.data
+      return data?.some((t) => t.status === "running") ? 3000 : false
+    },
   })
 
   const tasks = useMemo(
@@ -96,7 +101,7 @@ export default function BatchDashboardPage() {
                       "h-full rounded-full transition-all duration-300",
                       t.status === "completed"
                         ? "bg-emerald-500"
-                        : t.status === "cancelled"
+                        : t.status === "cancelled" || t.status === "interrupted"
                           ? "bg-red-400"
                           : "bg-blue-500",
                     )}

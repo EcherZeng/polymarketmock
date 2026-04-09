@@ -18,6 +18,7 @@ const statusLabel: Record<string, string> = {
   completed: "已完成",
   cancelled: "已停止",
   failed: "失败",
+  interrupted: "已中断",
 }
 
 const statusColor: Record<string, string> = {
@@ -25,6 +26,14 @@ const statusColor: Record<string, string> = {
   completed: "bg-emerald-100 text-emerald-700",
   cancelled: "bg-amber-100 text-amber-700",
   failed: "bg-red-100 text-red-700",
+  interrupted: "bg-orange-100 text-orange-700",
+}
+
+const PCT_METRICS = new Set(["total_return_pct", "win_rate", "max_drawdown", "hold_to_settlement_ratio", "annualized_return"])
+
+function fmtMetric(target: string, value: number): string {
+  if (PCT_METRICS.has(target)) return `${(value * 100).toFixed(2)}%`
+  return value.toFixed(4)
 }
 
 export default function AiOptimizeDetailPage() {
@@ -174,7 +183,10 @@ export default function AiOptimizeDetailPage() {
         <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-4">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-emerald-800">
-              当前最优: {task.optimize_target} = {task.best_metric?.toFixed(4) ?? "N/A"}
+              当前最优: {task.optimize_target} = {task.best_metric != null ? fmtMetric(task.optimize_target, task.best_metric) : "N/A"}
+              <span className="ml-2 text-xs font-normal text-emerald-600">
+                ({task.best_total_trades}笔交易{task.best_total_trades < 5 ? " · 低交易量，可信度低" : ""})
+              </span>
             </h3>
             <div className="flex items-center gap-2">
               {task.best_session_id && (
@@ -285,7 +297,7 @@ export default function AiOptimizeDetailPage() {
                     </span>
                   </div>
                   <span className="text-sm font-medium">
-                    最优: <span className="text-emerald-600">{round.best_metric_value.toFixed(4)}</span>
+                    最优: <span className="text-emerald-600">{fmtMetric(task.optimize_target, round.best_metric_value)}</span>
                   </span>
                 </div>
 
@@ -355,11 +367,11 @@ export default function AiOptimizeDetailPage() {
                                 "px-4 py-2 text-right font-mono",
                                 (m.total_return_pct ?? 0) >= 0 ? "text-emerald-600" : "text-red-500",
                               )}>
-                                {(m.total_return_pct ?? 0).toFixed(2)}%
+                                {((m.total_return_pct ?? 0) * 100).toFixed(2)}%
                               </td>
                               <td className="px-4 py-2 text-right font-mono">{(m.sharpe_ratio ?? 0).toFixed(3)}</td>
-                              <td className="px-4 py-2 text-right font-mono">{(m.win_rate ?? 0).toFixed(1)}%</td>
-                              <td className="px-4 py-2 text-right font-mono">{(m.max_drawdown ?? 0).toFixed(2)}%</td>
+                              <td className="px-4 py-2 text-right font-mono">{((m.win_rate ?? 0) * 100).toFixed(1)}%</td>
+                              <td className="px-4 py-2 text-right font-mono">{((m.max_drawdown ?? 0) * 100).toFixed(2)}%</td>
                               <td className="px-4 py-2 text-right font-mono">{m.total_trades ?? 0}</td>
                             </tr>
                             {isSlugExpanded && slugMetrics.length > 0 && slugMetrics.map((sm) => (
@@ -379,11 +391,11 @@ export default function AiOptimizeDetailPage() {
                                   "px-4 py-1.5 text-right font-mono text-xs",
                                   sm.total_return_pct >= 0 ? "text-emerald-600" : "text-red-500",
                                 )}>
-                                  {sm.total_return_pct.toFixed(2)}%
+                                  {(sm.total_return_pct * 100).toFixed(2)}%
                                 </td>
                                 <td className="px-4 py-1.5 text-right font-mono text-xs">{sm.sharpe_ratio.toFixed(3)}</td>
-                                <td className="px-4 py-1.5 text-right font-mono text-xs">{(sm.win_rate ?? 0).toFixed(1)}%</td>
-                                <td className="px-4 py-1.5 text-right font-mono text-xs">{sm.max_drawdown.toFixed(2)}%</td>
+                                <td className="px-4 py-1.5 text-right font-mono text-xs">{((sm.win_rate ?? 0) * 100).toFixed(1)}%</td>
+                                <td className="px-4 py-1.5 text-right font-mono text-xs">{(sm.max_drawdown * 100).toFixed(2)}%</td>
                                 <td className="px-4 py-1.5 text-right font-mono text-xs">{sm.total_trades}</td>
                               </tr>
                             ))}

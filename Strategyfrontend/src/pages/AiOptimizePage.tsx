@@ -43,6 +43,7 @@ const statusLabel: Record<string, string> = {
   completed: "已完成",
   cancelled: "已停止",
   failed: "失败",
+  interrupted: "已中断",
 }
 
 const statusColor: Record<string, string> = {
@@ -50,6 +51,14 @@ const statusColor: Record<string, string> = {
   completed: "bg-emerald-100 text-emerald-700",
   cancelled: "bg-amber-100 text-amber-700",
   failed: "bg-red-100 text-red-700",
+  interrupted: "bg-orange-100 text-orange-700",
+}
+
+const PCT_METRICS = new Set(["total_return_pct", "win_rate", "max_drawdown", "hold_to_settlement_ratio", "annualized_return"])
+
+function fmtMetric(target: string, value: number): string {
+  if (PCT_METRICS.has(target)) return `${(value * 100).toFixed(2)}%`
+  return value.toFixed(4)
 }
 
 const optimizeTargets = [
@@ -95,7 +104,10 @@ export default function AiOptimizePage() {
   const { data: tasks = [], isLoading } = useQuery<AiOptimizeTask[]>({
     queryKey: ["aiOptimizeTasks"],
     queryFn: fetchAiOptimizeTasks,
-    refetchInterval: 3000,
+    refetchInterval: (query) => {
+      const data = query.state.data
+      return data?.some((t) => t.status === "running") ? 3000 : false
+    },
   })
 
   const { data: modelsData } = useQuery<AiModelsResponse>({
@@ -175,6 +187,7 @@ export default function AiOptimizePage() {
       runs_per_round: runsPerRound,
       initial_balance: balance,
       param_keys: [...selectedParamKeys],
+      active_params: Object.keys(baseConfig),
       llm_model: llmModel,
     }
 
@@ -255,7 +268,10 @@ export default function AiOptimizePage() {
 
                 {t.best_metric !== null && (
                   <div className="mt-1 text-sm">
-                    最优 {t.optimize_target}: <span className="font-medium text-emerald-600">{t.best_metric.toFixed(4)}</span>
+                    最优 {t.optimize_target}: <span className="font-medium text-emerald-600">{fmtMetric(t.optimize_target, t.best_metric)}</span>
+                    <span className="ml-1 text-xs text-muted-foreground">
+                      ({t.best_total_trades}笔{t.best_total_trades < 5 ? " · 低可信" : ""})
+                    </span>
                   </div>
                 )}
 
