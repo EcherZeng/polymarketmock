@@ -226,6 +226,7 @@ export interface BatchTask {
   batch_id: string
   strategy: string
   slugs: string[]
+  config: Record<string, unknown>
   status: string
   total: number
   completed: number
@@ -293,6 +294,7 @@ export interface PortfolioItem {
   avg_slippage: number
   initial_balance: number
   final_equity: number
+  config: Record<string, unknown>
 }
 
 export interface Portfolio {
@@ -301,6 +303,9 @@ export interface Portfolio {
   created_at: string
   updated_at: string
   items: PortfolioItem[]
+  is_strategy_group: boolean
+  group_strategy: string | null
+  group_config: Record<string, unknown> | null
 }
 
 // ── AI Optimize ─────────────────────────────────────────────────────────────

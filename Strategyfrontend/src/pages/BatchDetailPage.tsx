@@ -148,6 +148,7 @@ export default function BatchDetailPage() {
         avg_slippage: r.avg_slippage,
         initial_balance: r.initial_balance,
         final_equity: r.final_equity,
+        config: task?.config ?? {},
       }))
   }, [results, selectedIds, task])
 

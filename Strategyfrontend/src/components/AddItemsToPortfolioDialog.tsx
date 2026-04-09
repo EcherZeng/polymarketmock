@@ -139,6 +139,7 @@ export default function AddItemsToPortfolioDialog({
           avg_slippage: r.avg_slippage,
           initial_balance: r.initial_balance,
           final_equity: r.final_equity,
+          config: batchDetail.config ?? {},
         } as PortfolioItem,
       ])
   }, [batchDetail, existingSessionIds])
@@ -177,6 +178,7 @@ export default function AddItemsToPortfolioDialog({
           avg_slippage: 0,
           initial_balance: 0,
           final_equity: 0,
+          config: {},
         })
       }
       return next

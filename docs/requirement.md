@@ -15,6 +15,9 @@
 3. **Req5 累计模式执行顺序 → 按组合(portfolio)中数据源的已有排序**：前端提交的 `slugs` 列表顺序即执行顺序（由组合页排列决定），不需要后端按数据时间重排。
 4. **Req5 资金耗尽 → 立即中止**：累计模式下某 slug 结束后 `final_equity ≤ 0`，后续所有 slug 跳过（标记 `capital_exhausted`），不是继续以极小金额执行。
 5. **Req4「数据源数量」= 覆盖度指标**：同一参数配置跑了多少个不同 slug，衡量策略泛化性。不是简单的 portfolio item 计数。
+6. **Req4 策略组 = 自动识别（基于 Portfolio）**：Portfolio 中所有 items 的 `strategy` + `config` 完全相同 → 自动标记为策略组。对照功能在**策略组与策略组之间**进行，不是组合内部 items 之间。
+7. **Req4 策略组添加数据源 → 自动回测**：向策略组添加 slug 时，后端用组的 config 自动跑回测，将结果作为新 item 加入组。
+8. **Req4 对照入口 = 组合列表页勾选 → `/comparison` 页面**：在 PortfoliosPage 选择 2+ 策略组后跳转独立对照页面。
 
 **3.1 与 3.2 是两个独立 bug**（勿混淆）：
 - **3.1** 是 AI 优化器的 best 选择逻辑问题 → 低交易量 session 的 win_rate=1.0 霸占 best → 后续每轮 prompt 都以这个 100% 为参考 → AI 越调越偏（级联污染）
@@ -183,34 +186,66 @@
 
 ---
 
-#### P3 — Req4: 参数对照功能
+#### P3 — Req4: 策略组参数对照功能
 **优先级理由**：依赖 Req5（累计模式修复后对照才有意义）和 Req1（参数可见性明确后对照更清晰）。
 
-##### 4.1 Backend — 结果存储携带完整 config
-- **现状**：`result_store.py` 存储的 JSON 已包含 `config` 字段（在 BacktestSession 中），但 portfolio item 的 summary 未携带 config。
-- **涉及文件**：`Strategy/api/portfolios.py`、`Strategy/core/types.py`
+**关键设计决策（已确认）：**
+1. **策略组 = 自动识别**：Portfolio 中所有 items 的 `strategy` + `config` 完全相同 → 自动标记为策略组（`is_strategy_group=true`）。不需要手动标记。
+2. **策略组添加数据源 → 自动回测**：向策略组添加 slug 时，后端用组的 config 自动跑回测，将回测结果作为新 item 加入组。
+3. **对照入口 = 组合列表页勾选 → 跳转独立 `/comparison` 页面**：在 PortfoliosPage 选择 2+ 策略组后打开参数对照。
+4. **混合策略组合不参与对照**：Portfolio 中存在不同 strategy 或不同 config 的 items → 非策略组，无对照功能。
+5. **对照维度**：参数差异 + 数据源覆盖度（同配置跑了多少 slug）+ 收益对比（min/max/avg）。
+
+##### 4.1 Backend — PortfolioItem 携带 config 快照 ✅ DONE
+- **现状**：`result_store.py` 存储的 JSON 已包含 `config` 字段（在 BacktestSession 中），但 `PortfolioItemBody` 未携带 config。
+- **涉及文件**：`Strategy/api/portfolios.py`、`Strategy/core/types.py`、`Strategyfrontend/src/types/index.ts`
 - **任务**：
-  - Portfolio item 在添加时携带该 result 的完整 `config` 快照
+  - `PortfolioItemBody` 新增 `config: dict[str, Any] = {}` 字段
+  - 前端 `PortfolioItem` 类型新增 `config: Record<string, unknown>`
+  - 前端添加 item 时从 BacktestResult 中携带 config
   - Portfolio list/detail API 返回每个 item 的 config
 
-##### 4.2 Frontend — 对照表格组件
-- **涉及文件**：`Strategyfrontend/src/pages/PortfolioDetailPage.tsx`、新建 `Strategyfrontend/src/components/ParamComparisonTable.tsx`
+##### 4.2 Backend — 策略组自动识别 API（依赖 4.1） ✅ DONE
+- **涉及文件**：`Strategy/api/portfolios.py`
 - **任务**：
-  - 新增"参数对照"视图：表格横轴为选中的 portfolio items，纵轴为参数 key
-  - 高亮差异项（值不同的单元格标色）
-  - 支持筛选：仅显示有差异的参数
-  - 同行显示：数据源(slug)、本金、收益等快速参考列
+  - 查询时自动判断：items 非空 + 所有 items 的 `strategy` 相同 + 所有 items 的 `config` 相同 → `is_strategy_group=true`
+  - Portfolio API 响应中附加 `is_strategy_group: bool`、`group_strategy: str | None`、`group_config: dict | None`
+  - 无额外存储字段，纯查询时派生
 
-##### 4.3 Frontend — 对照摘要卡片（参数 × 数据源覆盖度 × 收益）
-- **涉及文件**：`Strategyfrontend/src/pages/PortfolioDetailPage.tsx`
-- **「数据源数量」含义**：同一参数配置跑了多少个不同数据源（slug），衡量策略的**覆盖面/泛化性**。
+##### 4.3 Backend — 策略组添加 slug 自动回测端点（依赖 4.2）
+- **涉及文件**：`Strategy/api/portfolios.py`、`Strategy/core/runner.py`
 - **任务**：
-  - 在现有 stats 卡片区域新增对比摘要：
-    - 参数差异数（多少个参数在 items 间有不同值）
-    - 每组参数配置的数据源覆盖数（同配置跑了 N 个 slug）
+  - 新增 `POST /portfolios/{id}/run-slugs` 端点
+  - 接收 `slugs: list[str]`，校验 portfolio 是策略组
+  - 用 `group_config` + `group_strategy` 对每个 slug 跑回测
+  - 回测结果自动作为 item 加入 portfolio
+  - 返回更新后的 portfolio
+
+##### 4.4 Frontend — PortfolioDetailPage 策略组展示 + PortfoliosPage 勾选入口（依赖 4.2）
+- **涉及文件**：`Strategyfrontend/src/pages/PortfolioDetailPage.tsx`、`Strategyfrontend/src/pages/PortfoliosPage.tsx`、`Strategyfrontend/src/types/index.ts`
+- **任务**：
+  - TS `Portfolio` 类型增加 `is_strategy_group`、`group_strategy`、`group_config`
+  - **PortfolioDetailPage**：策略组 → 页面顶部显示策略名称 + config 参数面板
+  - **PortfoliosPage**：策略组 card 显示 badge 标识；增加 checkbox 多选（仅策略组可选）；选 2+ 个后显示"参数对照"按钮 → 跳转 `/comparison?ids=a,b,c`
+
+##### 4.5 Frontend — `/comparison` 参数对照页面（依赖 4.1, 4.4）
+- **涉及文件**：新建 `Strategyfrontend/src/pages/ComparisonPage.tsx`、注册到 `App.tsx`
+- **任务**：
+  - 从 URL params 获取 portfolio ids，fetch 各 portfolio 数据
+  - 参数对照表格：列 = 策略组（portfolio 名称），行 = 参数 key，高亮差异单元格
+  - 筛选：可切换「仅显示差异参数」
+  - 摘要区域：
+    - 每组的数据源覆盖数（slug 数）
     - 收益区间（min/max/avg return）
-  - 支持按「参数配置」分组聚合，展示同配置在不同 slug 上的表现分布
-  - 点击可展开完整对照表
+    - 参数差异数
+  - 表头行：策略名、组合名、slug 数量、平均收益
+
+##### 4.6 Frontend — 策略组添加数据源对接自动回测（依赖 4.3, 4.4）
+- **涉及文件**：`Strategyfrontend/src/pages/PortfolioDetailPage.tsx`、`Strategyfrontend/src/components/AddItemsToPortfolioDialog.tsx`、`Strategyfrontend/src/api/client.ts`
+- **任务**：
+  - 策略组详情页的「添加数据源」dialog 改造：选择 slug → 调用 `/portfolios/{id}/run-slugs` → 等待回测完成 → 自动刷新 items
+  - 添加过程中显示回测进度
+  - 非策略组保持现有的手动添加行为
 
 ---
 
