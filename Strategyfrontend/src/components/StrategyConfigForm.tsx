@@ -1,5 +1,5 @@
 import { useMemo, useState, useRef, useCallback } from "react"
-import { InfoIcon, XIcon, PlusIcon, CheckIcon } from "lucide-react"
+import { InfoIcon, XIcon, PlusIcon } from "lucide-react"
 import type { ParamSchemaItem, ParamGroupDef } from "@/types"
 import { cn } from "@/lib/utils"
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
