@@ -125,12 +125,26 @@ export default function AiOptimizePage() {
   const activeStrategy = strategies.find((s) => s.name === selectedStrategy)
   const selectedPortfolio = portfolios.find((p) => p.portfolio_id === selectedPortfolioId)
 
-  // Tunable params grouped by param_schema group (exclude bool toggles)
+  // Tunable params: non-bool params that exist in the selected strategy's default_config,
+  // excluding child params whose parent toggle is OFF in the strategy config.
   const tunableParams = useMemo(() => {
+    if (!activeStrategy) return []
+    const strategyKeys = new Set(Object.keys(activeStrategy.default_config))
+    const toggleOffKeys = new Set(
+      Object.entries(paramSchema)
+        .filter(([k, s]) => s.type === "bool" && strategyKeys.has(k) && !activeStrategy.default_config[k])
+        .map(([k]) => k)
+    )
     return Object.entries(paramSchema)
-      .filter(([, info]) => info.type !== "bool")
+      .filter(([key, info]) => {
+        if (info.type === "bool") return false
+        if (!strategyKeys.has(key)) return false
+        // Exclude child params whose parent toggle is off
+        if (info.depends_on && toggleOffKeys.has(info.depends_on)) return false
+        return true
+      })
       .map(([key, info]) => ({ key, ...info }))
-  }, [paramSchema])
+  }, [paramSchema, activeStrategy])
 
   // Unique slugs from selected portfolio
   const portfolioSlugs = useMemo(() => {
@@ -153,22 +167,41 @@ export default function AiOptimizePage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["aiOptimizeTasks"] }),
   })
 
+  function buildDefaultSelectedKeys(params: typeof tunableParams): Set<string> {
+    return new Set(params.filter((p) => p.group !== "risk").map((p) => p.key))
+  }
+
   // ── Handlers ────────────────────────────────────────────────────────────
+  function handleSelectStrategy(name: string) {
+    setSelectedStrategy(name)
+    // Recompute tunable params for the newly selected strategy inline
+    const strat = strategies.find((s) => s.name === name)
+    if (!strat) { setSelectedParamKeys(new Set()); return }
+    const strategyKeys = new Set(Object.keys(strat.default_config))
+    const toggleOffKeys = new Set(
+      Object.entries(paramSchema)
+        .filter(([k, s]) => s.type === "bool" && strategyKeys.has(k) && !strat.default_config[k])
+        .map(([k]) => k)
+    )
+    const newTunable = Object.entries(paramSchema)
+      .filter(([key, info]) => {
+        if (info.type === "bool") return false
+        if (!strategyKeys.has(key)) return false
+        if (info.depends_on && toggleOffKeys.has(info.depends_on)) return false
+        return true
+      })
+      .map(([key, info]) => ({ key, ...info }))
+    setSelectedParamKeys(buildDefaultSelectedKeys(newTunable))
+  }
+
   function handleOpenDialog() {
-    // Pre-select first strategy
-    if (!selectedStrategy && strategies.length > 0) {
-      setSelectedStrategy(strategies[0].name)
+    const firstStrategy = selectedStrategy || strategies[0]?.name || ""
+    if (!selectedStrategy && firstStrategy) {
+      handleSelectStrategy(firstStrategy)
+    } else if (selectedParamKeys.size === 0 && tunableParams.length > 0) {
+      setSelectedParamKeys(buildDefaultSelectedKeys(tunableParams))
     }
-    // Pre-select tunable params (risk params available but not pre-selected)
-    if (selectedParamKeys.size === 0 && tunableParams.length > 0) {
-      setSelectedParamKeys(
-        new Set(tunableParams.filter((p) => p.group !== "risk").map((p) => p.key)),
-      )
-    }
-    // Pre-select default model
-    if (!llmModel && modelsData) {
-      setLlmModel(modelsData.default_model)
-    }
+    if (!llmModel && modelsData) setLlmModel(modelsData.default_model)
     setDialogOpen(true)
   }
 
@@ -320,7 +353,7 @@ export default function AiOptimizePage() {
               <label className="text-sm font-medium">策略</label>
               <select
                 value={selectedStrategy}
-                onChange={(e) => setSelectedStrategy(e.target.value)}
+                onChange={(e) => handleSelectStrategy(e.target.value)}
                 className="rounded-md border bg-background px-3 py-2 text-sm"
               >
                 <option value="">选择策略...</option>
@@ -429,20 +462,72 @@ export default function AiOptimizePage() {
             {/* Tunable parameters */}
             <div className="flex flex-col gap-1.5">
               <label className="text-sm font-medium">AI 可调参数</label>
-              <p className="text-xs text-muted-foreground">选择哪些参数允许 AI 调整（默认全选 entry/volatility/position 组）</p>
-              <div className="grid grid-cols-2 gap-1.5 rounded-md border p-3 max-h-48 overflow-y-auto">
-                {tunableParams.map((p) => (
-                  <label key={p.key} className="flex items-center gap-2 text-sm cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={selectedParamKeys.has(p.key)}
-                      onChange={() => toggleParamKey(p.key)}
-                      className="rounded"
-                    />
-                    <span className="truncate">{t(p.label)} <span className="text-xs text-muted-foreground">({p.key})</span></span>
-                  </label>
-                ))}
-              </div>
+              <p className="text-xs text-muted-foreground">
+                仅显示所选策略中存在的参数（bool 开关及未启用开关的子参数已排除）
+              </p>
+              {!activeStrategy ? (
+                <p className="rounded-md border border-dashed p-3 text-center text-xs text-muted-foreground">
+                  请先选择策略
+                </p>
+              ) : tunableParams.length === 0 ? (
+                <p className="rounded-md border border-dashed p-3 text-center text-xs text-muted-foreground">
+                  该策略无可调数值参数
+                </p>
+              ) : (
+                <div className="rounded-md border p-3 max-h-52 overflow-y-auto">
+                  {/* Group by schema group */}
+                  {(() => {
+                    const groups = new Map<string, typeof tunableParams>()
+                    for (const p of tunableParams) {
+                      if (!groups.has(p.group)) groups.set(p.group, [])
+                      groups.get(p.group)!.push(p)
+                    }
+                    const groupDefs = presetsData?.param_groups ?? {}
+                    const sorted = [...groups.entries()].sort((a, b) =>
+                      (groupDefs[a[0]]?.order ?? 99) - (groupDefs[b[0]]?.order ?? 99)
+                    )
+                    return sorted.map(([grpKey, params]) => (
+                      <div key={grpKey} className="mb-2 last:mb-0">
+                        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          {groupDefs[grpKey] ? t(groupDefs[grpKey]) : grpKey}
+                        </p>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                          {params.map((p) => (
+                            <label key={p.key} className="flex items-center gap-2 text-sm cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={selectedParamKeys.has(p.key)}
+                                onChange={() => toggleParamKey(p.key)}
+                                className="rounded"
+                              />
+                              <span className="truncate">{t(p.label)}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    ))
+                  })()}
+                  <div className="mt-2 flex gap-2 border-t pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedParamKeys(new Set(tunableParams.map((p) => p.key)))}
+                      className="text-xs text-primary hover:underline"
+                    >
+                      全选
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedParamKeys(new Set())}
+                      className="text-xs text-muted-foreground hover:underline"
+                    >
+                      清空
+                    </button>
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      已选 {selectedParamKeys.size} / {tunableParams.length}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* LLM model */}
