@@ -12,6 +12,7 @@ export interface I18nLabel {
 export interface ParamSchemaItem {
   group: string
   visibility?: "core" | "advanced"
+  weight?: "critical" | "high" | "medium" | "low"
   label: I18nLabel
   /** What this parameter does and how it affects the strategy */
   desc?: I18nLabel

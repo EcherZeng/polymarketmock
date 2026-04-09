@@ -100,6 +100,10 @@ async def lifespan(app: FastAPI):
     )
     state.ai_optimizer.load_tasks()
 
+    # ── Init sensitivity analyzer ────────────────────────────────────
+    from core.sensitivity import SensitivityAnalyzer
+    state.sensitivity_analyzer = SensitivityAnalyzer(state.registry)
+
     yield
 
     logger.info("Strategy engine shutting down")
@@ -131,6 +135,7 @@ from api.results import router as results_router
 from api.presets import router as presets_router
 from api.portfolios import router as portfolios_router
 from api.ai_optimize import router as ai_optimize_router
+from api.sensitivity import router as sensitivity_router
 
 app.include_router(strategies_router, tags=["Strategies"])
 app.include_router(data_router, tags=["Data"])
@@ -139,6 +144,7 @@ app.include_router(results_router, tags=["Results"])
 app.include_router(presets_router, tags=["Presets"])
 app.include_router(portfolios_router, tags=["Portfolios"])
 app.include_router(ai_optimize_router)
+app.include_router(sensitivity_router)
 
 
 @app.get("/health")

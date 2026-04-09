@@ -1,12 +1,46 @@
 import { useMemo, useState, useRef, useCallback } from "react"
 import { InfoIcon, XIcon, PlusIcon, CheckIcon } from "lucide-react"
 import type { ParamSchemaItem, ParamGroupDef } from "@/types"
+import { cn } from "@/lib/utils"
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 // ── helpers ─────────────────────────────────────────────────────────────────
+
+const WEIGHT_CONFIG: Record<string, { icon: string; color: string; tip: string }> = {
+  critical: { icon: "🔴", color: "text-red-500", tip: "本金安全 — 调整须极度谨慎" },
+  high:     { icon: "🟠", color: "text-orange-500", tip: "显著影响收益 — 谨慎调整" },
+  medium:   { icon: "🟡", color: "text-yellow-500", tip: "影响入场频率/质量" },
+  low:      { icon: "🟢", color: "text-green-500", tip: "微调类参数" },
+}
+
+function WeightBadge({ weight }: { weight?: string }) {
+  if (!weight) return null
+  const cfg = WEIGHT_CONFIG[weight]
+  if (!cfg) return null
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className={cn("cursor-default text-xs leading-none", cfg.color)} aria-label={`权重: ${weight}`}>
+            {cfg.icon}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="text-xs">
+          <span className="font-medium">{weight}</span> — {cfg.tip}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
 
 /** Get localised text — always zh for now, fallback to en */
 function t(label: { zh: string; en: string } | string): string {
@@ -277,6 +311,7 @@ export default function StrategyConfigForm({
                           onChange={(e) => handleChange(key, e.target.checked, schema)}
                           className="h-4 w-4 rounded accent-primary"
                         />
+                        <WeightBadge weight={schema.weight} />
                         <span className="text-sm">{label}</span>
                       </label>
                       {schema.desc && (
@@ -299,6 +334,7 @@ export default function StrategyConfigForm({
                 return (
                   <div key={key} className="flex flex-col gap-1">
                     <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <WeightBadge weight={schema.weight} />
                       <span>{label}</span>
                       {schema.unit && (
                         <span className="text-muted-foreground/50">({schema.unit})</span>
@@ -429,6 +465,7 @@ function AddParamPopover({ inactiveParams, onAdd }: AddParamPopoverProps) {
                   onCheckedChange={() => toggle(key)}
                   aria-label={t(schema.label)}
                 />
+                <WeightBadge weight={schema.weight} />
                 <span className="flex-1 truncate">{t(schema.label)}</span>
               </button>
             ))}

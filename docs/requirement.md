@@ -266,13 +266,13 @@
   - AI 调参时 critical/high 权重参数的变动幅度和方向需要更谨慎的推理（prompt 约束）
   - 每轮 AI 输出的 reason 中须说明对 critical 参数的调整依据
 
-##### 2.3 Frontend — 权重可视化
+##### 2.3 Frontend — 权重可视化 ✅ DONE
 - **涉及文件**：`Strategyfrontend/src/components/StrategyConfigForm.tsx`
 - **任务**：
   - 参数标签旁显示权重等级 badge（🔴 critical / 🟠 high / 🟡 medium / 🟢 low）
   - 可选：修改 critical/high 权重参数时弹出确认提示
 
-##### 2.4 （远期）敏感度分析端点
+##### 2.4 （远期）敏感度分析端点 ✅ DONE
 - **涉及文件**：新建 `Strategy/api/sensitivity.py`、`Strategy/core/sensitivity.py`
 - **任务**：
   - 基于 batch runner，对单个参数做 N 档扫描回测
