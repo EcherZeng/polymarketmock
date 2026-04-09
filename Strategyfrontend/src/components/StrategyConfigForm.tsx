@@ -181,57 +181,81 @@ export default function StrategyConfigForm({
   activeParams,
   onActiveParamsChange,
 }: StrategyConfigFormProps) {
-  // Group params by group, sorted by group order, filtered to visible keys
-  const { grouped, inactiveByGroup } = useMemo(() => {
-    const map = new Map<string, GroupedParam[]>()
-    const inactive = new Map<string, GroupedParam[]>()
-
+  // ── Identify toggle keys and their children ──────────────────────────────
+  // "Toggles" = bool params in the "toggles" group (always shown, not filtered by visibleKeys/activeParams)
+  // "Children" = params with depends_on pointing to a toggle key (shown inline under their toggle)
+  const { regularGrouped, regularInactiveByGroup, toggleParams, toggleChildMap } = useMemo(() => {
+    const toggleKeySet = new Set<string>()
     for (const [key, schema] of Object.entries(paramSchema)) {
-      if (!visibleKeys.has(key)) continue
-      // If param depends on a toggle, check if toggle is off → skip
-      if (schema.depends_on && !values[schema.depends_on]) continue
-
-      const group = schema.group
-
-      // When activeParams is provided, advanced params not in activeParams go to inactive list
-      if (activeParams && onActiveParamsChange && schema.visibility === "advanced" && !activeParams.has(key)) {
-        if (!inactive.has(group)) inactive.set(group, [])
-        inactive.get(group)!.push({ key, schema })
-        continue
-      }
-
-      if (!map.has(group)) map.set(group, [])
-      map.get(group)!.push({ key, schema })
+      if (schema.group === "toggles" && schema.type === "bool") toggleKeySet.add(key)
     }
 
-    // Also collect inactive params whose toggle is off but the toggle itself is inactive
-    // (these are already excluded above, which is correct)
+    const childKeySet = new Set<string>()
+    const childMap = new Map<string, GroupedParam[]>()
+    for (const [key, schema] of Object.entries(paramSchema)) {
+      if (schema.depends_on && toggleKeySet.has(schema.depends_on)) {
+        childKeySet.add(key)
+        if (!childMap.has(schema.depends_on)) childMap.set(schema.depends_on, [])
+        childMap.get(schema.depends_on)!.push({ key, schema })
+      }
+    }
 
-    // Sort groups by order
-    const sorted = [...map.entries()].sort((a, b) => {
+    // Build toggle params list (all toggles always shown, ordered by appearance in schema)
+    const togglesList: GroupedParam[] = []
+    for (const [key, schema] of Object.entries(paramSchema)) {
+      if (toggleKeySet.has(key)) togglesList.push({ key, schema })
+    }
+
+    // Build regular groups: non-toggle, non-child params (filtered by visibleKeys / activeParams)
+    const regularMap = new Map<string, GroupedParam[]>()
+    const regularInactive = new Map<string, GroupedParam[]>()
+
+    for (const [key, schema] of Object.entries(paramSchema)) {
+      if (toggleKeySet.has(key)) continue  // handled in toggle section
+      if (childKeySet.has(key)) continue   // handled inline under toggle
+      if (!visibleKeys.has(key)) continue
+
+      const group = schema.group
+      if (activeParams && onActiveParamsChange && schema.visibility === "advanced" && !activeParams.has(key)) {
+        if (!regularInactive.has(group)) regularInactive.set(group, [])
+        regularInactive.get(group)!.push({ key, schema })
+        continue
+      }
+      if (!regularMap.has(group)) regularMap.set(group, [])
+      regularMap.get(group)!.push({ key, schema })
+    }
+
+    const sortedRegular = [...regularMap.entries()].sort((a, b) => {
       const orderA = paramGroups[a[0]]?.order ?? 99
       const orderB = paramGroups[b[0]]?.order ?? 99
       return orderA - orderB
     })
 
-    return { grouped: sorted, inactiveByGroup: inactive }
-  }, [paramSchema, paramGroups, visibleKeys, values, activeParams, onActiveParamsChange])
-
-  if (grouped.length === 0) {
-    return <p className="text-sm text-muted-foreground">该策略无可配置参数</p>
-  }
+    return {
+      regularGrouped: sortedRegular,
+      regularInactiveByGroup: regularInactive,
+      toggleParams: togglesList,
+      toggleChildMap: childMap,
+    }
+  }, [paramSchema, paramGroups, visibleKeys, activeParams, onActiveParamsChange])
 
   function handleChange(key: string, raw: string | boolean, schema: ParamSchemaItem) {
     if (schema.type === "bool") {
       const updated = { ...values, [key]: raw as boolean }
-      // When a toggle is turned OFF, reset dependent params to disable_value
-      if (!(raw as boolean)) {
+      if (raw as boolean) {
+        // Toggle turned ON: initialise child params with schema default if not yet set
         for (const [depKey, depSchema] of Object.entries(paramSchema)) {
-          if (depSchema.depends_on === key && depSchema.disable_value != null) {
-            updated[depKey] = depSchema.disable_value
+          if (depSchema.depends_on === key && !(depKey in updated)) {
+            const dv = depSchema.default !== undefined
+              ? depSchema.default
+              : (depSchema.disable_value !== null && depSchema.disable_value !== undefined
+                  ? depSchema.disable_value
+                  : depSchema.min ?? 0)
+            updated[depKey] = dv
           }
         }
       }
+      // Toggle turned OFF: keep child param values in state (do NOT reset)
       onChange(updated)
     } else {
       onChange({ ...values, [key]: Number(raw) })
@@ -244,15 +268,10 @@ export default function StrategyConfigForm({
     const updatedValues = { ...values }
     for (const key of keys) {
       next.add(key)
-      // Initialise with schema default (min or disable_value) if not already set
       if (updatedValues[key] === undefined) {
-        const schema = paramSchema[key]
-        if (schema) {
-          if (schema.type === "bool") {
-            updatedValues[key] = false
-          } else {
-            updatedValues[key] = schema.disable_value ?? schema.min ?? 0
-          }
+        const s = paramSchema[key]
+        if (s) {
+          updatedValues[key] = s.type === "bool" ? false : (s.default ?? s.disable_value ?? s.min ?? 0)
         }
       }
     }
@@ -264,28 +283,55 @@ export default function StrategyConfigForm({
     if (!activeParams || !onActiveParamsChange) return
     const next = new Set(activeParams)
     next.delete(key)
-    // Also remove dependent params whose toggle is this key
-    for (const [depKey, depSchema] of Object.entries(paramSchema)) {
-      if (depSchema.depends_on === key) next.delete(depKey)
-    }
-    // Remove values for removed keys
     const updatedValues = { ...values }
     delete updatedValues[key]
-    for (const [depKey, depSchema] of Object.entries(paramSchema)) {
-      if (depSchema.depends_on === key) delete updatedValues[depKey]
-    }
     onChange(updatedValues)
     onActiveParamsChange(next)
   }
 
   const canManageParams = !!activeParams && !!onActiveParamsChange
 
+  // ── Shared number input renderer ─────────────────────────────────────────
+  function renderNumberInput(key: string, schema: ParamSchemaItem, isAdvanced = false) {
+    const currentVal = values[key]
+    return (
+      <div key={key} className="flex flex-col gap-1">
+        <label className="flex items-center gap-1 text-xs text-muted-foreground">
+          <WeightBadge weight={schema.weight} />
+          <span>{t(schema.label)}</span>
+          {schema.unit && <span className="text-muted-foreground/50">({schema.unit})</span>}
+          <ParamInfoPopup schema={schema} />
+          {isAdvanced && (
+            <button
+              type="button"
+              onClick={() => handleRemoveParam(key)}
+              className="ml-auto rounded p-0.5 text-muted-foreground/50 hover:text-destructive"
+              aria-label="移除参数"
+            >
+              <XIcon className="size-3" />
+            </button>
+          )}
+        </label>
+        <input
+          type="number"
+          value={currentVal !== undefined ? String(currentVal) : ""}
+          onChange={(e) => handleChange(key, e.target.value, schema)}
+          min={schema.min}
+          max={schema.max}
+          step={schema.step ?? (schema.type === "int" ? 1 : 0.0001)}
+          className="h-8 rounded-md border bg-background px-2 text-sm"
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-5">
-      {grouped.map(([groupKey, params]) => {
+      {/* ── Regular groups (risk / entry / volatility / position) ─────────── */}
+      {regularGrouped.map(([groupKey, params]) => {
         const groupDef = paramGroups[groupKey]
         const groupLabel = groupDef ? t(groupDef) : groupKey
-        const inactiveParams = inactiveByGroup.get(groupKey) ?? []
+        const inactiveParams = regularInactiveByGroup.get(groupKey) ?? []
 
         return (
           <div key={groupKey}>
@@ -300,10 +346,7 @@ export default function StrategyConfigForm({
 
                 if (schema.type === "bool") {
                   return (
-                    <div
-                      key={key}
-                      className="col-span-1 flex items-center gap-2 rounded-md border px-3 py-2"
-                    >
+                    <div key={key} className="col-span-1 flex items-center gap-2 rounded-md border px-3 py-2">
                       <label className="flex flex-1 cursor-pointer items-center gap-2">
                         <input
                           type="checkbox"
@@ -314,73 +357,32 @@ export default function StrategyConfigForm({
                         <WeightBadge weight={schema.weight} />
                         <span className="text-sm">{label}</span>
                       </label>
-                      {schema.desc && (
-                        <ParamInfoPopup schema={schema} />
-                      )}
+                      {schema.desc && <ParamInfoPopup schema={schema} />}
                       {isAdvanced && (
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveParam(key)}
-                          className="ml-auto rounded p-0.5 text-muted-foreground/50 hover:text-destructive"
-                          aria-label="移除参数"
-                        >
+                        <button type="button" onClick={() => handleRemoveParam(key)}
+                          className="ml-auto rounded p-0.5 text-muted-foreground/50 hover:text-destructive" aria-label="移除参数">
                           <XIcon className="size-3" />
                         </button>
                       )}
                     </div>
                   )
                 }
-
-                return (
-                  <div key={key} className="flex flex-col gap-1">
-                    <label className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <WeightBadge weight={schema.weight} />
-                      <span>{label}</span>
-                      {schema.unit && (
-                        <span className="text-muted-foreground/50">({schema.unit})</span>
-                      )}
-                      <ParamInfoPopup schema={schema} />
-                      {isAdvanced && (
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveParam(key)}
-                          className="ml-auto rounded p-0.5 text-muted-foreground/50 hover:text-destructive"
-                          aria-label="移除参数"
-                        >
-                          <XIcon className="size-3" />
-                        </button>
-                      )}
-                    </label>
-                    <input
-                      type="number"
-                      value={currentVal !== undefined ? String(currentVal) : ""}
-                      onChange={(e) => handleChange(key, e.target.value, schema)}
-                      min={schema.min}
-                      max={schema.max}
-                      step={schema.step ?? (schema.type === "int" ? 1 : 0.01)}
-                      className="h-8 rounded-md border bg-background px-2 text-sm"
-                    />
-                  </div>
-                )
+                return renderNumberInput(key, schema, isAdvanced)
               })}
 
-              {/* Add advanced param button */}
               {canManageParams && inactiveParams.length > 0 && (
-                <AddParamPopover
-                  inactiveParams={inactiveParams}
-                  onAdd={handleAddParams}
-                />
+                <AddParamPopover inactiveParams={inactiveParams} onAdd={handleAddParams} />
               )}
             </div>
           </div>
         )
       })}
 
-      {/* Show groups that have ONLY inactive params (all advanced, none active) */}
+      {/* Hidden regular groups with only inactive params */}
       {canManageParams && (() => {
-        const activeGroupKeys = new Set(grouped.map(([k]) => k))
-        const hiddenGroups = [...inactiveByGroup.entries()]
-          .filter(([gk, items]) => !activeGroupKeys.has(gk) && items.length > 0)
+        const activeGroupKeys = new Set(regularGrouped.map(([k]) => k))
+        const hiddenGroups = [...regularInactiveByGroup.entries()]
+          .filter(([gk, items]) => !activeGroupKeys.has(gk) && gk !== "toggles" && items.length > 0)
           .sort((a, b) => (paramGroups[a[0]]?.order ?? 99) - (paramGroups[b[0]]?.order ?? 99))
         if (hiddenGroups.length === 0) return null
         return hiddenGroups.map(([groupKey, inactiveParams]) => {
@@ -388,19 +390,57 @@ export default function StrategyConfigForm({
           const groupLabel = groupDef ? t(groupDef) : groupKey
           return (
             <div key={groupKey}>
-              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                {groupLabel}
-              </h3>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{groupLabel}</h3>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                <AddParamPopover
-                  inactiveParams={inactiveParams}
-                  onAdd={handleAddParams}
-                />
+                <AddParamPopover inactiveParams={inactiveParams} onAdd={handleAddParams} />
               </div>
             </div>
           )
         })
       })()}
+
+      {/* ── Toggles section (always shown, all feature switches) ─────────── */}
+      {toggleParams.length > 0 && (
+        <div>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            {paramGroups["toggles"] ? t(paramGroups["toggles"]) : "特性开关"}
+          </h3>
+          <div className="flex flex-col gap-2">
+            {toggleParams.map(({ key, schema }) => {
+              const isOn = !!values[key]
+              const children = toggleChildMap.get(key) ?? []
+
+              return (
+                <div key={key} className="overflow-hidden rounded-md border">
+                  {/* Toggle row */}
+                  <div className="flex items-center gap-2 px-3 py-2">
+                    <label className="flex flex-1 cursor-pointer items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={isOn}
+                        onChange={(e) => handleChange(key, e.target.checked, schema)}
+                        className="h-4 w-4 rounded accent-primary"
+                      />
+                      <WeightBadge weight={schema.weight} />
+                      <span className="text-sm font-medium">{t(schema.label)}</span>
+                    </label>
+                    {schema.desc && <ParamInfoPopup schema={schema} />}
+                  </div>
+
+                  {/* Child params — inline row shown only when toggle is ON */}
+                  {isOn && children.length > 0 && (
+                    <div className="border-t bg-muted/20 px-3 py-2">
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                        {children.map(({ key: ck, schema: cs }) => renderNumberInput(ck, cs))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

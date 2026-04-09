@@ -128,11 +128,8 @@ export default function StrategyPage() {
     [strategies, selectedStrategy],
   )
 
-  /** Set of config keys relevant for the selected strategy */
-  const visibleKeys = useMemo(() => {
-    if (!activeStrategy) return new Set<string>()
-    return new Set(Object.keys(activeStrategy.default_config))
-  }, [activeStrategy])
+  /** Set of config keys relevant for the selected strategy — use full schema so existing strategies can add any param */
+  const visibleKeys = useMemo(() => new Set(Object.keys(paramSchema)), [paramSchema])
 
   // ── Save preset mutation ──────────────────────────────────────────────────
 
@@ -251,14 +248,41 @@ export default function StrategyPage() {
     setSelectedSlugs(new Set())
   }
 
+  /** Build a toggle-aware config: always include toggle values; include child params only when their toggle is ON */
+  function buildConfig(vals: Record<string, unknown>, activeP: Set<string>): Record<string, unknown> {
+    const toggleKeySet = new Set(
+      Object.entries(paramSchema)
+        .filter(([, s]) => s.group === "toggles" && s.type === "bool")
+        .map(([k]) => k)
+    )
+    const result: Record<string, unknown> = {}
+
+    // Always include all toggle values (backend needs to know toggle state)
+    for (const tk of toggleKeySet) {
+      if (tk in vals) result[tk] = vals[tk]
+    }
+
+    // Include regular active params (non-toggle, non-child)
+    for (const key of activeP) {
+      const s = paramSchema[key]
+      if (!s) continue
+      if (toggleKeySet.has(key)) continue  // already handled
+      if (s.depends_on && toggleKeySet.has(s.depends_on)) continue  // child, handled below
+      if (key in vals) result[key] = vals[key]
+    }
+
+    // Include child params only when their parent toggle is ON
+    for (const [key, s] of Object.entries(paramSchema)) {
+      if (!s.depends_on || !toggleKeySet.has(s.depends_on)) continue
+      if (vals[s.depends_on] === true && key in vals) result[key] = vals[key]
+    }
+
+    return result
+  }
+
   /** Filter config to only include active params */
   function activeConfig(): Record<string, unknown> {
-    if (configActiveParams.size === 0) return configValues
-    const result: Record<string, unknown> = {}
-    for (const key of configActiveParams) {
-      if (key in configValues) result[key] = configValues[key]
-    }
-    return result
+    return buildConfig(configValues, configActiveParams)
   }
 
   function handleRun() {
@@ -371,13 +395,36 @@ export default function StrategyPage() {
               ))}
               <button
                 onClick={() => {
-                  // Initialize with first strategy's defaults if available
-                  const base = strategies[0]?.default_config ?? {}
-                  setNewStrategyValues({ ...base })
-                  // For new strategy, start with only core params active
+                  // Base values from first builtin strategy, then force all toggles OFF
+                  const builtinStrategy = strategies.find((s) => s.builtin)
+                  const base: Record<string, unknown> = { ...(builtinStrategy?.default_config ?? {}) }
+
+                  // Identify toggle keys and their children from schema
+                  const toggleKeySet = new Set(
+                    Object.entries(paramSchema)
+                      .filter(([, s]) => s.group === "toggles" && s.type === "bool")
+                      .map(([k]) => k)
+                  )
+                  const childKeySet = new Set(
+                    Object.entries(paramSchema)
+                      .filter(([, s]) => s.depends_on && toggleKeySet.has(s.depends_on))
+                      .map(([k]) => k)
+                  )
+
+                  // Force all toggles to false; remove inherited child param values
+                  for (const tk of toggleKeySet) base[tk] = false
+                  for (const ck of childKeySet) delete base[ck]
+
+                  setNewStrategyValues(base)
+
+                  // Active params: only core non-toggle non-child params
                   const coreKeys = new Set(
                     Object.entries(paramSchema)
-                      .filter(([, s]) => s.visibility !== "advanced")
+                      .filter(([k, s]) =>
+                        s.visibility !== "advanced" &&
+                        !toggleKeySet.has(k) &&
+                        !childKeySet.has(k)
+                      )
                       .map(([k]) => k)
                   )
                   setNewStrategyActiveParams(coreKeys)
@@ -864,15 +911,10 @@ export default function StrategyPage() {
                     <button
                       onClick={() => {
                         const name = savePresetName.trim() || selectedStrategy
-                        // Strip unified rule keys out — only save strategy-specific params
-                        const params: Record<string, unknown> = {}
-                        for (const [k, v] of Object.entries(activeConfig())) {
-                          params[k] = v
-                        }
                         savePresetMutation.mutate({
                           name,
                           desc: savePresetDesc.trim(),
-                          params,
+                          params: activeConfig(),
                         })
                       }}
                       disabled={savePresetMutation.isPending}
@@ -953,16 +995,11 @@ export default function StrategyPage() {
               <button
                 disabled={!newStrategyName.trim() || savePresetMutation.isPending}
                 onClick={() => {
-                  // Filter to only active params for new strategy
-                  const filteredParams: Record<string, unknown> = {}
-                  for (const key of newStrategyActiveParams) {
-                    if (key in newStrategyValues) filteredParams[key] = newStrategyValues[key]
-                  }
                   savePresetMutation.mutate(
                     {
                       name: newStrategyName.trim(),
                       desc: newStrategyDesc.trim(),
-                      params: filteredParams,
+                      params: buildConfig(newStrategyValues, newStrategyActiveParams),
                     },
                     { onSuccess: () => setCreateStrategyOpen(false) },
                   )

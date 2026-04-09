@@ -27,6 +27,8 @@ export interface ParamSchemaItem {
   disable_value?: number | null
   /** Human-readable explanation of what disable_value achieves */
   disable_note?: I18nLabel
+  /** Default value to initialise when the parent toggle is first turned ON */
+  default?: number | boolean
 }
 
 export interface ParamGroupDef {
