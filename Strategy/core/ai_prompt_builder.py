@@ -30,38 +30,66 @@ SYSTEM_PROMPT = (
     "- 首轮探索应使用宽松参数：先确保有足够交易次数（>=10 笔），再逐步收紧\n"
     "- 如果上一轮 total_trades=0 或 <5，必须大幅放宽过滤条件\n"
     "- 每次只收紧 1-2 个参数，保持其他参数宽松\n\n"
+    "## 参数权重体系\n"
+    "每个参数标注了权重等级，表示该参数对 Polymarket BTC 预测市场回测收益/本金安全的重要程度：\n"
+    "- 🔴 **critical**：直接影响本金安全，调整须极度谨慎，每次变动幅度应最小\n"
+    "- 🟠 **high**：显著影响收益，调整需谨慎推理，大幅变动需充分理由\n"
+    "- 🟡 **medium**：影响入场频率/质量，可适度探索\n"
+    "- 🟢 **low**：微调类参数，可大胆探索不同取值\n\n"
     "## 各参数在预测市场中的影响\n"
-    "- **min_price [0.5-1.0]**: 买入价格下限。设 >0.85 会排除大部分市场机会，"
+    "- 🔴 **stop_loss_price [0-1.0]** [critical]: 绝对止损价。"
+    "设置过低则止损失效，本金暴露于极端下跌；设置过高则频繁止损侵蚀本金\n"
+    "- 🔴 **stop_loss_pct [0-1.0]** [critical]: 止损比例。预测市场波动小，"
+    "0.05-0.15 的止损已足够。过大=不止损，过小=频繁止损\n"
+    "- 🔴 **min_price [0.5-1.0]** [critical]: 买入价格下限。"
+    "过低则买入低概率垃圾标的导致本金亏损；设 >0.85 会排除大部分机会，"
     "建议首轮 0.55-0.65，逐步上调\n"
-    "- **max_spread [0.01-1.0]**: 价差过滤。预测市场 spread 通常较小，"
-    "设 <0.02 会过滤大量时刻，建议 ≥0.03\n"
-    "- **max_ask_deviation [0.01-1.0]**: ask 偏离锚定价。建议 ≥0.05，"
-    "过小会几乎不允许入场\n"
-    "- **min_profit_room [0-0.5]**: 利润空间要求。对于高概率 token (>0.85)，"
-    "利润空间天然 <0.15，设 >0.10 会完全排除此类标的\n"
-    "- **momentum_min [0-0.1]**: 动量阈值。预测市场价格变动缓慢，"
-    "0.005 已是显著动量，建议 ≤0.01\n"
-    "- **amplitude_min/max**: 振幅范围。预测市场振幅很小，"
-    "amplitude_min 建议 ≤0.005，amplitude_max 建议 ≥0.1\n"
-    "- **max_std [0-1.0]**: 标准差上限。预测市场 std 通常 <0.05，"
-    "设 <0.01 过严，建议 ≥0.02\n"
-    "- **max_drawdown [0-1.0]**: 回撤上限。建议 ≥0.05，预测市场回撤有限\n"
-    "- **position_min_pct / position_max_pct**: 仓位比例。"
-    "高概率 token 利润空间小，需要较大仓位，建议 min≥0.1, max≥0.3\n"
-    "- **take_profit_price [0.5-1.0]**: 止盈价。对于买入>0.80的token，"
+    "- 🟠 **take_profit_price [0.5-1.0]** [high]: 止盈价。对于买入>0.80的token，"
     "TP 设 0.95-0.98 更合理（接近结算值1.0）\n"
-    "- **stop_loss_pct [0-1.0]**: 止损比例。预测市场波动小，"
-    "0.05-0.15 的止损已足够\n\n"
+    "- 🟠 **take_profit_pct [0-1.0]** [high]: 止盈比例（基于买入价）。"
+    "与绝对止盈价独立生效\n"
+    "- 🟠 **position_max_pct [0.01-1.0]** [high]: 最大仓位比例。"
+    "过大则单笔风险集中，过小则收益微薄。建议 0.2-0.5\n"
+    "- 🟠 **max_spread [0.01-1.0]** [high]: 价差过滤。预测市场 spread 通常较小，"
+    "设 <0.02 会过滤大量时刻，建议 ≥0.03\n"
+    "- 🟠 **min_profit_room [0-0.5]** [high]: 利润空间要求。对于高概率 token (>0.85)，"
+    "利润空间天然 <0.15，设 >0.10 会完全排除此类标的\n"
+    "- 🟡 **time_remaining_ratio [0-1.0]** [medium]: 剩余时间比例阈值\n"
+    "- 🟡 **momentum_min [0-0.1]** [medium]: 动量阈值。预测市场价格变动缓慢，"
+    "0.005 已是显著动量，建议 ≤0.01\n"
+    "- 🟡 **max_ask_deviation [0.01-1.0]** [medium]: ask 偏离锚定价。建议 ≥0.05，"
+    "过小会几乎不允许入场\n"
+    "- 🟡 **max_std [0-1.0]** [medium]: 标准差上限。预测市场 std 通常 <0.05，"
+    "设 <0.01 过严，建议 ≥0.02\n"
+    "- 🟡 **max_drawdown [0-1.0]** [medium]: 回撤上限。建议 ≥0.05，预测市场回撤有限\n"
+    "- 🟡 **position_min_pct [0.01-1.0]** [medium]: 最小仓位比例。"
+    "高概率 token 利润空间小，需要较大仓位，建议 min≥0.1\n"
+    "- 🟢 **amplitude_min/max** [low]: 振幅范围。预测市场振幅很小，"
+    "amplitude_min 建议 ≤0.005，amplitude_max 建议 ≥0.1\n"
+    "- 🟢 **reverse_threshold [0-0.1]** [low]: 反向波动阈值，微调类\n"
+    "- 🟢 **toggle 开关** [low]: use_momentum_check 等特性开关\n\n"
     "## 规则\n"
     "1. 输出必须是严格的 JSON，格式：{\"configs\": [...], \"reason\": \"调整理由\"}\n"
     "2. 所有参数值必须在 schema 规定的 min/max 范围内\n"
     "3. bool 类型参数只能是 true 或 false\n"
-    "4. 每轮给出简短的调整理由（reason 字段）\n"
+    "4. 每轮给出简短的调整理由（reason 字段），**对 critical/high 权重参数的任何调整必须在 reason 中说明依据**\n"
     "5. 基于历史结果中表现好的参数方向进行收敛，但保持多样性探索\n"
     "6. 首轮用宽松参数，后续逐步收紧表现差的方向\n"
     "7. 如果前几轮都是 0 交易，必须显著放宽多个过滤条件\n"
-    "8. 每组参数之间应有差异性，避免生成雷同配置"
+    "8. 每组参数之间应有差异性，避免生成雷同配置\n"
+    "9. [权重约束] critical 参数每次调整幅度不超过当前值的 20%；"
+    "high 参数不超过 30%；medium/low 参数可自由探索"
 )
+
+
+# ── Weight icons ──────────────────────────────────────────────────────────────
+
+_WEIGHT_ICONS: dict[str, str] = {
+    "critical": "🔴",
+    "high": "🟠",
+    "medium": "🟡",
+    "low": "🟢",
+}
 
 
 # ── Helper formatters ────────────────────────────────────────────────────────
@@ -288,7 +316,7 @@ def build_round_prompt(
     param_keys: list[str],
 ) -> str:
     """Build the user prompt for one optimization round."""
-    # Parameter schema (compact: only name, type, min, max, step)
+    # Parameter schema (compact: name, type, min, max, step, weight)
     schema_lines: list[str] = []
     for name, info in param_schema.items():
         if name not in param_keys:
@@ -297,7 +325,9 @@ def build_round_prompt(
         pmin = info.get("min", "")
         pmax = info.get("max", "")
         step = info.get("step", "")
-        schema_lines.append(f"  {name}: {ptype} [{pmin}, {pmax}] step={step}")
+        weight = info.get("weight", "medium")
+        weight_icon = _WEIGHT_ICONS.get(weight, "")
+        schema_lines.append(f"  {weight_icon} {name}: {ptype} [{pmin}, {pmax}] step={step} weight={weight}")
     schema_text = "\n".join(schema_lines)
 
     # Market characteristics (limit to 10 markets to control prompt size)
@@ -392,7 +422,7 @@ def build_group_prompt(
     2. Previous round's per-group results (params + metrics)
     3. Asks AI to adjust each group individually
     """
-    # Parameter schema
+    # Parameter schema (with weight)
     schema_lines: list[str] = []
     for name, info in param_schema.items():
         if name not in param_keys:
@@ -401,7 +431,9 @@ def build_group_prompt(
         pmin = info.get("min", "")
         pmax = info.get("max", "")
         step = info.get("step", "")
-        schema_lines.append(f"  {name}: {ptype} [{pmin}, {pmax}] step={step}")
+        weight = info.get("weight", "medium")
+        weight_icon = _WEIGHT_ICONS.get(weight, "")
+        schema_lines.append(f"  {weight_icon} {name}: {ptype} [{pmin}, {pmax}] step={step} weight={weight}")
     schema_text = "\n".join(schema_lines)
 
     # Market characteristics (compact)

@@ -247,7 +247,7 @@
 **优先级理由**：增强功能，依赖 Req1（已有 visibility 分层后再叠加权重信息更合理）和 Req3（指标准确后权重才有参考意义）。
 **核心概念**：每个策略参数 = 一个影响因子，为其赋予「权重」表达该参数对 Polymarket BTC 预测市场回测收益/本金安全的重要程度。AI 优化时必须理解这些权重。
 
-##### 2.1 param_schema 扩展 — 参数权重标注
+##### 2.1 param_schema 扩展 — 参数权重标注 ✅ DONE
 - **涉及文件**：`Strategy/strategy_presets.json`
 - **任务**：
   - param_schema 每项增加 `"weight": "critical" | "high" | "medium" | "low"` 字段
@@ -258,7 +258,7 @@
     - **low**：微调类。如 `amplitude_min`、`reverse_threshold`
   - 后续可用敏感度分析验证/校准标注
 
-##### 2.2 AI 优化 prompt 注入权重上下文
+##### 2.2 AI 优化 prompt 注入权重上下文 ✅ DONE
 - **涉及文件**：`Strategy/core/ai_prompt_builder.py`（拆分后）或 `Strategy/core/ai_optimizer.py`
 - **任务**：
   - System prompt 中为每个参数附带权重标签及原因说明

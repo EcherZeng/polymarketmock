@@ -15,6 +15,7 @@
     "take_profit_price": {
       "group": "risk",
       "visibility": "core",
+      "weight": "high",
       "label": {
         "zh": "止盈价格",
         "en": "Take Profit Price"
@@ -38,6 +39,7 @@
     "stop_loss_price": {
       "group": "risk",
       "visibility": "core",
+      "weight": "critical",
       "label": {
         "zh": "止损价格",
         "en": "Stop Loss Price"
@@ -61,6 +63,7 @@
     "stop_loss_pct": {
       "group": "risk",
       "visibility": "core",
+      "weight": "critical",
       "label": {
         "zh": "止损比例（基于买入价）",
         "en": "Stop Loss % (from entry)"
@@ -84,6 +87,7 @@
     "take_profit_pct": {
       "group": "risk",
       "visibility": "core",
+      "weight": "high",
       "label": {
         "zh": "止盈比例（基于买入价）",
         "en": "Take Profit % (from entry)"
@@ -107,6 +111,7 @@
     "force_close_remaining_seconds": {
       "group": "risk",
       "visibility": "advanced",
+      "weight": "medium",
       "label": {
         "zh": "强制平仓剩余秒数",
         "en": "Force Close Remaining (s)"
@@ -130,6 +135,7 @@
     "consecutive_loss_threshold": {
       "group": "risk",
       "visibility": "advanced",
+      "weight": "medium",
       "label": {
         "zh": "连续亏损降仓阈值",
         "en": "Consecutive Loss Threshold"
@@ -153,6 +159,7 @@
     "loss_position_reduction_pct": {
       "group": "risk",
       "visibility": "advanced",
+      "weight": "medium",
       "label": {
         "zh": "亏损降仓比例",
         "en": "Loss Position Reduction (%)"
@@ -176,6 +183,7 @@
     "exit_use_orderbook_mode": {
       "group": "risk",
       "visibility": "advanced",
+      "weight": "medium",
       "label": {
         "zh": "平仓时按盘口深度撮合",
         "en": "Exit via Orderbook Reduction"
@@ -190,6 +198,7 @@
     "exit_min_sell_price": {
       "group": "risk",
       "visibility": "advanced",
+      "weight": "medium",
       "label": {
         "zh": "退出最低卖出价",
         "en": "Exit Min Sell Price"
@@ -214,6 +223,7 @@
     "exit_reduction_pct": {
       "group": "risk",
       "visibility": "advanced",
+      "weight": "medium",
       "label": {
         "zh": "每次退出减仓比例",
         "en": "Exit Reduction Ratio"
@@ -238,6 +248,7 @@
     "min_price": {
       "group": "entry",
       "visibility": "core",
+      "weight": "critical",
       "label": {
         "zh": "入场最低价格",
         "en": "Entry Min Price"
@@ -261,6 +272,7 @@
     "time_remaining_ratio": {
       "group": "entry",
       "visibility": "core",
+      "weight": "medium",
       "label": {
         "zh": "剩余时间比例阈值",
         "en": "Time Remaining Ratio"
@@ -284,6 +296,7 @@
     "momentum_window": {
       "group": "entry",
       "visibility": "advanced",
+      "weight": "medium",
       "label": {
         "zh": "动量检测窗口",
         "en": "Momentum Window"
@@ -308,6 +321,7 @@
     "momentum_min": {
       "group": "entry",
       "visibility": "advanced",
+      "weight": "medium",
       "label": {
         "zh": "最小涨幅",
         "en": "Min Momentum"
@@ -332,6 +346,7 @@
     "direction_window": {
       "group": "entry",
       "visibility": "advanced",
+      "weight": "medium",
       "label": {
         "zh": "方向一致性检测窗口",
         "en": "Direction Window"
@@ -356,6 +371,7 @@
     "volatility_window": {
       "group": "volatility",
       "visibility": "advanced",
+      "weight": "medium",
       "label": {
         "zh": "波动检测窗口",
         "en": "Volatility Window"
@@ -379,6 +395,7 @@
     "amplitude_min": {
       "group": "volatility",
       "visibility": "advanced",
+      "weight": "low",
       "label": {
         "zh": "振幅下限",
         "en": "Min Amplitude"
@@ -403,6 +420,7 @@
     "amplitude_max": {
       "group": "volatility",
       "visibility": "advanced",
+      "weight": "low",
       "label": {
         "zh": "振幅上限",
         "en": "Max Amplitude"
@@ -427,6 +445,7 @@
     "max_std": {
       "group": "volatility",
       "visibility": "advanced",
+      "weight": "medium",
       "label": {
         "zh": "最大标准差",
         "en": "Max Std Dev"
@@ -451,6 +470,7 @@
     "max_drawdown": {
       "group": "volatility",
       "visibility": "advanced",
+      "weight": "medium",
       "label": {
         "zh": "窗口最大回撤",
         "en": "Max Drawdown"
@@ -475,6 +495,7 @@
     "reverse_tick_window": {
       "group": "volatility",
       "visibility": "advanced",
+      "weight": "low",
       "label": {
         "zh": "反向检测窗口",
         "en": "Reverse Tick Window"
@@ -499,6 +520,7 @@
     "reverse_threshold": {
       "group": "volatility",
       "visibility": "advanced",
+      "weight": "low",
       "label": {
         "zh": "反向波动阈值",
         "en": "Reverse Threshold"
@@ -523,6 +545,7 @@
     "position_min_pct": {
       "group": "position",
       "visibility": "core",
+      "weight": "medium",
       "label": {
         "zh": "最小仓位比例",
         "en": "Min Position (%)"
@@ -546,6 +569,7 @@
     "position_max_pct": {
       "group": "position",
       "visibility": "core",
+      "weight": "high",
       "label": {
         "zh": "最大仓位比例",
         "en": "Max Position (%)"
@@ -569,6 +593,7 @@
     "use_momentum_check": {
       "group": "toggles",
       "visibility": "advanced",
+      "weight": "low",
       "label": {
         "zh": "启用动量检测",
         "en": "Enable Momentum Check"
@@ -583,6 +608,7 @@
     "use_direction_check": {
       "group": "toggles",
       "visibility": "advanced",
+      "weight": "low",
       "label": {
         "zh": "启用方向一致性检测",
         "en": "Enable Direction Check"
@@ -597,6 +623,7 @@
     "use_std_check": {
       "group": "toggles",
       "visibility": "advanced",
+      "weight": "low",
       "label": {
         "zh": "启用标准差检测",
         "en": "Enable Std Dev Check"
@@ -611,6 +638,7 @@
     "use_drawdown_check": {
       "group": "toggles",
       "visibility": "advanced",
+      "weight": "low",
       "label": {
         "zh": "启用回撤检测",
         "en": "Enable Drawdown Check"
@@ -625,6 +653,7 @@
     "use_amplitude_check": {
       "group": "toggles",
       "visibility": "advanced",
+      "weight": "low",
       "label": {
         "zh": "启用振幅检测",
         "en": "Enable Amplitude Check"
@@ -639,6 +668,7 @@
     "use_reverse_check": {
       "group": "toggles",
       "visibility": "advanced",
+      "weight": "low",
       "label": {
         "zh": "启用反转检测",
         "en": "Enable Reverse Check"
@@ -653,6 +683,7 @@
     "max_spread": {
       "group": "entry",
       "visibility": "core",
+      "weight": "high",
       "label": {
         "zh": "最大 Spread 阈值",
         "en": "Max Spread"
@@ -676,6 +707,7 @@
     "max_ask_deviation": {
       "group": "entry",
       "visibility": "advanced",
+      "weight": "medium",
       "label": {
         "zh": "最大 Ask 偏离度",
         "en": "Max Ask Deviation"
@@ -699,6 +731,7 @@
     "min_profit_room": {
       "group": "entry",
       "visibility": "advanced",
+      "weight": "high",
       "label": {
         "zh": "最小利润空间",
         "en": "Min Profit Room"
