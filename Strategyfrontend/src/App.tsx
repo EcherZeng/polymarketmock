@@ -15,6 +15,7 @@ import PortfoliosPage from "@/pages/PortfoliosPage"
 import PortfolioDetailPage from "@/pages/PortfolioDetailPage"
 import AiOptimizePage from "@/pages/AiOptimizePage"
 import AiOptimizeDetailPage from "@/pages/AiOptimizeDetailPage"
+import ComparisonPage from "@/pages/ComparisonPage"
 
 const navItems = [
   { to: "/", label: "策略回测" },
@@ -49,6 +50,7 @@ export default function App() {
                   location.pathname === item.to
                     || (item.to === "/batch" && location.pathname.startsWith("/batch"))
                     || (item.to === "/portfolios" && location.pathname.startsWith("/portfolios"))
+                    || (item.to === "/portfolios" && location.pathname.startsWith("/comparison"))
                     || (item.to === "/ai-optimize" && location.pathname.startsWith("/ai-optimize"))
                     ? "text-foreground font-medium"
                     : "text-muted-foreground",
@@ -69,6 +71,7 @@ export default function App() {
           <Route path="/results/:sessionId" element={<ResultDetailPage />} />
           <Route path="/portfolios" element={<PortfoliosPage />} />
           <Route path="/portfolios/:portfolioId" element={<PortfolioDetailPage />} />
+          <Route path="/comparison" element={<ComparisonPage />} />
           <Route path="/ai-optimize" element={<AiOptimizePage />} />
           <Route path="/ai-optimize/:taskId" element={<AiOptimizeDetailPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />

@@ -35,6 +35,7 @@ interface AddItemsToPortfolioDialogProps {
   portfolioId: string
   existingSessionIds: Set<string>
   existingSlugs: Set<string>
+  groupStrategy?: string
 }
 
 export default function AddItemsToPortfolioDialog({
@@ -43,6 +44,7 @@ export default function AddItemsToPortfolioDialog({
   portfolioId,
   existingSessionIds,
   existingSlugs,
+  groupStrategy,
 }: AddItemsToPortfolioDialogProps) {
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<SourceTab>("archives")
@@ -99,24 +101,33 @@ export default function AddItemsToPortfolioDialog({
   }, [archives, term, existingSlugs])
 
   const filteredBatchTasks = useMemo(() => {
-    const completed = batchTasks.filter((t) => t.status === "completed")
+    let completed = batchTasks.filter((t) => t.status === "completed")
+    if (groupStrategy) {
+      completed = completed.filter((t) => t.strategy === groupStrategy)
+    }
     if (!term) return completed
     return completed.filter(
       (t) =>
         t.batch_id.toLowerCase().includes(term) ||
         t.strategy.toLowerCase().includes(term),
     )
-  }, [batchTasks, term])
+  }, [batchTasks, term, groupStrategy])
 
   const filteredPortfolios = useMemo(() => {
     const others = portfolios.filter((p) => p.portfolio_id !== portfolioId)
-    if (!term) return others
-    return others.filter(
-      (p) =>
+    if (!term && !groupStrategy) return others
+    return others.filter((p) => {
+      const hasMatchingItems = groupStrategy
+        ? p.items.some((it) => it.strategy === groupStrategy)
+        : true
+      if (!hasMatchingItems) return false
+      if (!term) return true
+      return (
         p.name.toLowerCase().includes(term) ||
-        p.items.some((it) => it.slug.toLowerCase().includes(term)),
-    )
-  }, [portfolios, term, portfolioId])
+        p.items.some((it) => it.slug.toLowerCase().includes(term))
+      )
+    })
+  }, [portfolios, term, portfolioId, groupStrategy])
 
   // ── Batch detail results (deduplicated) ───────────────────────────────────
 
@@ -388,9 +399,12 @@ export default function AddItemsToPortfolioDialog({
                 </div>
               ) : (
                 filteredPortfolios.map((p) => {
-                  const newItems = p.items.filter(
+                  let newItems = p.items.filter(
                     (it) => !existingSessionIds.has(it.session_id),
                   )
+                  if (groupStrategy) {
+                    newItems = newItems.filter((it) => it.strategy === groupStrategy)
+                  }
                   return (
                     <div
                       key={p.portfolio_id}

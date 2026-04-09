@@ -212,23 +212,24 @@
   - Portfolio API 响应中附加 `is_strategy_group: bool`、`group_strategy: str | None`、`group_config: dict | None`
   - 无额外存储字段，纯查询时派生
 
-##### 4.3 Backend — 策略组添加 slug 自动回测端点（依赖 4.2）
-- **涉及文件**：`Strategy/api/portfolios.py`、`Strategy/core/runner.py`
+##### 4.3 Frontend — 策略组添加数据源自动过滤（依赖 4.2） ✅ DONE
+- **涉及文件**：`Strategyfrontend/src/components/AddItemsToPortfolioDialog.tsx`、`Strategyfrontend/src/pages/PortfolioDetailPage.tsx`
+- **变更说明**：不做自动回测，改为自动过滤已有回测结果中匹配该策略组策略的数据源。
 - **任务**：
-  - 新增 `POST /portfolios/{id}/run-slugs` 端点
-  - 接收 `slugs: list[str]`，校验 portfolio 是策略组
-  - 用 `group_config` + `group_strategy` 对每个 slug 跑回测
-  - 回测结果自动作为 item 加入 portfolio
-  - 返回更新后的 portfolio
+  - `AddItemsToPortfolioDialog` 新增 `groupStrategy?: string` prop
+  - 当 `groupStrategy` 有值时（策略组上下文）：
+    - 批量回测 tab：仅显示 `batch.strategy === groupStrategy` 的批量任务
+    - 组合 tab：仅显示其他 portfolio 中 `item.strategy === groupStrategy` 的 items
+  - 非策略组保持现有无过滤行为
 
-##### 4.4 Frontend — PortfolioDetailPage 策略组展示 + PortfoliosPage 勾选入口（依赖 4.2）
+##### 4.4 Frontend — PortfolioDetailPage 策略组展示 + PortfoliosPage 勾选入口（依赖 4.2） ✅ DONE
 - **涉及文件**：`Strategyfrontend/src/pages/PortfolioDetailPage.tsx`、`Strategyfrontend/src/pages/PortfoliosPage.tsx`、`Strategyfrontend/src/types/index.ts`
 - **任务**：
-  - TS `Portfolio` 类型增加 `is_strategy_group`、`group_strategy`、`group_config`
+  - ~~TS `Portfolio` 类型增加 `is_strategy_group`、`group_strategy`、`group_config`~~ ✅ 已在 4.2 完成
   - **PortfolioDetailPage**：策略组 → 页面顶部显示策略名称 + config 参数面板
   - **PortfoliosPage**：策略组 card 显示 badge 标识；增加 checkbox 多选（仅策略组可选）；选 2+ 个后显示"参数对照"按钮 → 跳转 `/comparison?ids=a,b,c`
 
-##### 4.5 Frontend — `/comparison` 参数对照页面（依赖 4.1, 4.4）
+##### 4.5 Frontend — `/comparison` 参数对照页面（依赖 4.1, 4.4） ✅ DONE
 - **涉及文件**：新建 `Strategyfrontend/src/pages/ComparisonPage.tsx`、注册到 `App.tsx`
 - **任务**：
   - 从 URL params 获取 portfolio ids，fetch 各 portfolio 数据
@@ -239,13 +240,6 @@
     - 收益区间（min/max/avg return）
     - 参数差异数
   - 表头行：策略名、组合名、slug 数量、平均收益
-
-##### 4.6 Frontend — 策略组添加数据源对接自动回测（依赖 4.3, 4.4）
-- **涉及文件**：`Strategyfrontend/src/pages/PortfolioDetailPage.tsx`、`Strategyfrontend/src/components/AddItemsToPortfolioDialog.tsx`、`Strategyfrontend/src/api/client.ts`
-- **任务**：
-  - 策略组详情页的「添加数据源」dialog 改造：选择 slug → 调用 `/portfolios/{id}/run-slugs` → 等待回测完成 → 自动刷新 items
-  - 添加过程中显示回测进度
-  - 非策略组保持现有的手动添加行为
 
 ---
 

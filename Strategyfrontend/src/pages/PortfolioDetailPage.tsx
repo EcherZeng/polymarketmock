@@ -186,6 +186,26 @@ export default function PortfolioDetailPage() {
         </Link>
       </div>
 
+      {/* Strategy group header */}
+      {portfolio.is_strategy_group && portfolio.group_strategy && portfolio.group_config && (
+        <div className="rounded-lg border bg-muted/30 p-4">
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
+              策略组
+            </span>
+            <span className="text-sm font-semibold">{portfolio.group_strategy}</span>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+            {Object.entries(portfolio.group_config).map(([key, val]) => (
+              <div key={key} className="text-xs">
+                <span className="text-muted-foreground">{key}:</span>{" "}
+                <span className="font-mono">{String(val)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Aggregate stats */}
       {stats && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
@@ -367,6 +387,7 @@ export default function PortfolioDetailPage() {
         portfolioId={portfolioId!}
         existingSessionIds={existingSessionIds}
         existingSlugs={existingSlugs}
+        groupStrategy={portfolio?.is_strategy_group ? (portfolio.group_strategy ?? undefined) : undefined}
       />
     </div>
   )
