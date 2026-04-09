@@ -319,6 +319,13 @@ class AIOptimizer:
                     merged_config = {k: v for k, v in merged_config.items() if k in active_set}
                     merged_config = self._registry.normalize_config(merged_config)
 
+                    # Collect per-slug results for group-level best tracking.
+                    # Best is determined by the average metric across all slugs
+                    # in this config group, not by any single slug's result.
+                    _cfg_metric_vals: list[float] = []
+                    _cfg_total_trades_vals: list[int] = []
+                    _cfg_first_session_id: str = ""
+
                     for slug in task.slugs:
                         if task.status == "cancelled":
                             break
@@ -361,31 +368,13 @@ class AIOptimizer:
                                 round_result.digests.append(digest)
                                 task.all_digests.append(digest)
 
-                                # Track best — require minimum trades to avoid
-                                # low-volume flukes (e.g. 1 trade → win_rate=1.0)
-                                _MIN_TRADES_FOR_BEST = 5
-                                metric_val = getattr(metrics, task.optimize_target, None)
-                                if metric_val is not None:
-                                    new_enough = metrics.total_trades >= _MIN_TRADES_FOR_BEST
-                                    old_enough = task.best_total_trades >= _MIN_TRADES_FOR_BEST
-                                    should_update = False
-                                    if task.best_metric == float("-inf"):
-                                        # No best yet — accept anything
-                                        should_update = True
-                                    elif new_enough and not old_enough:
-                                        # New has sufficient trades, old doesn't — always replace
-                                        should_update = True
-                                    elif not new_enough and old_enough:
-                                        # Old is reliable, new is fluke — never replace
-                                        should_update = False
-                                    else:
-                                        # Both same reliability tier — use metric comparison
-                                        should_update = metric_val > task.best_metric
-                                    if should_update:
-                                        task.best_metric = metric_val
-                                        task.best_config = merged_config
-                                        task.best_session_id = session.session_id
-                                        task.best_total_trades = metrics.total_trades
+                                # Accumulate per-slug values for group-level best tracking
+                                slug_metric_val = getattr(metrics, task.optimize_target, None)
+                                if slug_metric_val is not None:
+                                    _cfg_metric_vals.append(slug_metric_val)
+                                    _cfg_total_trades_vals.append(metrics.total_trades)
+                                    if not _cfg_first_session_id:
+                                        _cfg_first_session_id = session.session_id
 
                             except asyncio.TimeoutError:
                                 err_msg = f"[round_{round_num}] config {cfg_idx} slug {slug} timed out after {config.slug_timeout}s"
@@ -421,13 +410,58 @@ class AIOptimizer:
 
                         task.completed_runs += 1
 
-                # Round summary
-                round_metrics = [
-                    d["metrics"].get(task.optimize_target, 0)
-                    for d in round_result.digests
-                    if d.get("metrics")
+                    # Group-level best update — compare this config's *average* metric
+                    # across all slugs. This prevents a config that happens to be
+                    # great on one slug but poor overall from being selected as best.
+                    if _cfg_metric_vals:
+                        _MIN_TRADES_FOR_BEST = 5
+                        group_metric = sum(_cfg_metric_vals) / len(_cfg_metric_vals)
+                        group_total_trades = sum(_cfg_total_trades_vals)
+                        avg_trades_per_slug = group_total_trades / len(_cfg_metric_vals)
+
+                        new_enough = avg_trades_per_slug >= _MIN_TRADES_FOR_BEST
+                        # For the old-best reliability check, use avg trades per slug
+                        best_avg_trades = (
+                            task.best_total_trades / len(task.slugs)
+                            if task.slugs else task.best_total_trades
+                        )
+                        old_enough = best_avg_trades >= _MIN_TRADES_FOR_BEST
+
+                        should_update = False
+                        if task.best_metric == float("-inf"):
+                            # No best yet — accept anything
+                            should_update = True
+                        elif new_enough and not old_enough:
+                            # New group has sufficient trades, old doesn't — always replace
+                            should_update = True
+                        elif not new_enough and old_enough:
+                            # Old is reliable, new is fluke — never replace
+                            should_update = False
+                        else:
+                            # Both same reliability tier — use group metric comparison
+                            should_update = group_metric > task.best_metric
+
+                        if should_update:
+                            task.best_metric = group_metric
+                            task.best_config = merged_config
+                            task.best_session_id = _cfg_first_session_id
+                            task.best_total_trades = group_total_trades
+
+                # Round summary — best_metric_value = best *group-average* metric
+                # across configs this round (not raw max of individual slug results)
+                _rnd_config_metrics: dict[int, list[float]] = {}
+                for _d in round_result.digests:
+                    _ci = _d.get("config_index", -1)
+                    if _d.get("metrics"):
+                        _v = _d["metrics"].get(task.optimize_target, None)
+                        if _v is not None:
+                            _rnd_config_metrics.setdefault(_ci, []).append(_v)
+                _group_avgs = [
+                    sum(vals) / len(vals)
+                    for vals in _rnd_config_metrics.values()
+                    if vals
                 ]
-                round_result.best_metric_value = max(round_metrics) if round_metrics else 0.0
+                round_result.best_metric_value = max(_group_avgs) if _group_avgs else 0.0
                 round_result.duration_ms = (time.monotonic() - t_round) * 1000
                 task.rounds.append(round_result)
                 self._persist_task(task)
