@@ -22,12 +22,13 @@ export interface ParamSchemaItem {
   step?: number
   unit?: string
   scope: "unified" | "strategy"
+  /** Parent param key: selecting this param auto-adds the parent. Removing the parent removes this child. */
   depends_on?: string
-  /** The value to set when you want this parameter to have no effect on calculations. null means use the corresponding toggle instead. */
+  /** The value to set when you want this parameter to have no effect on calculations. null means param is toggle-like (presence = enabled). */
   disable_value?: number | null
   /** Human-readable explanation of what disable_value achieves */
   disable_note?: I18nLabel
-  /** Default value to initialise when the parent toggle is first turned ON */
+  /** Default value to initialise when this param is first added to the active set */
   default?: number | boolean
 }
 

@@ -248,35 +248,12 @@ export default function StrategyPage() {
     setSelectedSlugs(new Set())
   }
 
-  /** Build a toggle-aware config: always include toggle values; include child params only when their toggle is ON */
+  /** Build config: only include active params */
   function buildConfig(vals: Record<string, unknown>, activeP: Set<string>): Record<string, unknown> {
-    const toggleKeySet = new Set(
-      Object.entries(paramSchema)
-        .filter(([, s]) => s.group === "toggles" && s.type === "bool")
-        .map(([k]) => k)
-    )
     const result: Record<string, unknown> = {}
-
-    // Always include all toggle values (backend needs to know toggle state)
-    for (const tk of toggleKeySet) {
-      if (tk in vals) result[tk] = vals[tk]
-    }
-
-    // Include regular active params (non-toggle, non-child)
     for (const key of activeP) {
-      const s = paramSchema[key]
-      if (!s) continue
-      if (toggleKeySet.has(key)) continue  // already handled
-      if (s.depends_on && toggleKeySet.has(s.depends_on)) continue  // child, handled below
       if (key in vals) result[key] = vals[key]
     }
-
-    // Include child params only when their parent toggle is ON
-    for (const [key, s] of Object.entries(paramSchema)) {
-      if (!s.depends_on || !toggleKeySet.has(s.depends_on)) continue
-      if (vals[s.depends_on] === true && key in vals) result[key] = vals[key]
-    }
-
     return result
   }
 
@@ -395,35 +372,18 @@ export default function StrategyPage() {
               ))}
               <button
                 onClick={() => {
-                  // Base values from first builtin strategy, then force all toggles OFF
+                  // Base values from first builtin strategy
                   const builtinStrategy = strategies.find((s) => s.builtin)
                   const base: Record<string, unknown> = { ...(builtinStrategy?.default_config ?? {}) }
 
-                  // Identify toggle keys and their children from schema
-                  const toggleKeySet = new Set(
-                    Object.entries(paramSchema)
-                      .filter(([, s]) => s.group === "toggles" && s.type === "bool")
-                      .map(([k]) => k)
-                  )
-                  const childKeySet = new Set(
-                    Object.entries(paramSchema)
-                      .filter(([, s]) => s.depends_on && toggleKeySet.has(s.depends_on))
-                      .map(([k]) => k)
-                  )
-
-                  // Force all toggles to false; remove inherited child param values
-                  for (const tk of toggleKeySet) base[tk] = false
-                  for (const ck of childKeySet) delete base[ck]
-
                   setNewStrategyValues(base)
 
-                  // Active params: only core non-toggle non-child params
+                  // Active params: only core params (non-advanced, non-child)
                   const coreKeys = new Set(
                     Object.entries(paramSchema)
-                      .filter(([k, s]) =>
+                      .filter(([, s]) =>
                         s.visibility !== "advanced" &&
-                        !toggleKeySet.has(k) &&
-                        !childKeySet.has(k)
+                        !s.depends_on
                       )
                       .map(([k]) => k)
                   )
@@ -866,7 +826,7 @@ export default function StrategyPage() {
 
       {/* Strategy config dialog */}
       <Dialog open={configDialogOpen} onOpenChange={setConfigDialogOpen}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-5xl">
           <DialogHeader>
             <DialogTitle>策略参数 — {activeStrategy?.name}</DialogTitle>
             <DialogDescription>
@@ -944,7 +904,7 @@ export default function StrategyPage() {
 
       {/* ── Create Strategy Dialog ─────────────────────────────────────── */}
       <Dialog open={createStrategyOpen} onOpenChange={setCreateStrategyOpen}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-5xl">
           <DialogHeader>
             <DialogTitle>创建策略</DialogTitle>
             <DialogDescription>

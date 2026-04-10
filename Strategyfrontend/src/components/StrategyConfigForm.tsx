@@ -1,11 +1,9 @@
-import { useMemo, useState, useRef, useCallback } from "react"
-import { InfoIcon, XIcon, PlusIcon } from "lucide-react"
+﻿import { useMemo, useState, useRef, useCallback } from "react"
+import { InfoIcon, XIcon, PlusIcon, ChevronRightIcon } from "lucide-react"
 import type { ParamSchemaItem, ParamGroupDef } from "@/types"
 import { cn } from "@/lib/utils"
-import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Checkbox } from "@/components/ui/checkbox"
 import {
   Tooltip,
   TooltipContent,
@@ -42,7 +40,6 @@ function WeightBadge({ weight }: { weight?: string }) {
   )
 }
 
-/** Get localised text — always zh for now, fallback to en */
 function t(label: { zh: string; en: string } | string): string {
   if (typeof label === "string") return label
   return label.zh || label.en
@@ -50,13 +47,8 @@ function t(label: { zh: string; en: string } | string): string {
 
 // ── ParamInfoPopup ─────────────────────────────────────────────────────────
 
-interface ParamInfoPopupProps {
-  schema: ParamSchemaItem
-}
-
-function ParamInfoPopup({ schema }: ParamInfoPopupProps) {
+function ParamInfoPopup({ schema }: { schema: ParamSchemaItem }) {
   const [open, setOpen] = useState(false)
-  // position relative to viewport center offset
   const [pos, setPos] = useState({ x: 0, y: 0 })
   const dragging = useRef(false)
   const dragStart = useRef({ mx: 0, my: 0, px: 0, py: 0 })
@@ -109,7 +101,6 @@ function ParamInfoPopup({ schema }: ParamInfoPopupProps) {
             transform: `translate(calc(-50% + ${pos.x}px), calc(-50% + ${pos.y}px))`,
           }}
         >
-          {/* Drag handle */}
           <div
             onMouseDown={onDragMouseDown}
             onClick={(e) => e.stopPropagation()}
@@ -152,6 +143,48 @@ function ParamInfoPopup({ schema }: ParamInfoPopupProps) {
   )
 }
 
+// ── Dependency helpers ──────────────────────────────────────────────────────
+
+interface DepGraph {
+  parentToChildren: Map<string, string[]>
+  childToParent: Map<string, string>
+}
+
+function buildDepGraph(schema: Record<string, ParamSchemaItem>): DepGraph {
+  const parentToChildren = new Map<string, string[]>()
+  const childToParent = new Map<string, string>()
+  for (const [key, s] of Object.entries(schema)) {
+    if (s.depends_on && s.depends_on in schema) {
+      childToParent.set(key, s.depends_on)
+      if (!parentToChildren.has(s.depends_on)) parentToChildren.set(s.depends_on, [])
+      parentToChildren.get(s.depends_on)!.push(key)
+    }
+  }
+  return { parentToChildren, childToParent }
+}
+
+function getDescendants(key: string, graph: DepGraph): string[] {
+  const result: string[] = []
+  const children = graph.parentToChildren.get(key) ?? []
+  for (const child of children) {
+    result.push(child)
+    result.push(...getDescendants(child, graph))
+  }
+  return result
+}
+
+function getAncestors(key: string, graph: DepGraph): string[] {
+  const result: string[] = []
+  let current = graph.childToParent.get(key)
+  while (current) {
+    result.push(current)
+    current = graph.childToParent.get(current)
+  }
+  return result
+}
+
+// ── types ───────────────────────────────────────────────────────────────────
+
 interface GroupedParam {
   key: string
   schema: ParamSchemaItem
@@ -164,11 +197,8 @@ interface StrategyConfigFormProps {
   onChange: (values: Record<string, unknown>) => void
   paramSchema: Record<string, ParamSchemaItem>
   paramGroups: Record<string, ParamGroupDef>
-  /** Keys that exist in the current strategy default_config (to filter relevant params) */
   visibleKeys: Set<string>
-  /** Currently active param keys (core always included; advanced toggled by user) */
   activeParams?: Set<string>
-  /** Called when user adds/removes advanced params */
   onActiveParamsChange?: (params: Set<string>) => void
 }
 
@@ -181,133 +211,134 @@ export default function StrategyConfigForm({
   activeParams,
   onActiveParamsChange,
 }: StrategyConfigFormProps) {
-  // ── Identify toggle keys and their children ──────────────────────────────
-  // "Toggles" = bool params in the "toggles" group (always shown, not filtered by visibleKeys/activeParams)
-  // "Children" = params with depends_on pointing to a toggle key (shown inline under their toggle)
-  const { regularGrouped, regularInactiveByGroup, toggleParams, toggleChildMap } = useMemo(() => {
-    const toggleKeySet = new Set<string>()
-    for (const [key, schema] of Object.entries(paramSchema)) {
-      if (schema.group === "toggles" && schema.type === "bool") toggleKeySet.add(key)
-    }
+  const [expandedPoolGroup, setExpandedPoolGroup] = useState<string | null>(null)
 
-    const childKeySet = new Set<string>()
-    const childMap = new Map<string, GroupedParam[]>()
-    for (const [key, schema] of Object.entries(paramSchema)) {
-      if (schema.depends_on && toggleKeySet.has(schema.depends_on)) {
-        childKeySet.add(key)
-        if (!childMap.has(schema.depends_on)) childMap.set(schema.depends_on, [])
-        childMap.get(schema.depends_on)!.push({ key, schema })
-      }
-    }
+  const depGraph = useMemo(() => buildDepGraph(paramSchema), [paramSchema])
 
-    // Build toggle params list (all toggles always shown, ordered by appearance in schema)
-    const togglesList: GroupedParam[] = []
-    for (const [key, schema] of Object.entries(paramSchema)) {
-      if (toggleKeySet.has(key)) togglesList.push({ key, schema })
-    }
-
-    // Build regular groups: non-toggle, non-child params (filtered by visibleKeys / activeParams)
-    const regularMap = new Map<string, GroupedParam[]>()
-    const regularInactive = new Map<string, GroupedParam[]>()
+  // ── Organize params into active form and pool ────────────────────────────
+  const { activeGrouped, poolGrouped } = useMemo(() => {
+    const activeMap = new Map<string, GroupedParam[]>()
+    const poolMap = new Map<string, GroupedParam[]>()
 
     for (const [key, schema] of Object.entries(paramSchema)) {
-      if (toggleKeySet.has(key)) continue  // handled in toggle section
-      if (childKeySet.has(key)) continue   // handled inline under toggle
       if (!visibleKeys.has(key)) continue
-
       const group = schema.group
-      if (activeParams && onActiveParamsChange && schema.visibility === "advanced" && !activeParams.has(key)) {
-        if (!regularInactive.has(group)) regularInactive.set(group, [])
-        regularInactive.get(group)!.push({ key, schema })
-        continue
+
+      const isActive = activeParams?.has(key) ?? true
+      if (isActive) {
+        if (schema.depends_on && !activeParams?.has(schema.depends_on)) continue
+        if (!activeMap.has(group)) activeMap.set(group, [])
+        activeMap.get(group)!.push({ key, schema })
+      } else {
+        if (!poolMap.has(group)) poolMap.set(group, [])
+        poolMap.get(group)!.push({ key, schema })
       }
-      if (!regularMap.has(group)) regularMap.set(group, [])
-      regularMap.get(group)!.push({ key, schema })
     }
 
-    const sortedRegular = [...regularMap.entries()].sort((a, b) => {
-      const orderA = paramGroups[a[0]]?.order ?? 99
-      const orderB = paramGroups[b[0]]?.order ?? 99
-      return orderA - orderB
-    })
+    const sortByOrder = (entries: [string, GroupedParam[]][]) =>
+      entries.sort((a, b) => (paramGroups[a[0]]?.order ?? 99) - (paramGroups[b[0]]?.order ?? 99))
 
     return {
-      regularGrouped: sortedRegular,
-      regularInactiveByGroup: regularInactive,
-      toggleParams: togglesList,
-      toggleChildMap: childMap,
+      activeGrouped: sortByOrder([...activeMap.entries()]),
+      poolGrouped: sortByOrder([...poolMap.entries()]),
     }
-  }, [paramSchema, paramGroups, visibleKeys, activeParams, onActiveParamsChange])
+  }, [paramSchema, paramGroups, visibleKeys, activeParams])
+
+  const canManageParams = !!activeParams && !!onActiveParamsChange
+
+  // ── Add with auto-dependency ──────────────────────────────────────────────
+  function handleAddParam(key: string) {
+    if (!activeParams || !onActiveParamsChange) return
+    const next = new Set(activeParams)
+    const updatedValues = { ...values }
+
+    const ancestors = getAncestors(key, depGraph)
+    for (const ak of ancestors) {
+      if (!next.has(ak)) {
+        next.add(ak)
+        if (updatedValues[ak] === undefined) {
+          const s = paramSchema[ak]
+          if (s) updatedValues[ak] = s.type === "bool" ? false : (s.default ?? s.disable_value ?? s.min ?? 0)
+        }
+      }
+    }
+
+    next.add(key)
+    if (updatedValues[key] === undefined) {
+      const s = paramSchema[key]
+      if (s) updatedValues[key] = s.type === "bool" ? false : (s.default ?? s.disable_value ?? s.min ?? 0)
+    }
+
+    onChange(updatedValues)
+    onActiveParamsChange(next)
+  }
+
+  // ── Remove with cascading children ────────────────────────────────────────
+  function handleRemoveParam(key: string) {
+    if (!activeParams || !onActiveParamsChange) return
+    const next = new Set(activeParams)
+    const updatedValues = { ...values }
+
+    const descendants = getDescendants(key, depGraph)
+    for (const dk of descendants) {
+      next.delete(dk)
+      delete updatedValues[dk]
+    }
+
+    next.delete(key)
+    delete updatedValues[key]
+
+    onChange(updatedValues)
+    onActiveParamsChange(next)
+  }
 
   function handleChange(key: string, raw: string | boolean, schema: ParamSchemaItem) {
     if (schema.type === "bool") {
-      const updated = { ...values, [key]: raw as boolean }
-      if (raw as boolean) {
-        // Toggle turned ON: initialise child params with schema default if not yet set
-        for (const [depKey, depSchema] of Object.entries(paramSchema)) {
-          if (depSchema.depends_on === key && !(depKey in updated)) {
-            const dv = depSchema.default !== undefined
-              ? depSchema.default
-              : (depSchema.disable_value !== null && depSchema.disable_value !== undefined
-                  ? depSchema.disable_value
-                  : depSchema.min ?? 0)
-            updated[depKey] = dv
-          }
-        }
-      }
-      // Toggle turned OFF: keep child param values in state (do NOT reset)
-      onChange(updated)
+      onChange({ ...values, [key]: raw as boolean })
     } else {
       onChange({ ...values, [key]: Number(raw) })
     }
   }
 
-  function handleAddParams(keys: string[]) {
-    if (!activeParams || !onActiveParamsChange) return
-    const next = new Set(activeParams)
-    const updatedValues = { ...values }
-    for (const key of keys) {
-      next.add(key)
-      if (updatedValues[key] === undefined) {
-        const s = paramSchema[key]
-        if (s) {
-          updatedValues[key] = s.type === "bool" ? false : (s.default ?? s.disable_value ?? s.min ?? 0)
-        }
-      }
-    }
-    onChange(updatedValues)
-    onActiveParamsChange(next)
-  }
-
-  function handleRemoveParam(key: string) {
-    if (!activeParams || !onActiveParamsChange) return
-    const next = new Set(activeParams)
-    next.delete(key)
-    const updatedValues = { ...values }
-    delete updatedValues[key]
-    onChange(updatedValues)
-    onActiveParamsChange(next)
-  }
-
-  const canManageParams = !!activeParams && !!onActiveParamsChange
-
-  // ── Shared number input renderer ─────────────────────────────────────────
-  function renderNumberInput(key: string, schema: ParamSchemaItem, isAdvanced = false) {
+  // ── Param input renderer ──────────────────────────────────────────────────
+  function renderParamInput(key: string, schema: ParamSchemaItem) {
     const currentVal = values[key]
+    const isChild = !!schema.depends_on
+
+    if (schema.type === "bool") {
+      return (
+        <div key={key} className={cn("col-span-1 flex items-center gap-2 rounded-md border px-3 py-2", isChild && "ml-4 border-dashed border-primary/30")}>
+          <label className="flex flex-1 cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={!!currentVal}
+              onChange={(e) => handleChange(key, e.target.checked, schema)}
+              className="h-4 w-4 rounded accent-primary"
+            />
+            <WeightBadge weight={schema.weight} />
+            <span className="text-sm">{t(schema.label)}</span>
+          </label>
+          {schema.desc && <ParamInfoPopup schema={schema} />}
+          {canManageParams && !isChild && (
+            <button type="button" onClick={() => handleRemoveParam(key)}
+              className="ml-auto rounded p-0.5 text-muted-foreground/50 hover:text-destructive" aria-label="移除参数">
+              <XIcon className="size-3" />
+            </button>
+          )}
+        </div>
+      )
+    }
+
     return (
-      <div key={key} className="flex flex-col gap-1">
+      <div key={key} className={cn("flex flex-col gap-1", isChild && "ml-4")}>
         <label className="flex items-center gap-1 text-xs text-muted-foreground">
           <WeightBadge weight={schema.weight} />
           <span>{t(schema.label)}</span>
           {schema.unit && <span className="text-muted-foreground/50">({schema.unit})</span>}
           <ParamInfoPopup schema={schema} />
-          {isAdvanced && (
-            <button
-              type="button"
-              onClick={() => handleRemoveParam(key)}
-              className="ml-auto rounded p-0.5 text-muted-foreground/50 hover:text-destructive"
-              aria-label="移除参数"
-            >
+          {canManageParams && !isChild && (
+            <button type="button" onClick={() => handleRemoveParam(key)}
+              className="ml-auto rounded p-0.5 text-muted-foreground/50 hover:text-destructive" aria-label="移除参数">
               <XIcon className="size-3" />
             </button>
           )}
@@ -319,216 +350,124 @@ export default function StrategyConfigForm({
           min={schema.min}
           max={schema.max}
           step={schema.step ?? (schema.type === "int" ? 1 : 0.0001)}
-          className="h-8 rounded-md border bg-background px-2 text-sm"
+          className={cn("h-8 rounded-md border bg-background px-2 text-sm", isChild && "border-dashed border-primary/30")}
         />
       </div>
     )
   }
 
+  const poolTotalCount = useMemo(
+    () => poolGrouped.reduce((sum, [, items]) => sum + items.length, 0),
+    [poolGrouped],
+  )
+
   return (
-    <div className="flex flex-col gap-5">
-      {/* ── Regular groups (risk / entry / volatility / position) ─────────── */}
-      {regularGrouped.map(([groupKey, params]) => {
-        const groupDef = paramGroups[groupKey]
-        const groupLabel = groupDef ? t(groupDef) : groupKey
-        const inactiveParams = regularInactiveByGroup.get(groupKey) ?? []
-
-        return (
-          <div key={groupKey}>
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              {groupLabel}
-            </h3>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {params.map(({ key, schema }) => {
-                const currentVal = values[key]
-                const label = t(schema.label)
-                const isAdvanced = canManageParams && schema.visibility === "advanced"
-
-                if (schema.type === "bool") {
-                  return (
-                    <div key={key} className="col-span-1 flex items-center gap-2 rounded-md border px-3 py-2">
-                      <label className="flex flex-1 cursor-pointer items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={!!currentVal}
-                          onChange={(e) => handleChange(key, e.target.checked, schema)}
-                          className="h-4 w-4 rounded accent-primary"
-                        />
-                        <WeightBadge weight={schema.weight} />
-                        <span className="text-sm">{label}</span>
-                      </label>
-                      {schema.desc && <ParamInfoPopup schema={schema} />}
-                      {isAdvanced && (
-                        <button type="button" onClick={() => handleRemoveParam(key)}
-                          className="ml-auto rounded p-0.5 text-muted-foreground/50 hover:text-destructive" aria-label="移除参数">
-                          <XIcon className="size-3" />
-                        </button>
-                      )}
-                    </div>
-                  )
-                }
-                return renderNumberInput(key, schema, isAdvanced)
-              })}
-
-              {canManageParams && inactiveParams.length > 0 && (
-                <AddParamPopover inactiveParams={inactiveParams} onAdd={handleAddParams} />
-              )}
-            </div>
+    <div className="flex gap-4">
+      {/* ══════════════ Main form: active params ══════════════ */}
+      <div className="flex-1 flex flex-col gap-5 min-w-0">
+        {activeGrouped.length === 0 && (
+          <div className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed py-8 text-muted-foreground">
+            <PlusIcon className="size-5" />
+            <p className="text-sm">从右侧参数池中选择参数</p>
           </div>
-        )
-      })}
+        )}
 
-      {/* Hidden regular groups with only inactive params */}
-      {canManageParams && (() => {
-        const activeGroupKeys = new Set(regularGrouped.map(([k]) => k))
-        const hiddenGroups = [...regularInactiveByGroup.entries()]
-          .filter(([gk, items]) => !activeGroupKeys.has(gk) && gk !== "toggles" && items.length > 0)
-          .sort((a, b) => (paramGroups[a[0]]?.order ?? 99) - (paramGroups[b[0]]?.order ?? 99))
-        if (hiddenGroups.length === 0) return null
-        return hiddenGroups.map(([groupKey, inactiveParams]) => {
+        {activeGrouped.map(([groupKey, params]) => {
           const groupDef = paramGroups[groupKey]
           const groupLabel = groupDef ? t(groupDef) : groupKey
+
+          const rootParams = params.filter(p => !p.schema.depends_on)
+          const childParams = params.filter(p => !!p.schema.depends_on)
+
+          const childrenByParent = new Map<string, GroupedParam[]>()
+          for (const cp of childParams) {
+            const parent = cp.schema.depends_on!
+            if (!childrenByParent.has(parent)) childrenByParent.set(parent, [])
+            childrenByParent.get(parent)!.push(cp)
+          }
+
           return (
             <div key={groupKey}>
-              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{groupLabel}</h3>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                {groupLabel}
+              </h3>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                <AddParamPopover inactiveParams={inactiveParams} onAdd={handleAddParams} />
+                {rootParams.map(({ key, schema }) => {
+                  const children = childrenByParent.get(key)
+                  if (children && children.length > 0) {
+                    return (
+                      <div key={key} className="col-span-full flex flex-col gap-2 rounded-md border bg-muted/10 p-3">
+                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                          {renderParamInput(key, schema)}
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 border-t border-dashed pt-2">
+                          {children.map(({ key: ck, schema: cs }) => renderParamInput(ck, cs))}
+                        </div>
+                      </div>
+                    )
+                  }
+                  return renderParamInput(key, schema)
+                })}
               </div>
             </div>
           )
-        })
-      })()}
+        })}
+      </div>
 
-      {/* ── Toggles section (always shown, all feature switches) ─────────── */}
-      {toggleParams.length > 0 && (
-        <div>
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            {paramGroups["toggles"] ? t(paramGroups["toggles"]) : "特性开关"}
-          </h3>
-          <div className="flex flex-col gap-2">
-            {toggleParams.map(({ key, schema }) => {
-              const isOn = !!values[key]
-              const children = toggleChildMap.get(key) ?? []
-
-              return (
-                <div key={key} className="overflow-hidden rounded-md border">
-                  {/* Toggle row */}
-                  <div className="flex items-center gap-2 px-3 py-2">
-                    <label className="flex flex-1 cursor-pointer items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={isOn}
-                        onChange={(e) => handleChange(key, e.target.checked, schema)}
-                        className="h-4 w-4 rounded accent-primary"
-                      />
-                      <WeightBadge weight={schema.weight} />
-                      <span className="text-sm font-medium">{t(schema.label)}</span>
-                    </label>
-                    {schema.desc && <ParamInfoPopup schema={schema} />}
-                  </div>
-
-                  {/* Child params — inline row shown only when toggle is ON */}
-                  {isOn && children.length > 0 && (
-                    <div className="border-t bg-muted/20 px-3 py-2">
-                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                        {children.map(({ key: ck, schema: cs }) => renderNumberInput(ck, cs))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
+      {/* ══════════════ Side panel: parameter pool ══════════════ */}
+      {canManageParams && poolTotalCount > 0 && (
+        <div className="w-52 shrink-0 rounded-md border bg-muted/30">
+          <div className="flex items-center gap-1.5 border-b px-3 py-2">
+            <PlusIcon className="size-3.5 text-muted-foreground" />
+            <span className="text-xs font-medium">参数池</span>
+            <Badge variant="secondary" className="ml-auto text-[10px]">
+              {poolTotalCount}
+            </Badge>
           </div>
+          <ScrollArea className="max-h-[60vh]">
+            <div className="flex flex-col">
+              {poolGrouped.map(([groupKey, items]) => {
+                const groupDef = paramGroups[groupKey]
+                const groupLabel = groupDef ? t(groupDef) : groupKey
+                const isExpanded = expandedPoolGroup === groupKey
+
+                return (
+                  <div key={groupKey}>
+                    <button
+                      type="button"
+                      onClick={() => setExpandedPoolGroup(isExpanded ? null : groupKey)}
+                      className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-xs font-medium text-muted-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <ChevronRightIcon className={cn("size-3 transition-transform", isExpanded && "rotate-90")} />
+                      <span className="flex-1">{groupLabel}</span>
+                      <Badge variant="outline" className="text-[10px] px-1.5">
+                        {items.length}
+                      </Badge>
+                    </button>
+
+                    {isExpanded && (
+                      <div className="flex flex-col gap-0.5 px-1 pb-1">
+                        {items.map(({ key, schema }) => (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => handleAddParam(key)}
+                            className="flex items-center gap-1.5 rounded px-2 py-1 text-left text-xs hover:bg-primary/10 transition-colors"
+                          >
+                            <PlusIcon className="size-3 shrink-0 text-muted-foreground" />
+                            <WeightBadge weight={schema.weight} />
+                            <span className="flex-1 truncate">{t(schema.label)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </ScrollArea>
         </div>
       )}
     </div>
-  )
-}
-
-// ── AddParamPopover ─────────────────────────────────────────────────────────
-
-interface AddParamPopoverProps {
-  inactiveParams: GroupedParam[]
-  onAdd: (keys: string[]) => void
-}
-
-function AddParamPopover({ inactiveParams, onAdd }: AddParamPopoverProps) {
-  const [open, setOpen] = useState(false)
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-
-  function toggle(key: string) {
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
-
-  function handleConfirm() {
-    if (selected.size > 0) {
-      onAdd([...selected])
-      setSelected(new Set())
-    }
-    setOpen(false)
-  }
-
-  return (
-    <Popover open={open} onOpenChange={(v) => { setOpen(v); if (!v) setSelected(new Set()) }}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className="flex h-8 items-center gap-1 rounded-md border border-dashed border-muted-foreground/30 px-3 text-xs text-muted-foreground hover:border-primary/50 hover:text-foreground transition-colors"
-        >
-          <PlusIcon className="size-3" />
-          添加参数
-          <Badge variant="secondary" className="ml-1 text-[10px]">
-            {inactiveParams.length}
-          </Badge>
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-72 p-0" align="start">
-        <div className="border-b px-3 py-2">
-          <p className="text-xs font-medium">选择要添加的高级参数</p>
-        </div>
-        <ScrollArea className="max-h-60">
-          <div className="flex flex-col gap-0.5 p-2">
-            {inactiveParams.map(({ key, schema }) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => toggle(key)}
-                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted transition-colors"
-              >
-                <Checkbox
-                  checked={selected.has(key)}
-                  onCheckedChange={() => toggle(key)}
-                  aria-label={t(schema.label)}
-                />
-                <WeightBadge weight={schema.weight} />
-                <span className="flex-1 truncate">{t(schema.label)}</span>
-              </button>
-            ))}
-          </div>
-        </ScrollArea>
-        <div className="flex items-center justify-end gap-2 border-t px-3 py-2">
-          <button
-            type="button"
-            onClick={() => { setOpen(false); setSelected(new Set()) }}
-            className="h-7 rounded-md px-3 text-xs hover:bg-muted"
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            disabled={selected.size === 0}
-            onClick={handleConfirm}
-            className="h-7 rounded-md bg-primary px-3 text-xs text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-          >
-            添加 {selected.size > 0 && `(${selected.size})`}
-          </button>
-        </div>
-      </PopoverContent>
-    </Popover>
   )
 }

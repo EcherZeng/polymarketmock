@@ -1,12 +1,13 @@
 """统一策略 — 所有预设策略共用的参数化入场逻辑。
 
-通过 strategy_presets.json 中的特性开关控制检查项:
-  use_momentum_check   — 10 分钟动量检查 (solid_core, main_force)
-  use_direction_check  — 10 分钟方向一致性检查 (high_freq_coverage)
-  use_std_check        — 波动率标准差检查 (solid_core, main_force)
-  use_drawdown_check   — 窗口最大回撤检查 (solid_core, main_force)
-  use_amplitude_check  — 振幅范围检查
-  use_reverse_check    — 反转检测检查
+通过 strategy_presets.json 中的参数存在性控制检查项（选中即启用）:
+  momentum_window / momentum_min — 动量检查
+  direction_window               — 方向一致性检查
+  volatility_window + amplitude_min/max — 振幅范围检查
+  volatility_window + max_std    — 波动率标准差检查
+  volatility_window + max_drawdown — 窗口最大回撤检查
+  reverse_tick_window / reverse_threshold — 反转检测检查
+  max_entry_count                — 单场买入次数限制
 
 统一规则 (TP/SL/强制平仓/降仓) 由 UnifiedBaseStrategy 基类处理。
 """
@@ -35,13 +36,16 @@ class UnifiedStrategy(UnifiedBaseStrategy):
         self.max_ask_deviation: float | None = config.get("max_ask_deviation") if param_active(config, "max_ask_deviation") else None
         self.min_profit_room: float | None = config.get("min_profit_room") if param_active(config, "min_profit_room") else None
 
-        # ── Feature toggles — only active if key present AND True ──
-        self.use_momentum: bool = bool(config.get("use_momentum_check")) if param_active(config, "use_momentum_check") else False
-        self.use_direction: bool = bool(config.get("use_direction_check")) if param_active(config, "use_direction_check") else False
-        self.use_std: bool = bool(config.get("use_std_check")) if param_active(config, "use_std_check") else False
-        self.use_drawdown: bool = bool(config.get("use_drawdown_check")) if param_active(config, "use_drawdown_check") else False
-        self.use_amplitude: bool = bool(config.get("use_amplitude_check")) if param_active(config, "use_amplitude_check") else False
-        self.use_reverse: bool = bool(config.get("use_reverse_check")) if param_active(config, "use_reverse_check") else False
+        # ── Feature detection — derived from param presence (select = enable) ──
+        self.use_momentum: bool = param_active(config, "momentum_window")
+        self.use_direction: bool = param_active(config, "direction_window")
+        self.use_amplitude: bool = param_active(config, "amplitude_min") or param_active(config, "amplitude_max")
+        self.use_std: bool = param_active(config, "max_std")
+        self.use_drawdown: bool = param_active(config, "max_drawdown")
+        self.use_reverse: bool = param_active(config, "reverse_tick_window")
+
+        # ── Entry count limit ──
+        self.max_entry_count: int | None = int(config.get("max_entry_count", 0)) if param_active(config, "max_entry_count") else None
 
         # ── Momentum params ──
         self.momentum_window: int = int(config.get("momentum_window", 600))
@@ -73,6 +77,10 @@ class UnifiedStrategy(UnifiedBaseStrategy):
     def compute_entry_signals(self, ctx: TickContext) -> list[Signal]:
         # Skip if all tokens already entered
         if len(self._entered_tokens) >= len(ctx.tokens):
+            return []
+
+        # Skip if entry count limit reached
+        if self.max_entry_count is not None and self._entry_count >= self.max_entry_count:
             return []
 
         # 1. Time gate — skip if param not active
