@@ -9,7 +9,7 @@ import {
   purgeRunnerMemory,
   clearResults,
 } from "@/api/client"
-import type { ResultsStatsResponse, ResultStatItem, BatchStatItem } from "@/api/client"
+import type { ResultsStatsResponse, ResultStatItem } from "@/api/client"
 
 function fmtSize(kb: number) {
   return kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb.toFixed(0)} KB`
