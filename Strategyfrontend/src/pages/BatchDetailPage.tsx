@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { useParams, Link } from "react-router-dom"
+import { useParams, Link, useNavigate } from "react-router-dom"
 import { useMemo, useState } from "react"
 import { cn } from "@/lib/utils"
-import { fetchBatchTask, cancelBatch } from "@/api/client"
+import { fetchBatchTask, cancelBatch, cleanupByBatch } from "@/api/client"
 import { Checkbox } from "@/components/ui/checkbox"
 import AddToPortfolioDialog from "@/components/AddToPortfolioDialog"
 import type { BatchTaskDetail, BatchResultSummary, SlugWorkflow, PortfolioItem } from "@/types"
@@ -46,10 +46,12 @@ const stepStatusIcon: Record<string, string> = {
 export default function BatchDetailPage() {
   const { batchId } = useParams<{ batchId: string }>()
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const [expandedSlug, setExpandedSlug] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [returnFilter, setReturnFilter] = useState<"all" | "positive" | "negative">("all")
   const [portfolioOpen, setPortfolioOpen] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const { data: task, isLoading, isError } = useQuery<BatchTaskDetail>({
     queryKey: ["batchTask", batchId],
@@ -66,6 +68,16 @@ export default function BatchDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["batchTask", batchId] })
       queryClient.invalidateQueries({ queryKey: ["batchTasks"] })
+    },
+  })
+
+  const deleteBatchMutation = useMutation({
+    mutationFn: () => cleanupByBatch(batchId!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["batch-tasks"] })
+      queryClient.invalidateQueries({ queryKey: ["results-stats"] })
+      queryClient.invalidateQueries({ queryKey: ["results"] })
+      navigate("/batch")
     },
   })
 
@@ -203,6 +215,31 @@ export default function BatchDetailPage() {
             >
               取消批量
             </button>
+          )}
+          {task.status !== "running" && !confirmDelete && (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="rounded-md border border-destructive px-3 py-1.5 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10"
+            >
+              删除此批次
+            </button>
+          )}
+          {confirmDelete && (
+            <>
+              <button
+                onClick={() => deleteBatchMutation.mutate()}
+                disabled={deleteBatchMutation.isPending}
+                className="rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {deleteBatchMutation.isPending ? "删除中..." : "确认删除"}
+              </button>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="rounded-md border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
+              >
+                取消
+              </button>
+            </>
           )}
           <Link
             to="/batch"

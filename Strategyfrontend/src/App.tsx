@@ -4,7 +4,6 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/sonner"
 import { useConnectionStatus } from "@/hooks/useConnectionStatus"
 import StrategyPage from "@/pages/StrategyPage"
-import ResultsListPage from "@/pages/ResultsListPage"
 import ResultDetailPage from "@/pages/ResultDetailPage"
 import DashboardPage from "@/pages/DashboardPage"
 import BatchDashboardPage from "@/pages/BatchDashboardPage"
@@ -20,7 +19,6 @@ import ComparisonPage from "@/pages/ComparisonPage"
 const navItems = [
   { to: "/", label: "策略回测" },
   { to: "/batch", label: "批量回测" },
-  { to: "/results", label: "回测结果" },
   { to: "/portfolios", label: "数据组合" },
   { to: "/ai-optimize", label: "AI 优化" },
   { to: "/dashboard", label: "仪表盘" },
@@ -67,7 +65,6 @@ export default function App() {
           <Route path="/" element={<StrategyPage />} />
           <Route path="/batch" element={<BatchDashboardPage />} />
           <Route path="/batch/:batchId" element={<BatchDetailPage />} />
-          <Route path="/results" element={<ResultsListPage />} />
           <Route path="/results/:sessionId" element={<ResultDetailPage />} />
           <Route path="/portfolios" element={<PortfoliosPage />} />
           <Route path="/portfolios/:portfolioId" element={<PortfolioDetailPage />} />

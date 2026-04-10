@@ -155,6 +155,7 @@ export interface ResultStatItem {
   total_return_pct: number
   total_trades: number
   size_kb: number
+  batch_id: string | null
 }
 
 export interface BatchStatItem {

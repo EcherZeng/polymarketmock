@@ -40,8 +40,8 @@ export default function ResultDetailPage() {
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <Link to="/results" className="text-sm text-muted-foreground hover:text-foreground">
-              ← 返回列表
+            <Link to="/dashboard" className="text-sm text-muted-foreground hover:text-foreground">
+              ← 返回仪表盘
             </Link>
           </div>
           <h1 className="mt-1 text-2xl font-bold tracking-tight">

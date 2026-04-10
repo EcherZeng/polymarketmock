@@ -144,6 +144,16 @@ async def results_stats():
 
     all_results = store.values()
 
+    # Build a reverse map: session_id -> batch_id
+    session_to_batch: dict[str, str] = {}
+    if state.batch_store is not None:
+        for b in state.batch_store.values():
+            bid = b.get("batch_id", "")
+            for _slug, summary in b.get("results", {}).items():
+                sid = summary.get("session_id", "")
+                if sid:
+                    session_to_batch[sid] = bid
+
     # Per-result size on disk
     results_dir = config.results_dir
     result_items: list[dict] = []
@@ -164,6 +174,7 @@ async def results_stats():
             "total_return_pct": r.get("metrics", {}).get("total_return_pct", 0),
             "total_trades": r.get("metrics", {}).get("total_trades", 0),
             "size_kb": round(size_bytes / 1024, 1),
+            "batch_id": session_to_batch.get(sid),
         })
 
     # Batch records

@@ -19,10 +19,14 @@ def _query_parquet(path: Path, order_by: str = "timestamp") -> list[dict]:
         return []
     try:
         path_str = str(path).replace("\\", "/")
-        df = duckdb.sql(
-            f"SELECT * FROM read_parquet('{path_str}') ORDER BY {order_by}"
-        ).fetchdf()
-        return df.to_dict("records")
+        conn = duckdb.connect()
+        try:
+            df = conn.sql(
+                f"SELECT * FROM read_parquet('{path_str}') ORDER BY {order_by}"
+            ).fetchdf()
+            return df.to_dict("records")
+        finally:
+            conn.close()
     except Exception as e:
         logger.warning("Failed to read %s: %s", path, e)
         return []
@@ -37,10 +41,14 @@ def _query_parquet_glob(directory: Path, order_by: str = "timestamp") -> list[di
         return []
     try:
         glob_str = str(directory / "*.parquet").replace("\\", "/")
-        df = duckdb.sql(
-            f"SELECT * FROM read_parquet('{glob_str}') ORDER BY {order_by}"
-        ).fetchdf()
-        return df.to_dict("records")
+        conn = duckdb.connect()
+        try:
+            df = conn.sql(
+                f"SELECT * FROM read_parquet('{glob_str}') ORDER BY {order_by}"
+            ).fetchdf()
+            return df.to_dict("records")
+        finally:
+            conn.close()
     except Exception as e:
         logger.warning("Failed to read glob %s: %s", directory, e)
         return []

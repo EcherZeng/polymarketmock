@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState, useMemo } from "react"
+import { Link } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import {
   fetchResultsStats,
@@ -8,7 +9,7 @@ import {
   purgeRunnerMemory,
   clearResults,
 } from "@/api/client"
-import type { ResultsStatsResponse } from "@/api/client"
+import type { ResultsStatsResponse, ResultStatItem, BatchStatItem } from "@/api/client"
 
 function fmtSize(kb: number) {
   return kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb.toFixed(0)} KB`
@@ -28,13 +29,14 @@ function fmtPct(v: number) {
   return `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`
 }
 
-type Tab = "results" | "batches"
+type Tab = "standalone" | "batches"
 
 export default function ResultsCleanupPage() {
   const queryClient = useQueryClient()
-  const [tab, setTab] = useState<Tab>("results")
+  const [tab, setTab] = useState<Tab>("standalone")
   const [selectedResults, setSelectedResults] = useState<Set<string>>(new Set())
   const [selectedBatches, setSelectedBatches] = useState<Set<string>>(new Set())
+  const [expandedBatchId, setExpandedBatchId] = useState<string | null>(null)
   const [confirmAction, setConfirmAction] = useState<string | null>(null)
 
   const { data, isLoading, refetch } = useQuery<ResultsStatsResponse>({
@@ -42,8 +44,25 @@ export default function ResultsCleanupPage() {
     queryFn: fetchResultsStats,
   })
 
-  const results = data?.results ?? []
+  const allResults = data?.results ?? []
   const batches = data?.batches ?? []
+
+  // Split results into standalone (no batch_id) and batch-associated
+  const standaloneResults = useMemo(
+    () => allResults.filter((r) => !r.batch_id),
+    [allResults],
+  )
+
+  const batchResultsMap = useMemo(() => {
+    const map: Record<string, ResultStatItem[]> = {}
+    for (const r of allResults) {
+      if (r.batch_id) {
+        if (!map[r.batch_id]) map[r.batch_id] = []
+        map[r.batch_id].push(r)
+      }
+    }
+    return map
+  }, [allResults])
 
   // ── Mutations ───────────────────────────────────────────────────────────
 
@@ -87,10 +106,10 @@ export default function ResultsCleanupPage() {
   // ── Selection helpers ─────────────────────────────────────────────────
 
   function toggleResultAll() {
-    if (selectedResults.size === results.length) {
+    if (selectedResults.size === standaloneResults.length) {
       setSelectedResults(new Set())
     } else {
-      setSelectedResults(new Set(results.map((r) => r.session_id)))
+      setSelectedResults(new Set(standaloneResults.map((r) => r.session_id)))
     }
   }
 
@@ -123,8 +142,8 @@ export default function ResultsCleanupPage() {
   // ── Computed ──────────────────────────────────────────────────────────
 
   const selectedResultsSize = useMemo(
-    () => results.filter((r) => selectedResults.has(r.session_id)).reduce((s, r) => s + r.size_kb, 0),
-    [results, selectedResults],
+    () => standaloneResults.filter((r) => selectedResults.has(r.session_id)).reduce((s, r) => s + r.size_kb, 0),
+    [standaloneResults, selectedResults],
   )
 
   const selectedBatchesSize = useMemo(
@@ -132,18 +151,15 @@ export default function ResultsCleanupPage() {
     [batches, selectedBatches],
   )
 
-  // ── Strategy grouping for results ─────────────────────────────────────
+  const standaloneSize = useMemo(
+    () => standaloneResults.reduce((s, r) => s + r.size_kb, 0),
+    [standaloneResults],
+  )
 
-  const strategyGroups = useMemo(() => {
-    const groups: Record<string, { count: number; sizeKb: number }> = {}
-    for (const r of results) {
-      const key = r.strategy || "unknown"
-      if (!groups[key]) groups[key] = { count: 0, sizeKb: 0 }
-      groups[key].count++
-      groups[key].sizeKb += r.size_kb
-    }
-    return groups
-  }, [results])
+  const batchResultsSize = useMemo(
+    () => allResults.filter((r) => r.batch_id).reduce((s, r) => s + r.size_kb, 0),
+    [allResults],
+  )
 
   return (
     <div className="flex flex-col gap-4">
@@ -159,14 +175,16 @@ export default function ResultsCleanupPage() {
       {data && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
           <div className="rounded-lg border p-3">
-            <p className="text-xs text-muted-foreground">回测结果</p>
-            <p className="text-xl font-semibold">{data.results_count}</p>
-            <p className="text-xs text-muted-foreground">{data.results_total_size_mb.toFixed(1)} MB</p>
+            <p className="text-xs text-muted-foreground">单独回测</p>
+            <p className="text-xl font-semibold">{standaloneResults.length}</p>
+            <p className="text-xs text-muted-foreground">{fmtSize(standaloneSize)}</p>
           </div>
           <div className="rounded-lg border p-3">
-            <p className="text-xs text-muted-foreground">批量记录</p>
-            <p className="text-xl font-semibold">{data.batches_count}</p>
-            <p className="text-xs text-muted-foreground">{data.batches_total_size_mb.toFixed(1)} MB</p>
+            <p className="text-xs text-muted-foreground">批量回测</p>
+            <p className="text-xl font-semibold">{batches.length}</p>
+            <p className="text-xs text-muted-foreground">
+              {data.batches_total_size_mb.toFixed(1)} MB (记录) + {fmtSize(batchResultsSize)} (结果)
+            </p>
           </div>
           <div className="rounded-lg border p-3">
             <p className="text-xs text-muted-foreground">总磁盘占用</p>
@@ -180,15 +198,9 @@ export default function ResultsCleanupPage() {
             <p className="text-xs text-muted-foreground">{data.runner_tasks_running} 运行中</p>
           </div>
           <div className="rounded-lg border p-3">
-            <p className="text-xs text-muted-foreground">策略分布</p>
-            <div className="mt-1 space-y-0.5">
-              {Object.entries(strategyGroups).map(([name, g]) => (
-                <p key={name} className="text-xs">
-                  <span className="font-medium">{name}</span>
-                  <span className="text-muted-foreground"> {g.count} ({fmtSize(g.sizeKb)})</span>
-                </p>
-              ))}
-            </div>
+            <p className="text-xs text-muted-foreground">总结果数</p>
+            <p className="text-xl font-semibold">{data.results_count}</p>
+            <p className="text-xs text-muted-foreground">{data.results_total_size_mb.toFixed(1)} MB</p>
           </div>
         </div>
       )}
@@ -239,15 +251,15 @@ export default function ResultsCleanupPage() {
       {/* Tab switcher */}
       <div className="flex gap-1 border-b">
         <button
-          onClick={() => setTab("results")}
+          onClick={() => setTab("standalone")}
           className={cn(
             "px-4 py-2 text-sm transition-colors",
-            tab === "results"
+            tab === "standalone"
               ? "border-b-2 border-foreground font-medium text-foreground"
               : "text-muted-foreground hover:text-foreground",
           )}
         >
-          回测结果 ({results.length})
+          单独回测 ({standaloneResults.length})
         </button>
         <button
           onClick={() => setTab("batches")}
@@ -258,7 +270,7 @@ export default function ResultsCleanupPage() {
               : "text-muted-foreground hover:text-foreground",
           )}
         >
-          批量记录 ({batches.length})
+          批量回测 ({batches.length})
         </button>
       </div>
 
@@ -266,14 +278,13 @@ export default function ResultsCleanupPage() {
         <div className="py-12 text-center text-muted-foreground">加载中...</div>
       )}
 
-      {/* ── Results tab ──────────────────────────────────────────────────── */}
-      {!isLoading && tab === "results" && (
+      {/* ── Standalone results tab ─────────────────────────────────────────── */}
+      {!isLoading && tab === "standalone" && (
         <>
-          {/* Bulk actions */}
-          {results.length > 0 && (
+          {standaloneResults.length > 0 && (
             <div className="flex items-center gap-3">
               <span className="text-sm text-muted-foreground">
-                已选 {selectedResults.size} / {results.length}
+                已选 {selectedResults.size} / {standaloneResults.length}
                 {selectedResults.size > 0 && ` (${fmtSize(selectedResultsSize)})`}
               </span>
               {confirmAction === "delete-results" ? (
@@ -308,13 +319,13 @@ export default function ResultsCleanupPage() {
                 onClick={toggleResultAll}
                 className="h-8 rounded-md border px-3 text-sm text-muted-foreground hover:text-foreground"
               >
-                {selectedResults.size === results.length ? "取消全选" : "全选"}
+                {selectedResults.size === standaloneResults.length ? "取消全选" : "全选"}
               </button>
             </div>
           )}
 
-          {results.length === 0 ? (
-            <div className="py-12 text-center text-muted-foreground">暂无回测结果</div>
+          {standaloneResults.length === 0 ? (
+            <div className="py-12 text-center text-muted-foreground">暂无单独回测结果</div>
           ) : (
             <div className="overflow-x-auto rounded-lg border">
               <table className="w-full text-sm">
@@ -323,7 +334,7 @@ export default function ResultsCleanupPage() {
                     <th className="w-10 px-3 py-2">
                       <input
                         type="checkbox"
-                        checked={selectedResults.size === results.length && results.length > 0}
+                        checked={selectedResults.size === standaloneResults.length && standaloneResults.length > 0}
                         onChange={toggleResultAll}
                         className="size-4 rounded border"
                       />
@@ -337,7 +348,7 @@ export default function ResultsCleanupPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {results.map((r) => (
+                  {standaloneResults.map((r) => (
                     <tr
                       key={r.session_id}
                       className={cn(
@@ -426,47 +437,33 @@ export default function ResultsCleanupPage() {
           {batches.length === 0 ? (
             <div className="py-12 text-center text-muted-foreground">暂无批量记录</div>
           ) : (
-            <div className="overflow-x-auto rounded-lg border">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/50 text-left text-xs text-muted-foreground">
-                    <th className="w-10 px-3 py-2">
+            <div className="rounded-lg border">
+              {batches.map((b) => {
+                const batchResults = batchResultsMap[b.batch_id] ?? []
+                const isExpanded = expandedBatchId === b.batch_id
+                const batchResultsTotalSize = batchResults.reduce((s, r) => s + r.size_kb, 0)
+                return (
+                  <div key={b.batch_id} className="border-b last:border-b-0">
+                    {/* Batch header row */}
+                    <div className={cn(
+                      "flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted/30",
+                      selectedBatches.has(b.batch_id) && "bg-muted/20",
+                    )}>
                       <input
                         type="checkbox"
-                        checked={selectedBatches.size === batches.length && batches.length > 0}
-                        onChange={toggleBatchAll}
+                        checked={selectedBatches.has(b.batch_id)}
+                        onChange={() => toggleBatch(b.batch_id)}
                         className="size-4 rounded border"
                       />
-                    </th>
-                    <th className="px-3 py-2">批次 ID</th>
-                    <th className="px-3 py-2">策略</th>
-                    <th className="px-3 py-2">状态</th>
-                    <th className="px-3 py-2 text-right">场次</th>
-                    <th className="px-3 py-2 text-right">已完成</th>
-                    <th className="px-3 py-2 text-right">大小</th>
-                    <th className="px-3 py-2">时间</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {batches.map((b) => (
-                    <tr
-                      key={b.batch_id}
-                      className={cn(
-                        "border-b transition-colors hover:bg-muted/30",
-                        selectedBatches.has(b.batch_id) && "bg-muted/20",
-                      )}
-                    >
-                      <td className="px-3 py-2">
-                        <input
-                          type="checkbox"
-                          checked={selectedBatches.has(b.batch_id)}
-                          onChange={() => toggleBatch(b.batch_id)}
-                          className="size-4 rounded border"
-                        />
-                      </td>
-                      <td className="px-3 py-2 font-mono text-xs">{b.batch_id}</td>
-                      <td className="px-3 py-2 font-medium">{b.strategy}</td>
-                      <td className="px-3 py-2">
+                      <button
+                        onClick={() => setExpandedBatchId(isExpanded ? null : b.batch_id)}
+                        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                      >
+                        <span className="text-xs text-muted-foreground">
+                          {isExpanded ? "▼" : "▶"}
+                        </span>
+                        <span className="font-mono text-xs">{b.batch_id}</span>
+                        <span className="font-medium">{b.strategy}</span>
                         <span
                           className={cn(
                             "inline-flex rounded-full px-2 py-0.5 text-xs",
@@ -479,17 +476,77 @@ export default function ResultsCleanupPage() {
                         >
                           {b.status}
                         </span>
-                      </td>
-                      <td className="px-3 py-2 text-right">{b.total}</td>
-                      <td className="px-3 py-2 text-right">{b.completed}</td>
-                      <td className="px-3 py-2 text-right">{fmtSize(b.size_kb)}</td>
-                      <td className="px-3 py-2 text-xs text-muted-foreground">
+                        <span className="text-xs text-muted-foreground">
+                          {b.completed}/{b.total} 场
+                        </span>
+                      </button>
+                      <span className="text-xs text-muted-foreground">
+                        {fmtSize(b.size_kb + batchResultsTotalSize)}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
                         {fmtTime(b.created_at)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </span>
+                      <Link
+                        to={`/batch/${b.batch_id}`}
+                        className="text-xs text-primary hover:underline"
+                      >
+                        详情
+                      </Link>
+                    </div>
+
+                    {/* Expanded: child results */}
+                    {isExpanded && (
+                      <div className="border-t bg-muted/10">
+                        {batchResults.length === 0 ? (
+                          <div className="px-6 py-3 text-xs text-muted-foreground">
+                            无关联回测结果
+                          </div>
+                        ) : (
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="text-left text-xs text-muted-foreground">
+                                <th className="px-6 py-1.5">数据源</th>
+                                <th className="px-3 py-1.5 text-right">收益率</th>
+                                <th className="px-3 py-1.5 text-right">交易数</th>
+                                <th className="px-3 py-1.5 text-right">大小</th>
+                                <th className="px-3 py-1.5"></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {batchResults.map((r) => (
+                                <tr
+                                  key={r.session_id}
+                                  className="border-t border-muted/30 transition-colors hover:bg-muted/20"
+                                >
+                                  <td className="px-6 py-1.5 font-mono text-xs">{r.slug}</td>
+                                  <td
+                                    className={cn(
+                                      "px-3 py-1.5 text-right font-medium text-xs",
+                                      r.total_return_pct >= 0 ? "text-emerald-600" : "text-red-500",
+                                    )}
+                                  >
+                                    {fmtPct(r.total_return_pct)}
+                                  </td>
+                                  <td className="px-3 py-1.5 text-right text-xs">{r.total_trades}</td>
+                                  <td className="px-3 py-1.5 text-right text-xs">{fmtSize(r.size_kb)}</td>
+                                  <td className="px-3 py-1.5 text-right">
+                                    <Link
+                                      to={`/results/${r.session_id}`}
+                                      className="text-xs text-primary hover:underline"
+                                    >
+                                      详情
+                                    </Link>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
         </>

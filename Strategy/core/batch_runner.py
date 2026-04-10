@@ -438,21 +438,21 @@ class BatchRunner:
                 chunk = slugs[chunk_start : chunk_start + chunk_size]
                 await asyncio.gather(*(run_one(slug) for slug in chunk))
 
-            # Release full sessions from previous chunk — summaries are kept
-            for slug in chunk:
-                task.results.pop(slug, None)
+                # Release full sessions from this chunk — summaries are kept
+                for slug in chunk:
+                    task.results.pop(slug, None)
 
-            # Evict data cache for completed slugs (next chunk may need different data)
-            completed_slugs = {s for s in chunk if task.workflows[s].status in ("completed", "failed", "skipped")}
-            for s in completed_slugs:
-                data_cache.pop(s, None)
+                # Evict data cache for completed slugs (next chunk may need different data)
+                completed_slugs = {s for s in chunk if task.workflows[s].status in ("completed", "failed", "skipped")}
+                for s in completed_slugs:
+                    data_cache.pop(s, None)
 
-            # Periodic GC to reclaim memory between chunks
-            gc.collect()
-            logger.info(
-                "Batch %s chunk %d-%d done (%d/%d total)",
-                batch_id, chunk_start, chunk_start + len(chunk),
-                task.completed_count, task.total,
+                # Periodic GC to reclaim memory between chunks
+                gc.collect()
+                logger.info(
+                    "Batch %s chunk %d-%d done (%d/%d total)",
+                    batch_id, chunk_start, chunk_start + len(chunk),
+                    task.completed_count, task.total,
             )
 
         if task.status != "cancelled":
