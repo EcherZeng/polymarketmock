@@ -59,7 +59,9 @@ export default function StrategyPage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [activeCategory, setActiveCategory] = useState<string>("")
   const [archiveSort, setArchiveSort] = useState<"time" | "name">("time")
-  const [batchSize, setBatchSize] = useState<number>(0) // 0 = all
+  const [batchSize, setBatchSize] = useState<number>(0) // 0=all, 10/20/50=top N, -50=random 50, -1=custom
+  const [customBatchMode, setCustomBatchMode] = useState<"top" | "random">("top")
+  const [customBatchCount, setCustomBatchCount] = useState<number>(30)
   const [savePresetName, setSavePresetName] = useState("")
   const [savePresetDesc, setSavePresetDesc] = useState("")
   const [createStrategyOpen, setCreateStrategyOpen] = useState(false)
@@ -99,9 +101,12 @@ export default function StrategyPage() {
   })
 
   const filteredPortfolios = useMemo(() => {
-    if (!portfolioSearch.trim()) return portfolios
+    let list = [...portfolios]
+    // Sort newest first
+    list.sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))
+    if (!portfolioSearch.trim()) return list
     const term = portfolioSearch.trim().toLowerCase()
-    return portfolios.filter(
+    return list.filter(
       (p) =>
         p.name.toLowerCase().includes(term) ||
         p.items.some((it) => it.slug.toLowerCase().includes(term)),
@@ -240,8 +245,26 @@ export default function StrategyPage() {
   }
 
   function handleSelectAll() {
-    const slugs = batchSize > 0 ? filteredArchives.slice(0, batchSize) : filteredArchives
-    setSelectedSlugs(new Set(slugs.map((a) => a.slug)))
+    let picked: typeof filteredArchives
+    if (batchSize === -1) {
+      // Custom mode
+      const count = Math.min(customBatchCount, filteredArchives.length)
+      if (customBatchMode === "random") {
+        const shuffled = [...filteredArchives].sort(() => Math.random() - 0.5)
+        picked = shuffled.slice(0, count)
+      } else {
+        picked = filteredArchives.slice(0, count)
+      }
+    } else if (batchSize === -50) {
+      // Random 50
+      const shuffled = [...filteredArchives].sort(() => Math.random() - 0.5)
+      picked = shuffled.slice(0, Math.min(50, filteredArchives.length))
+    } else if (batchSize > 0) {
+      picked = filteredArchives.slice(0, batchSize)
+    } else {
+      picked = filteredArchives
+    }
+    setSelectedSlugs(new Set(picked.map((a) => a.slug)))
   }
 
   function handleDeselectAll() {
@@ -571,7 +594,31 @@ export default function StrategyPage() {
                   <option value={0}>全部</option>
                   <option value={10}>前 10 条</option>
                   <option value={20}>前 20 条</option>
+                  <option value={50}>前 50 条</option>
+                  <option value={-50}>随机 50 条</option>
+                  <option value={-1}>自定义</option>
                 </select>
+                {batchSize === -1 && (
+                  <>
+                    <select
+                      value={customBatchMode}
+                      onChange={(e) => setCustomBatchMode(e.target.value as "top" | "random")}
+                      className="h-8 rounded-md border bg-background px-2 text-xs"
+                    >
+                      <option value="top">前</option>
+                      <option value="random">随机</option>
+                    </select>
+                    <input
+                      type="number"
+                      min={1}
+                      max={filteredArchives.length || 999}
+                      value={customBatchCount}
+                      onChange={(e) => setCustomBatchCount(Math.max(1, Number(e.target.value)))}
+                      className="h-8 w-16 rounded-md border bg-background px-2 text-xs"
+                    />
+                    <span className="text-xs text-muted-foreground">条</span>
+                  </>
+                )}
                 <button
                   onClick={handleSelectAll}
                   className="h-8 rounded-md border px-3 text-xs font-medium transition-colors hover:bg-muted"

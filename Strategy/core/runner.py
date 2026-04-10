@@ -305,6 +305,7 @@ def run_backtest(
             balance=round(balance, 6),
             positions=dict(positions),
             equity=round(equity, 6),
+            initial_balance=initial_balance,
             price_history={tid: list(h) for tid, h in price_history.items()},
             trade_history=recent_trades[-50:],
         )

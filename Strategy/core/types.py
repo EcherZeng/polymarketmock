@@ -54,6 +54,7 @@ class TickContext:
     balance: float = 0.0
     positions: dict[str, float] = field(default_factory=dict)
     equity: float = 0.0
+    initial_balance: float = 0.0
 
     price_history: dict[str, list[float]] = field(default_factory=dict)
     trade_history: list[dict] = field(default_factory=list)

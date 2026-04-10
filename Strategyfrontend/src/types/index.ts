@@ -306,7 +306,10 @@ export interface Portfolio {
   name: string
   created_at: string
   updated_at: string
+  parent_id: string | null
+  children: string[]
   items: PortfolioItem[]
+  is_container: boolean
   is_strategy_group: boolean
   group_strategy: string | null
   group_config: Record<string, unknown> | null

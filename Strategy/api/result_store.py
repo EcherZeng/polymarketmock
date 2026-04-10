@@ -220,6 +220,87 @@ class PortfolioStore:
     def __len__(self) -> int:
         return len(self._data)
 
+    # ── Children operations (container tree) ────────────────────────────────
+
+    def get_depth(self, portfolio_id: str) -> int:
+        """Return depth of *portfolio_id* in the tree (root = 1)."""
+        depth = 1
+        cur = portfolio_id
+        while True:
+            p = self._data.get(cur)
+            if p is None:
+                break
+            parent = p.get("parent_id")
+            if not parent:
+                break
+            depth += 1
+            cur = parent
+        return depth
+
+    def get_all_descendants(self, portfolio_id: str) -> set[str]:
+        """Return IDs of all descendants (children, grandchildren, …)."""
+        result: set[str] = set()
+        stack = list(self._data.get(portfolio_id, {}).get("children", []))
+        while stack:
+            cid = stack.pop()
+            if cid in result:
+                continue
+            result.add(cid)
+            child = self._data.get(cid)
+            if child:
+                stack.extend(child.get("children", []))
+        return result
+
+    def get_ancestors(self, portfolio_id: str) -> set[str]:
+        """Return IDs of all ancestors (parent, grandparent, …)."""
+        result: set[str] = set()
+        cur = portfolio_id
+        while True:
+            p = self._data.get(cur)
+            if p is None:
+                break
+            parent = p.get("parent_id")
+            if not parent or parent in result:
+                break
+            result.add(parent)
+            cur = parent
+        return result
+
+    def add_children(self, parent_id: str, child_ids: list[str]) -> dict | None:
+        parent = self._data.get(parent_id)
+        if parent is None:
+            return None
+        existing = set(parent.get("children", []))
+        for cid in child_ids:
+            if cid not in existing and cid in self._data:
+                existing.add(cid)
+                child = self._data[cid]
+                child["parent_id"] = parent_id
+                self._persist(cid, child)
+        parent["children"] = list(existing)
+        from datetime import datetime, timezone
+        parent["updated_at"] = datetime.now(timezone.utc).isoformat()
+        self._persist(parent_id, parent)
+        return parent
+
+    def remove_children(self, parent_id: str, child_ids: list[str]) -> dict | None:
+        parent = self._data.get(parent_id)
+        if parent is None:
+            return None
+        remove_set = set(child_ids)
+        parent["children"] = [
+            cid for cid in parent.get("children", []) if cid not in remove_set
+        ]
+        for cid in child_ids:
+            child = self._data.get(cid)
+            if child and child.get("parent_id") == parent_id:
+                child["parent_id"] = None
+                self._persist(cid, child)
+        from datetime import datetime, timezone
+        parent["updated_at"] = datetime.now(timezone.utc).isoformat()
+        self._persist(parent_id, parent)
+        return parent
+
     # ── Item-level operations ────────────────────────────────────────────────
 
     def add_items(self, portfolio_id: str, items: list[dict]) -> dict | None:

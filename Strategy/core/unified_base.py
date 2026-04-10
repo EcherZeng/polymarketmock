@@ -26,8 +26,8 @@ class UnifiedBaseStrategy(BaseStrategy):
         # Unified rule parameters — only set when activated
         self._tp_price: float | None = config.get("take_profit_price") if param_active(config, "take_profit_price") else None
         self._sl_price: float | None = config.get("stop_loss_price") if param_active(config, "stop_loss_price") else None
-        self._tp_pct: float | None = (config.get("take_profit_pct") or None) if param_active(config, "take_profit_pct") else None
-        self._sl_pct: float | None = (config.get("stop_loss_pct") or None) if param_active(config, "stop_loss_pct") else None
+        self._tp_pct: float | None = (config.get("take_profit_pct") or None) if param_active(config, "take_profit_pct") else None  # capital-based
+        self._sl_pct: float | None = (config.get("stop_loss_pct") or None) if param_active(config, "stop_loss_pct") else None  # capital-based
         self._force_close_seconds: int | None = int(config["force_close_remaining_seconds"]) if param_active(config, "force_close_remaining_seconds") else None
         self._consec_loss_threshold: int | None = int(config["consecutive_loss_threshold"]) if param_active(config, "consecutive_loss_threshold") else None
         self._loss_reduction_pct: float = config.get("loss_position_reduction_pct", 0.5) if param_active(config, "loss_position_reduction_pct") else 0.0
@@ -82,7 +82,22 @@ class UnifiedBaseStrategy(BaseStrategy):
                     signals.append(self._make_exit_signal(token_id, qty))
             return signals
 
-        # ── 2. Take profit / Stop loss (per-token, pct + absolute) ────────
+        # ── 2a. Capital-based pct TP/SL — compare equity vs initial_balance ──
+        if ctx.initial_balance > 0:
+            pnl_ratio = (ctx.equity - ctx.initial_balance) / ctx.initial_balance
+            capital_close = False
+            if self._tp_pct is not None and self._tp_pct > 0 and pnl_ratio >= self._tp_pct:
+                capital_close = True
+            if self._sl_pct is not None and self._sl_pct > 0 and pnl_ratio <= -self._sl_pct:
+                capital_close = True
+            if capital_close:
+                for token_id, qty in ctx.positions.items():
+                    if qty > 0:
+                        signals.append(self._make_exit_signal(token_id, qty))
+                if signals:
+                    return signals
+
+        # ── 2b. Take profit / Stop loss (per-token, absolute price) ────────
         for token_id, snapshot in ctx.tokens.items():
             qty = ctx.positions.get(token_id, 0)
             if qty <= 0:
@@ -96,15 +111,7 @@ class UnifiedBaseStrategy(BaseStrategy):
 
             price_side = entry_side or self._price_side(ref_price)
             effective_ref = self._effective_price(ref_price, price_side)
-            entry = self._entry_effective_prices.get(token_id)
             should_close = False
-
-            # Relative pct mode — anchored to entry price per token
-            if entry is not None and entry > 0:
-                if self._tp_pct is not None and self._tp_pct > 0 and effective_ref >= entry * (1 + self._tp_pct):
-                    should_close = True
-                if self._sl_pct is not None and self._sl_pct > 0 and effective_ref <= entry * (1 - self._sl_pct):
-                    should_close = True
 
             # Absolute price mode
             if self._tp_price is not None and effective_ref >= self._tp_price:

@@ -1,32 +1,55 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { useParams, Link } from "react-router-dom"
+import { useParams, Link, useNavigate } from "react-router-dom"
 import { useMemo, useState } from "react"
 import { cn } from "@/lib/utils"
 import {
   fetchPortfolio,
+  fetchPortfolios,
   renamePortfolio,
   removePortfolioItems,
+  addChildren,
+  removeChildren,
+  createPortfolio,
 } from "@/api/client"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog"
 import AddItemsToPortfolioDialog from "@/components/AddItemsToPortfolioDialog"
 import type { Portfolio } from "@/types"
 
 export default function PortfolioDetailPage() {
   const { portfolioId } = useParams<{ portfolioId: string }>()
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const [editing, setEditing] = useState(false)
   const [editName, setEditName] = useState("")
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [memberSearch, setMemberSearch] = useState("")
   const [returnFilter, setReturnFilter] = useState<"all" | "positive" | "negative">("all")
   const [addDialogOpen, setAddDialogOpen] = useState(false)
+  const [addChildOpen, setAddChildOpen] = useState(false)
+  const [addChildMode, setAddChildMode] = useState<"existing" | "create">("existing")
+  const [newChildName, setNewChildName] = useState("")
+  const [selectedChildIds, setSelectedChildIds] = useState<Set<string>>(new Set())
+  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set())
 
   const { data: portfolio, isLoading } = useQuery<Portfolio>({
     queryKey: ["portfolio", portfolioId],
     queryFn: () => fetchPortfolio(portfolioId!),
     enabled: !!portfolioId,
+  })
+
+  const { data: allPortfolios = [] } = useQuery<Portfolio[]>({
+    queryKey: ["portfolios"],
+    queryFn: fetchPortfolios,
   })
 
   const renameMutation = useMutation({
@@ -47,6 +70,66 @@ export default function PortfolioDetailPage() {
       setSelectedIds(new Set())
     },
   })
+
+  const addChildrenMutation = useMutation({
+    mutationFn: (children: string[]) => addChildren(portfolioId!, children),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["portfolio", portfolioId] })
+      queryClient.invalidateQueries({ queryKey: ["portfolios"] })
+      setAddChildOpen(false)
+      setSelectedChildIds(new Set())
+    },
+  })
+
+  const createChildMutation = useMutation({
+    mutationFn: async (name: string) => {
+      const created = await createPortfolio({ name, items: [] })
+      await addChildren(portfolioId!, [created.portfolio_id])
+      return created
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["portfolio", portfolioId] })
+      queryClient.invalidateQueries({ queryKey: ["portfolios"] })
+      setAddChildOpen(false)
+      setNewChildName("")
+    },
+  })
+
+  const removeChildrenMutation = useMutation({
+    mutationFn: (children: string[]) => removeChildren(portfolioId!, children),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["portfolio", portfolioId] })
+      queryClient.invalidateQueries({ queryKey: ["portfolios"] })
+      setSelectedChildIds(new Set())
+    },
+  })
+
+  // Available portfolios that can be added as children (not self, not ancestors, not already children)
+  const availableChildren = useMemo(() => {
+    if (!portfolio) return []
+    const childSet = new Set(portfolio.children)
+    return allPortfolios.filter((p) => {
+      if (p.portfolio_id === portfolioId) return false
+      if (childSet.has(p.portfolio_id)) return false
+      if (p.parent_id && p.parent_id !== portfolioId) return false // already belongs to another parent
+      return true
+    })
+  }, [allPortfolios, portfolio, portfolioId])
+
+  // Resolve children portfolios
+  const childPortfolios = useMemo(() => {
+    if (!portfolio?.is_container) return []
+    const pMap = new Map(allPortfolios.map((p) => [p.portfolio_id, p]))
+    return portfolio.children
+      .map((cid) => pMap.get(cid))
+      .filter((c): c is Portfolio => !!c)
+  }, [allPortfolios, portfolio])
+
+  // Strategy groups among children (for comparison entry from within container)
+  const childStrategyGroups = useMemo(
+    () => childPortfolios.filter((p) => p.is_strategy_group),
+    [childPortfolios],
+  )
 
   const stats = useMemo(() => {
     if (!portfolio || portfolio.items.length === 0) return null
@@ -173,17 +256,50 @@ export default function PortfolioDetailPage() {
             </div>
           )}
           <div className="mt-1 flex gap-3 text-sm text-muted-foreground">
-            <span>{portfolio.items.length} 条数据源</span>
+            <span>
+              {portfolio.is_container
+                ? `${portfolio.children.length} 个子组合`
+                : `${portfolio.items.length} 条数据源`}
+            </span>
             <span>·</span>
             <span>创建于 {portfolio.created_at.replace("T", " ").slice(0, 19)}</span>
+            {portfolio.is_container && (
+              <>
+                <span>·</span>
+                <Badge variant="outline" className="text-[10px]">容器</Badge>
+              </>
+            )}
           </div>
         </div>
-        <Link
-          to="/portfolios"
-          className="rounded-md border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
-        >
-          返回列表
-        </Link>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={portfolio.items.length > 0}
+            onClick={() => {
+              setAddChildMode("existing")
+              setAddChildOpen(true)
+            }}
+            title={portfolio.items.length > 0 ? "组合已有数据源，不可新增子组合" : undefined}
+          >
+            新增组合
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={portfolio.is_container}
+            onClick={() => setAddDialogOpen(true)}
+            title={portfolio.is_container ? "容器组合不可直接添加数据源" : undefined}
+          >
+            新增数据源
+          </Button>
+          <Link
+            to="/portfolios"
+            className="rounded-md border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
+          >
+            返回列表
+          </Link>
+        </div>
       </div>
 
       {/* Strategy group header */}
@@ -206,6 +322,278 @@ export default function PortfolioDetailPage() {
         </div>
       )}
 
+      {/* ── Container children section ──────────────────────────────────── */}
+      {portfolio.is_container && (
+        <>
+          {/* Comparison bar for strategy groups within this container */}
+          {childStrategyGroups.length >= 2 && (
+            <div className="rounded-lg border bg-muted/30 p-4">
+              <div className="text-sm font-medium">子策略组对照</div>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                此容器包含 {childStrategyGroups.length} 个策略组，可勾选进行参数对照
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {childStrategyGroups.map((sg) => (
+                  <label key={sg.portfolio_id} className="flex items-center gap-1.5">
+                    <Checkbox
+                      checked={selectedGroupIds.has(sg.portfolio_id)}
+                      onCheckedChange={() => {
+                        setSelectedGroupIds((prev) => {
+                          const next = new Set(prev)
+                          if (next.has(sg.portfolio_id)) next.delete(sg.portfolio_id)
+                          else next.add(sg.portfolio_id)
+                          return next
+                        })
+                      }}
+                    />
+                    <span className="text-xs">{sg.name}</span>
+                    <Badge variant="secondary" className="text-[10px]">
+                      {sg.group_strategy}
+                    </Badge>
+                  </label>
+                ))}
+              </div>
+              {selectedGroupIds.size >= 2 && (
+                <Button
+                  size="sm"
+                  className="mt-2"
+                  onClick={() => {
+                    const ids = [...selectedGroupIds].join(",")
+                    navigate(`/comparison?ids=${ids}`)
+                  }}
+                >
+                  参数对照 ({selectedGroupIds.size})
+                </Button>
+              )}
+            </div>
+          )}
+
+          {/* Children list */}
+          <div className="rounded-lg border">
+            <div className="flex items-center justify-between border-b bg-muted/50 px-4 py-2">
+              <h2 className="text-sm font-medium">子组合 ({portfolio.children.length})</h2>
+              <div className="flex items-center gap-2">
+                {selectedChildIds.size > 0 && (
+                  <>
+                    <span className="text-xs text-muted-foreground">
+                      已选 {selectedChildIds.size}
+                    </span>
+                    <button
+                      onClick={() => {
+                        if (confirm(`确认从容器中移除 ${selectedChildIds.size} 个子组合？子组合不会被删除，将提升为顶层组合。`))
+                          removeChildrenMutation.mutate([...selectedChildIds])
+                      }}
+                      disabled={removeChildrenMutation.isPending}
+                      className="rounded-md border px-2.5 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
+                    >
+                      移除选中
+                    </button>
+                  </>
+                )}
+                <button
+                  onClick={() => {
+                    setAddChildMode("existing")
+                    setAddChildOpen(true)
+                  }}
+                  className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                >
+                  添加子组合
+                </button>
+              </div>
+            </div>
+            {childPortfolios.length > 0 ? (
+              <div className="divide-y">
+                {childPortfolios.map((child) => {
+                  const returns = child.items.map((it) => it.total_return_pct)
+                  const avg = returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : 0
+                  return (
+                    <div
+                      key={child.portfolio_id}
+                      className={cn(
+                        "flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30",
+                        selectedChildIds.has(child.portfolio_id) && "bg-primary/5",
+                      )}
+                    >
+                      <Checkbox
+                        checked={selectedChildIds.has(child.portfolio_id)}
+                        onCheckedChange={() => {
+                          setSelectedChildIds((prev) => {
+                            const next = new Set(prev)
+                            if (next.has(child.portfolio_id)) next.delete(child.portfolio_id)
+                            else next.add(child.portfolio_id)
+                            return next
+                          })
+                        }}
+                      />
+                      <Link
+                        to={`/portfolios/${child.portfolio_id}`}
+                        className="flex flex-1 items-center justify-between"
+                      >
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium">{child.name}</span>
+                            {child.is_strategy_group && (
+                              <Badge variant="secondary" className="text-[10px]">
+                                策略组 · {child.group_strategy}
+                              </Badge>
+                            )}
+                            {child.is_container && (
+                              <Badge variant="outline" className="text-[10px]">
+                                容器 · {child.children.length} 子
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {child.is_container
+                              ? `${child.children.length} 个子组合`
+                              : `${child.items.length} 条数据源`}
+                          </div>
+                        </div>
+                        {!child.is_container && child.items.length > 0 && (
+                          <div className="text-right">
+                            <div
+                              className={cn(
+                                "text-sm font-mono font-semibold",
+                                avg >= 0 ? "text-emerald-600" : "text-red-500",
+                              )}
+                            >
+                              {avg >= 0 ? "+" : ""}
+                              {(avg * 100).toFixed(2)}%
+                            </div>
+                            <div className="text-[10px] text-muted-foreground">平均收益</div>
+                          </div>
+                        )}
+                      </Link>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="py-8 text-center text-sm text-muted-foreground">
+                暂无子组合，点击顶部"新增组合"按钮添加
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Add child dialog (available for any portfolio without items) */}
+      <Dialog open={addChildOpen} onOpenChange={setAddChildOpen}>
+        <DialogContent className="max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>新增组合</DialogTitle>
+          </DialogHeader>
+
+          {/* Mode toggle */}
+          <div className="flex items-center gap-2">
+            {(["existing", "create"] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setAddChildMode(mode)}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                  addChildMode === mode
+                    ? "bg-foreground text-background"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80",
+                )}
+              >
+                {mode === "existing" ? "选择现有组合" : "创建新组合"}
+              </button>
+            ))}
+          </div>
+
+          {addChildMode === "existing" ? (
+            <>
+              {availableChildren.length === 0 ? (
+                <p className="py-4 text-center text-sm text-muted-foreground">
+                  没有可添加的组合。组合需要是顶层组合（无父组合）才能被添加。
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {availableChildren.map((p) => (
+                    <label
+                      key={p.portfolio_id}
+                      className={cn(
+                        "flex cursor-pointer items-center gap-3 rounded-md border p-3 transition-colors hover:bg-muted/30",
+                        selectedChildIds.has(p.portfolio_id) && "ring-2 ring-primary/50",
+                      )}
+                    >
+                      <Checkbox
+                        checked={selectedChildIds.has(p.portfolio_id)}
+                        onCheckedChange={() => {
+                          setSelectedChildIds((prev) => {
+                            const next = new Set(prev)
+                            if (next.has(p.portfolio_id)) next.delete(p.portfolio_id)
+                            else next.add(p.portfolio_id)
+                            return next
+                          })
+                        }}
+                      />
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium">{p.name}</span>
+                          {p.is_strategy_group && (
+                            <Badge variant="secondary" className="text-[10px]">
+                              策略组
+                            </Badge>
+                          )}
+                          {p.is_container && (
+                            <Badge variant="outline" className="text-[10px]">容器</Badge>
+                          )}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {p.is_container
+                            ? `${p.children.length} 个子组合`
+                            : `${p.items.length} 条数据源`}
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              )}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => { setAddChildOpen(false); setSelectedChildIds(new Set()) }}>
+                  取消
+                </Button>
+                <Button
+                  disabled={selectedChildIds.size === 0 || addChildrenMutation.isPending}
+                  onClick={() => addChildrenMutation.mutate([...selectedChildIds])}
+                >
+                  {addChildrenMutation.isPending ? "添加中..." : `添加 (${selectedChildIds.size})`}
+                </Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
+              <Input
+                placeholder="输入新组合名称"
+                value={newChildName}
+                onChange={(e) => setNewChildName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && newChildName.trim()) {
+                    createChildMutation.mutate(newChildName.trim())
+                  }
+                }}
+              />
+              <DialogFooter>
+                <Button variant="outline" onClick={() => { setAddChildOpen(false); setNewChildName("") }}>
+                  取消
+                </Button>
+                <Button
+                  disabled={!newChildName.trim() || createChildMutation.isPending}
+                  onClick={() => createChildMutation.mutate(newChildName.trim())}
+                >
+                  {createChildMutation.isPending ? "创建中..." : "创建并添加"}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Leaf portfolio content (stats + items) ─────────────────────── */}
+      {!portfolio.is_container && (
+      <>
       {/* Aggregate stats */}
       {stats && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
@@ -389,6 +777,8 @@ export default function PortfolioDetailPage() {
         existingSlugs={existingSlugs}
         groupStrategy={portfolio?.is_strategy_group ? (portfolio.group_strategy ?? undefined) : undefined}
       />
+      </>
+      )}
     </div>
   )
 }

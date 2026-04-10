@@ -287,6 +287,11 @@ export async function fetchPortfolios(): Promise<Portfolio[]> {
   return data
 }
 
+export async function fetchStrategyGroups(): Promise<Portfolio[]> {
+  const { data } = await api.get<Portfolio[]>("/portfolios/strategy-groups")
+  return data
+}
+
 export async function fetchPortfolio(portfolioId: string): Promise<Portfolio> {
   const { data } = await api.get<Portfolio>(`/portfolios/${portfolioId}`)
   return data
@@ -297,6 +302,14 @@ export async function createPortfolio(body: {
   items: PortfolioItem[]
 }): Promise<Portfolio> {
   const { data } = await api.post<Portfolio>("/portfolios", body)
+  return data
+}
+
+export async function createContainer(body: {
+  name: string
+  children?: string[]
+}): Promise<Portfolio> {
+  const { data } = await api.post<Portfolio>("/portfolios/container", body)
   return data
 }
 
@@ -325,6 +338,27 @@ export async function removePortfolioItems(
   const { data } = await api.delete<Portfolio>(`/portfolios/${portfolioId}/items`, {
     data: { session_ids: sessionIds },
   })
+  return data
+}
+
+export async function addChildren(
+  portfolioId: string,
+  children: string[],
+): Promise<Portfolio> {
+  const { data } = await api.put<Portfolio>(`/portfolios/${portfolioId}/children`, {
+    children,
+  })
+  return data
+}
+
+export async function removeChildren(
+  portfolioId: string,
+  children: string[],
+): Promise<Portfolio> {
+  const { data } = await api.delete<Portfolio>(
+    `/portfolios/${portfolioId}/children`,
+    { data: { children } },
+  )
   return data
 }
 
