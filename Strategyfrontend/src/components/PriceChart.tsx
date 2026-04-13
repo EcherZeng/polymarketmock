@@ -11,6 +11,7 @@ import {
   Legend,
 } from "recharts"
 import type { PricePoint, TradeRecord } from "@/types"
+import { fmtTimeCst, fmtDateTimeCst } from "@/lib/utils"
 
 interface PriceChartProps {
   priceCurve: PricePoint[]
@@ -93,7 +94,7 @@ export default function PriceChart({ priceCurve, trades }: PriceChartProps) {
           <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
           <XAxis
             dataKey="timestamp"
-            tickFormatter={(v: string) => v.slice(11, 19)}
+            tickFormatter={(v: string) => fmtTimeCst(v)}
             tick={{ fontSize: 11 }}
             interval="preserveStartEnd"
           />
@@ -104,7 +105,7 @@ export default function PriceChart({ priceCurve, trades }: PriceChartProps) {
             width={55}
           />
           <Tooltip
-            labelFormatter={(v) => String(v).slice(0, 19).replace("T", " ")}
+            labelFormatter={(v) => fmtDateTimeCst(String(v))}
             formatter={(value, name) => {
               const nameStr = String(name)
               if (nameStr.startsWith("anchor_")) {

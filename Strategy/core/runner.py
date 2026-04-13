@@ -29,6 +29,7 @@ from core.types import (
     TokenSnapshot,
     btc_trend_enabled,
     param_active,
+    parse_slug_window,
 )
 
 logger = logging.getLogger(__name__)
@@ -171,6 +172,11 @@ def run_backtest(
 
     logger.info("Backtest %s: time grid %d ticks (%s → %s)", session_id, total_ticks, time_grid[0], time_grid[-1])
 
+    # ── Slug-derived session window ──────────────────────────────────────
+    slug_window = parse_slug_window(slug)
+    slug_start = slug_window[0] if slug_window else time_grid[0]
+    slug_end = slug_window[1] if slug_window else time_grid[-1]
+
     # ── Merge config (must happen before any param_active checks) ────────
     default_config = registry.get_default_config(strategy_name)
     if user_config:
@@ -187,7 +193,7 @@ def run_backtest(
         w2 = merged_config.get("btc_trend_window_2", 5)
         min_mom = merged_config.get("btc_min_momentum", 0.001)
         if btc_klines:
-            btc_trend_info = compute_btc_trend(btc_klines, time_grid[0], w1, w2, min_mom)
+            btc_trend_info = compute_btc_trend(btc_klines, slug_start, w1, w2, min_mom)
             btc_trend_pass = btc_trend_info["passed"]
             logger.info(
                 "Backtest %s BTC trend: a1=%.6f a2=%.6f |a1+a2|=%.6f pass=%s",
@@ -437,5 +443,7 @@ def run_backtest(
         final_positions=dict(positions),
         settlement_result=resolved_settlement,
         btc_trend_info=btc_trend_info,
+        slug_start=slug_start,
+        slug_end=slug_end,
     )
     return session

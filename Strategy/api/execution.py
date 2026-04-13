@@ -15,7 +15,7 @@ from core.btc_data import fetch_btc_klines
 from core.data_loader import load_archive
 from core.evaluator import compute_drawdown_curve, compute_drawdown_events, evaluate
 from core.runner import run_backtest
-from core.types import BacktestSession, btc_trend_enabled
+from core.types import BacktestSession, btc_trend_enabled, parse_slug_window
 
 logger = logging.getLogger(__name__)
 
@@ -69,16 +69,20 @@ async def run_single(req: RunRequest):
     btc_klines: list[dict] | None = None
     if btc_trend_enabled(req.config):
         try:
-            data = await asyncio.to_thread(load_archive, config.data_dir, req.slug)
-            # Collect all timestamps to determine time range
-            all_ts: set[str] = set()
-            for row in (*data.prices, *data.orderbooks, *data.live_trades, *data.ob_deltas):
-                ts = row.get("timestamp", "")
-                if ts:
-                    all_ts.add(ts)
-            if all_ts:
-                sorted_ts = sorted(all_ts)
-                btc_klines = await fetch_btc_klines(sorted_ts[0], sorted_ts[-1])
+            slug_window = parse_slug_window(req.slug)
+            if slug_window:
+                btc_klines = await fetch_btc_klines(slug_window[0], slug_window[1])
+            else:
+                # Fallback: derive time range from actual data timestamps
+                data = await asyncio.to_thread(load_archive, config.data_dir, req.slug)
+                all_ts: set[str] = set()
+                for row in (*data.prices, *data.orderbooks, *data.live_trades, *data.ob_deltas):
+                    ts = row.get("timestamp", "")
+                    if ts:
+                        all_ts.add(ts)
+                if all_ts:
+                    sorted_ts = sorted(all_ts)
+                    btc_klines = await fetch_btc_klines(sorted_ts[0], sorted_ts[-1])
         except Exception as e:
             logger.warning("BTC klines prefetch failed for %s: %s", req.slug, e)
             # Don't block backtest on BTC data failure
@@ -360,4 +364,6 @@ def _serialize_session(session) -> dict:
         "strategy_summary": session.strategy_summary,
         "settlement_result": session.settlement_result,
         "btc_trend_info": session.btc_trend_info,
+        "slug_start": session.slug_start,
+        "slug_end": session.slug_end,
     }

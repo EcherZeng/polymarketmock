@@ -24,7 +24,7 @@ from core.evaluator import compute_drawdown_curve, compute_drawdown_events, eval
 from core.registry import StrategyRegistry
 from core.runner import run_backtest
 from core.btc_data import fetch_btc_klines
-from core.types import ArchiveData, BacktestSession, btc_trend_enabled
+from core.types import ArchiveData, BacktestSession, btc_trend_enabled, parse_slug_window
 
 logger = logging.getLogger(__name__)
 
@@ -259,14 +259,18 @@ class BatchRunner:
                 btc_klines: list[dict] | None = None
                 if btc_trend_enabled(task.config):
                     try:
-                        all_ts: set[str] = set()
-                        for row in (*data.prices, *data.orderbooks, *data.live_trades, *data.ob_deltas):
-                            ts = row.get("timestamp", "")
-                            if ts:
-                                all_ts.add(ts)
-                        if all_ts:
-                            sorted_ts = sorted(all_ts)
-                            btc_klines = await fetch_btc_klines(sorted_ts[0], sorted_ts[-1])
+                        slug_window = parse_slug_window(slug)
+                        if slug_window:
+                            btc_klines = await fetch_btc_klines(slug_window[0], slug_window[1])
+                        else:
+                            all_ts: set[str] = set()
+                            for row in (*data.prices, *data.orderbooks, *data.live_trades, *data.ob_deltas):
+                                ts = row.get("timestamp", "")
+                                if ts:
+                                    all_ts.add(ts)
+                            if all_ts:
+                                sorted_ts = sorted(all_ts)
+                                btc_klines = await fetch_btc_klines(sorted_ts[0], sorted_ts[-1])
                     except Exception as e:
                         logger.warning("Batch %s slug %s BTC klines prefetch failed: %s", batch_id, slug, e)
 

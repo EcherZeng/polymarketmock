@@ -10,6 +10,7 @@ import {
   Tooltip,
 } from "recharts"
 import type { EquityPoint, DrawdownPoint } from "@/types"
+import { fmtTimeCst, fmtDateTimeCst } from "@/lib/utils"
 
 interface EquityCurveChartProps {
   equityCurve: EquityPoint[]
@@ -57,7 +58,7 @@ export default function EquityCurveChart({ equityCurve, drawdownCurve }: EquityC
             <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
             <XAxis
               dataKey="timestamp"
-              tickFormatter={(v: string) => v.slice(11, 19)}
+              tickFormatter={(v: string) => fmtTimeCst(v)}
               tick={{ fontSize: 11 }}
               interval="preserveStartEnd"
             />
@@ -68,7 +69,7 @@ export default function EquityCurveChart({ equityCurve, drawdownCurve }: EquityC
               width={70}
             />
             <Tooltip
-              labelFormatter={(v) => String(v).slice(0, 19).replace("T", " ")}
+              labelFormatter={(v) => fmtDateTimeCst(String(v))}
               formatter={(value, name) => {
                 const n = Number(value)
                 if (name === "equity") return [`$${n.toFixed(2)}`, "权益"]
@@ -97,7 +98,7 @@ export default function EquityCurveChart({ equityCurve, drawdownCurve }: EquityC
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
               <XAxis
                 dataKey="timestamp"
-                tickFormatter={(v: string) => v.slice(11, 19)}
+                tickFormatter={(v: string) => fmtTimeCst(v)}
                 tick={{ fontSize: 10 }}
                 interval="preserveStartEnd"
               />
@@ -108,7 +109,7 @@ export default function EquityCurveChart({ equityCurve, drawdownCurve }: EquityC
                 reversed
               />
               <Tooltip
-                labelFormatter={(v) => String(v).slice(0, 19).replace("T", " ")}
+                labelFormatter={(v) => fmtDateTimeCst(String(v))}
                 formatter={(value) => [`${Number(value).toFixed(2)}%`, "回撤"]}
               />
               <Line

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import { useParams, Link } from "react-router-dom"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { cn } from "@/lib/utils"
+import { cn, fmtTimeCst } from "@/lib/utils"
 import { fetchAiOptimizeTask, stopAiOptimize, savePreset } from "@/api/client"
 import { PARAM_SCHEMA } from "@/config/paramSchema"
 import type { AiOptimizeTaskDetail } from "@/types"
@@ -440,7 +440,7 @@ export default function AiOptimizeDetailPage() {
                   </span>
                   <span className="text-muted-foreground">{msg.content_length.toLocaleString()} chars</span>
                   <span className="ml-auto text-muted-foreground">
-                    {msg.timestamp.replace("T", " ").slice(11, 19)}
+                    {fmtTimeCst(msg.timestamp)}
                   </span>
                 </button>
                 {expandedAiMsgIdx === i && msg.content && (
@@ -514,7 +514,7 @@ function ErrorsSection({
                 <span className="text-muted-foreground">config#{err.config_index + 1}</span>
               )}
               <span className="ml-auto text-muted-foreground">
-                {err.timestamp.replace("T", " ").slice(11, 19)}
+                {fmtTimeCst(err.timestamp)}
               </span>
             </button>
             <p className="mt-1 text-xs text-red-600">{err.message}</p>

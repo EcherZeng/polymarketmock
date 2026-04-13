@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Link, useNavigate } from "react-router-dom"
-import { cn } from "@/lib/utils"
+import { cn, fmtFullCst } from "@/lib/utils"
 import {
   fetchStrategies,
   fetchPortfolios,
@@ -299,7 +299,7 @@ export default function AiOptimizePage() {
                     </span>
                   </div>
                   <span className="text-xs text-muted-foreground">
-                    {t.created_at.replace("T", " ").slice(0, 19)}
+                    {fmtFullCst(t.created_at)}
                   </span>
                 </div>
 

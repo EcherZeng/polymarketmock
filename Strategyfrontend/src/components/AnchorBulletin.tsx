@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import type { PricePoint } from "@/types"
+import { fmtTimeCst, fmtDateTimeCst } from "@/lib/utils"
 
 interface AnchorBulletinProps {
   priceCurve: PricePoint[]
@@ -308,7 +309,7 @@ export default function AnchorBulletin({ priceCurve }: AnchorBulletinProps) {
                     <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
                     <XAxis
                       dataKey="timestamp"
-                      tickFormatter={(v: string) => v.slice(11, 19)}
+                      tickFormatter={(v: string) => fmtTimeCst(v)}
                       tick={{ fontSize: 10 }}
                       interval="preserveStartEnd"
                     />
@@ -319,7 +320,7 @@ export default function AnchorBulletin({ priceCurve }: AnchorBulletinProps) {
                       width={50}
                     />
                     <Tooltip
-                      labelFormatter={(v) => String(v).slice(0, 19).replace("T", " ")}
+                      labelFormatter={(v) => fmtDateTimeCst(String(v))}
                       formatter={(value, name) => {
                         const labels: Record<string, string> = {
                           mid: "Mid Price",

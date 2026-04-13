@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useParams, Link, useNavigate } from "react-router-dom"
 import { useMemo, useState } from "react"
-import { cn } from "@/lib/utils"
+import { cn, fmtFullCst } from "@/lib/utils"
 import {
   fetchPortfolio,
   fetchPortfolios,
@@ -262,7 +262,7 @@ export default function PortfolioDetailPage() {
                 : `${portfolio.items.length} 条数据源`}
             </span>
             <span>·</span>
-            <span>创建于 {portfolio.created_at.replace("T", " ").slice(0, 19)}</span>
+            <span>创建于 {fmtFullCst(portfolio.created_at)}</span>
             {portfolio.is_container && (
               <>
                 <span>·</span>

@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils"
+import { cn, fmtTimeCst } from "@/lib/utils"
 import type { TradeRecord } from "@/types"
 
 interface TradesTableProps {
@@ -26,7 +26,7 @@ export default function TradesTable({ trades }: TradesTableProps) {
           {trades.map((t, i) => (
             <tr key={i} className="border-b hover:bg-muted/30">
               <td className="px-2 py-1.5 text-xs text-muted-foreground">{i + 1}</td>
-              <td className="px-2 py-1.5 text-xs">{t.timestamp.slice(11, 19)}</td>
+              <td className="px-2 py-1.5 text-xs">{fmtTimeCst(t.timestamp)}</td>
               <td className="px-2 py-1.5">
                 <span
                   className={cn(

@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 import api.state as state
 from api.result_store import sanitize_floats
 from core.btc_data import fetch_btc_klines
+from core.types import parse_slug_window
 
 logger = logging.getLogger(__name__)
 
@@ -332,15 +333,26 @@ async def get_btc_klines(session_id: str):
     if result is None:
         raise HTTPException(status_code=404, detail="Result not found")
 
-    # Determine time range from equity_curve or price_curve
-    equity_curve = result.get("equity_curve", [])
-    price_curve = result.get("price_curve", [])
-    source = equity_curve if equity_curve else price_curve
-    if not source:
-        raise HTTPException(status_code=400, detail="No time series data in result")
+    # Determine time range: prefer slug-derived window, fall back to data timestamps
+    slug_start = result.get("slug_start", "")
+    slug_end = result.get("slug_end", "")
+    if not slug_start or not slug_end:
+        slug_window = parse_slug_window(result.get("slug", ""))
+        if slug_window:
+            slug_start, slug_end = slug_window
 
-    start_ts = source[0]["timestamp"]
-    end_ts = source[-1]["timestamp"]
+    if slug_start and slug_end:
+        start_ts = slug_start
+        end_ts = slug_end
+    else:
+        # Fallback: use actual data timestamps
+        equity_curve = result.get("equity_curve", [])
+        price_curve = result.get("price_curve", [])
+        source = equity_curve if equity_curve else price_curve
+        if not source:
+            raise HTTPException(status_code=400, detail="No time series data in result")
+        start_ts = source[0]["timestamp"]
+        end_ts = source[-1]["timestamp"]
 
     # Fetch from Binance via shared module
     try:

@@ -2,7 +2,30 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+
+
+# ── Slug time window ─────────────────────────────────────────────────────────
+
+_BTC_SLUG_RE = re.compile(r"^btc-updown-(\d+)m-(\d+)$")
+
+
+def parse_slug_window(slug: str) -> tuple[str, str] | None:
+    """Extract (start_iso, end_iso) from a slug like ``btc-updown-15m-1775532600``.
+
+    Returns ISO 8601 UTC strings, or *None* if the slug doesn't match the
+    expected format.
+    """
+    m = _BTC_SLUG_RE.match(slug)
+    if not m:
+        return None
+    interval_min = int(m.group(1))
+    epoch = int(m.group(2))
+    start_dt = datetime.fromtimestamp(epoch, tz=timezone.utc)
+    end_dt = datetime.fromtimestamp(epoch + interval_min * 60, tz=timezone.utc)
+    return start_dt.isoformat(), end_dt.isoformat()
 
 
 # ── Param guard ──────────────────────────────────────────────────────────────
@@ -217,3 +240,7 @@ class BacktestSession:
 
     # BTC trend filter result
     btc_trend_info: dict | None = None
+
+    # Slug-derived session window (ISO UTC)
+    slug_start: str = ""
+    slug_end: str = ""

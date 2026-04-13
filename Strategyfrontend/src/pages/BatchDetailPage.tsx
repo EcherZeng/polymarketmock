@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useParams, Link, useNavigate } from "react-router-dom"
 import { useMemo, useState } from "react"
-import { cn, fmtTimeCst } from "@/lib/utils"
+import { cn, fmtTimeCst, fmtFullCst } from "@/lib/utils"
 import { fetchBatchTask, cancelBatch, cleanupByBatch } from "@/api/client"
 import { Checkbox } from "@/components/ui/checkbox"
 import AddToPortfolioDialog from "@/components/AddToPortfolioDialog"
@@ -203,7 +203,7 @@ export default function BatchDetailPage() {
             <span>·</span>
             <span>策略: <span className="font-medium text-foreground">{task.strategy}</span></span>
             <span>·</span>
-            <span>{task.created_at.replace("T", " ").slice(0, 19)}</span>
+            <span>{fmtFullCst(task.created_at)}</span>
           </div>
         </div>
         <div className="flex gap-2">

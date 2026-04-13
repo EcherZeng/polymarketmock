@@ -2,6 +2,7 @@ import { useParams, Link } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { fetchResult, fetchBtcKlines } from "@/api/client"
 import type { BacktestResult, BtcKlineResponse } from "@/types"
+import { fmtFullCst } from "@/lib/utils"
 import MetricsPanel from "@/components/MetricsPanel"
 import EquityCurveChart from "@/components/EquityCurveChart"
 import PriceChart from "@/components/PriceChart"
@@ -55,7 +56,7 @@ export default function ResultDetailPage() {
             <span>·</span>
             <span>耗时: {result.duration_seconds.toFixed(2)}s</span>
             <span>·</span>
-            <span>{result.created_at.slice(0, 19).replace("T", " ")}</span>
+            <span>{fmtFullCst(result.created_at)}</span>
           </div>
         </div>
         <div className="text-right">
