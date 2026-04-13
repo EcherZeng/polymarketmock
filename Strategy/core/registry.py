@@ -140,11 +140,12 @@ class StrategyRegistry:
         for key, meta in schema.items():
             if key not in result:
                 continue  # param not active — don't inject
-            toggle_key = meta.get("depends_on")
-            if not toggle_key:
+            raw_dep = meta.get("depends_on")
+            if not raw_dep:
                 continue
-            # Toggle is OFF → force disable_value
-            if not result.get(toggle_key):
+            toggle_keys = raw_dep if isinstance(raw_dep, list) else [raw_dep]
+            # Toggle is OFF → force disable_value (all deps must be present and truthy)
+            if not all(result.get(tk) for tk in toggle_keys):
                 disable_val = meta.get("disable_value")
                 if disable_val is not None:
                     result[key] = disable_val
