@@ -15,7 +15,7 @@ from core.btc_data import fetch_btc_klines
 from core.data_loader import load_archive
 from core.evaluator import compute_drawdown_curve, compute_drawdown_events, evaluate
 from core.runner import run_backtest
-from core.types import BacktestSession
+from core.types import BacktestSession, param_active
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ async def run_single(req: RunRequest):
 
     # Pre-fetch BTC klines if btc_trend_enabled is active
     btc_klines: list[dict] | None = None
-    if req.config.get("btc_trend_enabled"):
+    if param_active(req.config, "btc_trend_enabled") and req.config.get("btc_trend_enabled"):
         try:
             data = await asyncio.to_thread(load_archive, config.data_dir, req.slug)
             # Collect all timestamps to determine time range

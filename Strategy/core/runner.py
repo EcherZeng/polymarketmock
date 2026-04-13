@@ -162,6 +162,14 @@ def run_backtest(
 
     logger.info("Backtest %s: time grid %d ticks (%s → %s)", session_id, total_ticks, time_grid[0], time_grid[-1])
 
+    # ── Merge config (must happen before any param_active checks) ────────
+    default_config = registry.get_default_config(strategy_name)
+    if user_config:
+        merged_config = {k: user_config.get(k, default_config.get(k)) for k in user_config}
+    else:
+        merged_config = dict(default_config)
+    merged_config = registry.normalize_config(merged_config)
+
     # ── BTC trend filter ─────────────────────────────────────────────────
     btc_trend_info: dict | None = None
     btc_trend_pass = True  # default: allow entry
@@ -221,16 +229,6 @@ def run_backtest(
     last_trade_prices: dict[str, float] = {tid: 0.0 for tid in token_ids}
 
     # Init strategy
-    # If user_config is non-empty, it defines exactly which params are active
-    # (frontend filters to activeParams only).  Merge with defaults to fill
-    # values the user DID provide, then strip keys the user didn't send so
-    # that param_active() correctly skips deactivated branches.
-    default_config = registry.get_default_config(strategy_name)
-    if user_config:
-        merged_config = {k: user_config.get(k, default_config.get(k)) for k in user_config}
-    else:
-        merged_config = dict(default_config)
-    merged_config = registry.normalize_config(merged_config)
     try:
         strategy.on_init(merged_config)
     except Exception as e:

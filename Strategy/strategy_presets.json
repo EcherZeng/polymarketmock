@@ -220,8 +220,8 @@
         "en": "BTC Trend Window 2"
       },
       "desc": {
-        "zh": "第二段趋势检测窗口时长（分钟）。紧接窗口1之后的N分钟，用于计算第二段涨跌幅 a2。",
-        "en": "Duration (minutes) of the second trend detection window following window 1. Used to compute the second price change ratio a2."
+        "zh": "第二段趋势检测窗口时长（分钟）。紧接窗口1之后的N分钟，用于计算第二段涨跌幅 a2。必须大于窗口1的值。",
+        "en": "Duration (minutes) of the second trend detection window following window 1. Used to compute the second price change ratio a2. Must be greater than window 1."
       },
       "type": "int",
       "min": 1,
@@ -229,8 +229,8 @@
       "step": 1,
       "unit": "分钟",
       "scope": "unified",
-      "depends_on": "btc_trend_enabled",
-      "default": 5
+      "depends_on": "btc_trend_window_1",
+      "default": 10
     },
     "btc_min_momentum": {
       "group": "extra",
@@ -241,8 +241,8 @@
         "en": "BTC Min Momentum"
       },
       "desc": {
-        "zh": "BTC两段涨跌幅之和的绝对值 |a1+a2| 必须大于此阈值才允许入场。值越大，仅允许更强的趋势通过；值越小，弱趋势也可入场。",
-        "en": "The absolute sum |a1+a2| of the two BTC price change ratios must exceed this threshold to allow entry. Higher values filter out weak trends."
+        "zh": "BTC两段涨跌幅之和的绝对值 |a1+a2| 必须大于此阈值才允许入场。值越大，仅允许更强的趋势通过；值越小，弱趋势也可入场。依赖窗口1和窗口2。",
+        "en": "The absolute sum |a1+a2| of the two BTC price change ratios must exceed this threshold to allow entry. Higher values filter out weak trends. Requires both trend windows."
       },
       "type": "float",
       "min": 0,
@@ -250,7 +250,7 @@
       "step": 0.001,
       "unit": "",
       "scope": "unified",
-      "depends_on": "btc_trend_enabled",
+      "depends_on": "btc_trend_window_2",
       "default": 0.001
     }
   },
@@ -271,8 +271,8 @@
       "order": 5
     },
     "extra": {
-      "zh": "额外参数",
-      "en": "Extra Parameters",
+      "zh": "BTC 短线配置",
+      "en": "BTC Short-term Config",
       "order": 6
     }
   },

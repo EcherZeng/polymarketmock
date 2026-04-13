@@ -209,7 +209,22 @@ export default function AiOptimizePage() {
     if (!selectedStrategy || !selectedPortfolio || portfolioSlugs.length === 0) return
     if (!llmModel) return
 
-    const baseConfig = activeStrategy?.default_config ?? {}
+    const fullConfig = activeStrategy?.default_config ?? {}
+
+    // Filter active params: exclude bool toggles that are OFF and their dependent children
+    const disabledToggles = new Set(
+      Object.entries(paramSchema)
+        .filter(([k, s]) => s.type === "bool" && k in fullConfig && !fullConfig[k])
+        .map(([k]) => k),
+    )
+    const activeKeys = Object.keys(fullConfig).filter((k) => {
+      if (disabledToggles.has(k)) return false
+      const info = paramSchema[k]
+      if (info?.depends_on && disabledToggles.has(info.depends_on)) return false
+      return true
+    })
+    const baseConfig: Record<string, unknown> = {}
+    for (const k of activeKeys) baseConfig[k] = fullConfig[k]
 
     const req: AiOptimizeRequest = {
       strategy: selectedStrategy,
@@ -220,7 +235,7 @@ export default function AiOptimizePage() {
       runs_per_round: runsPerRound,
       initial_balance: balance,
       param_keys: [...selectedParamKeys],
-      active_params: Object.keys(baseConfig),
+      active_params: activeKeys,
       llm_model: llmModel,
     }
 

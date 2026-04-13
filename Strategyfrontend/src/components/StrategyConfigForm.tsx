@@ -296,7 +296,22 @@ export default function StrategyConfigForm({
     if (schema.type === "bool") {
       onChange({ ...values, [key]: raw as boolean })
     } else {
-      onChange({ ...values, [key]: Number(raw) })
+      const num = Number(raw)
+      const updated = { ...values, [key]: num }
+
+      // Cross-validation: btc_trend_window_2 must be > btc_trend_window_1
+      if (key === "btc_trend_window_1" && "btc_trend_window_2" in updated) {
+        if ((updated.btc_trend_window_2 as number) <= num) {
+          updated.btc_trend_window_2 = Math.min(num + 1, 10)
+        }
+      }
+      if (key === "btc_trend_window_2" && "btc_trend_window_1" in updated) {
+        if (num <= (updated.btc_trend_window_1 as number)) {
+          updated[key] = Math.min((updated.btc_trend_window_1 as number) + 1, 10)
+        }
+      }
+
+      onChange(updated)
     }
   }
 
@@ -379,11 +394,23 @@ export default function StrategyConfigForm({
           const rootParams = params.filter(p => !p.schema.depends_on)
           const childParams = params.filter(p => !!p.schema.depends_on)
 
+          // Build lookup for direct children
           const childrenByParent = new Map<string, GroupedParam[]>()
           for (const cp of childParams) {
             const parent = cp.schema.depends_on!
             if (!childrenByParent.has(parent)) childrenByParent.set(parent, [])
             childrenByParent.get(parent)!.push(cp)
+          }
+
+          // Collect all descendants (flattened) for multi-level deps
+          function collectDescendants(parentKey: string): GroupedParam[] {
+            const direct = childrenByParent.get(parentKey) ?? []
+            const all: GroupedParam[] = []
+            for (const c of direct) {
+              all.push(c)
+              all.push(...collectDescendants(c.key))
+            }
+            return all
           }
 
           return (
@@ -393,15 +420,15 @@ export default function StrategyConfigForm({
               </h3>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {rootParams.map(({ key, schema }) => {
-                  const children = childrenByParent.get(key)
-                  if (children && children.length > 0) {
+                  const allDescendants = collectDescendants(key)
+                  if (allDescendants.length > 0) {
                     return (
                       <div key={key} className="col-span-full flex flex-col gap-2 rounded-md border bg-muted/10 p-3">
                         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                           {renderParamInput(key, schema)}
                         </div>
                         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 border-t border-dashed pt-2">
-                          {children.map(({ key: ck, schema: cs }) => renderParamInput(ck, cs))}
+                          {allDescendants.map(({ key: ck, schema: cs }) => renderParamInput(ck, cs))}
                         </div>
                       </div>
                     )
