@@ -1,7 +1,7 @@
 import { useParams, Link } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { fetchResult, fetchBtcKlines } from "@/api/client"
-import type { BacktestResult, BtcKlineResponse, BtcTrendInfo } from "@/types"
+import type { BacktestResult, BtcKlineResponse } from "@/types"
 import MetricsPanel from "@/components/MetricsPanel"
 import EquityCurveChart from "@/components/EquityCurveChart"
 import PriceChart from "@/components/PriceChart"
