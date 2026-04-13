@@ -21,6 +21,7 @@ import PositionTable from "@/components/PositionTable"
 import TradeHistory from "@/components/TradeHistory"
 import { fetchMarket, searchEvents, resolveSlug, fetchBtcMarkets, fetchAutoRecordConfig, updateAutoRecordConfig } from "@/api/client"
 import type { Market, MarketEvent, AutoRecordConfig, AutoRecordState } from "@/types"
+import { fmtTimeShortCst } from "@/lib/utils"
 
 /** Parse clobTokenIds — handles both array and legacy JSON-string format. */
 function parseTokenIds(raw: unknown): string[] {
@@ -360,13 +361,10 @@ function parsePrices(raw: unknown): string[] {
   return []
 }
 
-/** Format eventStartTime to short local time string. */
+/** Format eventStartTime to short time string in UTC+8. */
 function fmtTime(iso: string | undefined): string {
   if (!iso) return ""
-  try {
-    const d = new Date(iso)
-    return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })
-  } catch { return "" }
+  return fmtTimeShortCst(iso)
 }
 
 interface BtcMarketPanelProps {

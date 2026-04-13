@@ -21,17 +21,10 @@ interface ReplayControlsProps {
   onSpeedChange: (speed: string) => void
 }
 
+import { fmtTimeCst } from "@/lib/utils"
+
 function fmtTs(iso: string): string {
-  try {
-    return new Date(iso).toLocaleTimeString("zh-CN", {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    })
-  } catch {
-    return iso
-  }
+  return fmtTimeCst(iso)
 }
 
 export default function ReplayControls({

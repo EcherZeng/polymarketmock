@@ -1,5 +1,5 @@
 import type { DrawdownEvent } from "@/types"
-import { cn } from "@/lib/utils"
+import { cn, fmtTimeCst } from "@/lib/utils"
 
 interface DrawdownTableProps {
   events: DrawdownEvent[]
@@ -7,7 +7,7 @@ interface DrawdownTableProps {
 
 function formatTime(iso: string | null): string {
   if (!iso) return "—"
-  return iso.slice(11, 19)
+  return fmtTimeCst(iso) || iso.slice(11, 19)
 }
 
 function formatDuration(seconds: number | null): string {

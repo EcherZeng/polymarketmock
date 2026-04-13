@@ -16,6 +16,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { fetchTradeHistory } from "@/api/client"
+import { fmtTimeCst } from "@/lib/utils"
 
 export default function TradeHistory() {
   const { data, isLoading } = useQuery({
@@ -65,7 +66,7 @@ export default function TradeHistory() {
               {trades.map((t) => (
                 <TableRow key={t.order_id}>
                   <TableCell className="text-xs text-muted-foreground">
-                    {new Date(t.timestamp).toLocaleTimeString()}
+                    {fmtTimeCst(t.timestamp)}
                   </TableCell>
                   <TableCell className="text-xs">
                     <Badge variant={t.side === "BUY" ? "default" : "secondary"}>

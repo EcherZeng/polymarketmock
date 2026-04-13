@@ -35,17 +35,11 @@ function fmtVolume(v: number): string {
   return `$${v.toFixed(0)}`
 }
 
+import { fmtTimeShortCst } from "@/lib/utils"
+
 function fmtTime(iso: string | undefined): string {
   if (!iso) return ""
-  try {
-    return new Date(iso).toLocaleTimeString("zh-CN", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    })
-  } catch {
-    return ""
-  }
+  return fmtTimeShortCst(iso)
 }
 
 const STATUS_BADGE: Record<

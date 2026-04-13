@@ -32,16 +32,14 @@ interface CandleData {
   wickHigh: number
 }
 
+import { fmtMsTimeCst, fmtMsDateTimeCst } from "@/lib/utils"
+
 function formatTime(ms: number): string {
-  const d = new Date(ms)
-  const hh = String(d.getHours()).padStart(2, "0")
-  const mm = String(d.getMinutes()).padStart(2, "0")
-  return `${hh}:${mm}`
+  return fmtMsTimeCst(ms)
 }
 
 function formatDate(ms: number): string {
-  const d = new Date(ms)
-  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`
+  return fmtMsDateTimeCst(ms)
 }
 
 type ViewMode = "candle" | "volume"

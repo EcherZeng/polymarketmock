@@ -50,20 +50,10 @@ function parseSessionType(slug: string): "5m" | "15m" | "other" {
   return "other"
 }
 
+import { fmtDateTimeCst } from "@/lib/utils"
+
 function fmtDateTime(iso: string): string {
-  if (!iso) return "—"
-  try {
-    return new Date(iso).toLocaleString("zh-CN", {
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    })
-  } catch {
-    return iso
-  }
+  return fmtDateTimeCst(iso)
 }
 
 function fmtDuration(start: string, end: string): string {

@@ -17,6 +17,7 @@ import ActivityFeed from "@/components/ActivityFeed"
 import useMarketWebSocket from "@/hooks/useMarketWebSocket"
 import { resolveSlug, fetchEventStatus, fetchNextEvent, watchEvent, recordingHeartbeat } from "@/api/client"
 import type { Market, MarketEvent, EventStatusResponse, NextEventResponse } from "@/types"
+import { fmtFullCst } from "@/lib/utils"
 
 function parseTokenIds(raw: unknown): string[] {
   if (Array.isArray(raw)) return raw.filter(Boolean)
@@ -255,7 +256,7 @@ export default function EventDetailPage() {
               🏁 本场已结束
               {eventStatus?.ended_at && (
                 <span className="ml-2 text-muted-foreground text-xs">
-                  {new Date(eventStatus.ended_at).toLocaleString("zh-CN")}
+                  {fmtFullCst(eventStatus.ended_at)}
                 </span>
               )}
             </span>

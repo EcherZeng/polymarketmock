@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState, useMemo } from "react"
 import { Link } from "react-router-dom"
-import { cn } from "@/lib/utils"
+import { cn, fmtFullCst } from "@/lib/utils"
 import {
   fetchResultsStats,
   cleanupResultsBulk,
@@ -17,11 +17,7 @@ function fmtSize(kb: number) {
 
 function fmtTime(iso: string) {
   if (!iso) return "—"
-  try {
-    return new Date(iso).toLocaleString("zh-CN", { hour12: false })
-  } catch {
-    return iso.slice(0, 19)
-  }
+  return fmtFullCst(iso)
 }
 
 function fmtPct(v: number) {

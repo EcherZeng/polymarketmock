@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { fetchTradeHistory, fetchBacktestMarkets } from "@/api/client"
+import { fmtFullCst } from "@/lib/utils"
 
 export default function HistoryPage() {
   const [offset, setOffset] = useState(0)
@@ -69,7 +70,7 @@ export default function HistoryPage() {
                   {trades.map((t) => (
                     <TableRow key={t.order_id}>
                       <TableCell className="text-xs">
-                        {new Date(t.timestamp).toLocaleString()}
+                        {fmtFullCst(t.timestamp)}
                       </TableCell>
                       <TableCell className="text-xs font-mono max-w-20 truncate">
                         {t.order_id.slice(0, 8)}…
