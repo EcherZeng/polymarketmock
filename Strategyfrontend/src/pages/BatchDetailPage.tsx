@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useParams, Link, useNavigate } from "react-router-dom"
 import { useMemo, useState } from "react"
-import { cn } from "@/lib/utils"
+import { cn, fmtTimeCst } from "@/lib/utils"
 import { fetchBatchTask, cancelBatch, cleanupByBatch } from "@/api/client"
 import { Checkbox } from "@/components/ui/checkbox"
 import AddToPortfolioDialog from "@/components/AddToPortfolioDialog"
@@ -411,7 +411,7 @@ export default function BatchDetailPage() {
                                 </span>
                               )}
                               <span className="text-muted-foreground">
-                                {step.timestamp.slice(11, 19)}
+                                {fmtTimeCst(step.timestamp)}
                               </span>
                             </div>
                             {step.message && (

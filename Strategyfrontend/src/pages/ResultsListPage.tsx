@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
-import { cn } from "@/lib/utils"
+import { cn, fmtDateTimeCst } from "@/lib/utils"
 import { fetchResults, deleteResult, clearResults } from "@/api/client"
 import type { BacktestResultSummary } from "@/types"
 import { useState, useMemo } from "react"
@@ -143,7 +143,7 @@ export default function ResultsListPage() {
                   <td className="px-3 py-2">{r.metrics.total_trades}</td>
                   <td className="px-3 py-2">{(r.metrics.max_drawdown * 100).toFixed(2)}%</td>
                   <td className="px-3 py-2 text-xs text-muted-foreground">
-                    {r.created_at.slice(0, 19).replace("T", " ")}
+                    {fmtDateTimeCst(r.created_at)}
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-2">

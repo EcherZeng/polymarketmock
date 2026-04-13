@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { cn } from "@/lib/utils"
+import { cn, fmtDateTimeCst } from "@/lib/utils"
 import {
   Dialog,
   DialogContent,
@@ -329,7 +329,7 @@ export default function AddItemsToPortfolioDialog({
                     </div>
                     <div className="text-right text-xs text-muted-foreground">
                       <div>{t.completed}/{t.total} 完成</div>
-                      <div>{t.created_at.replace("T", " ").slice(0, 16)}</div>
+                      <div>{fmtDateTimeCst(t.created_at)}</div>
                     </div>
                   </button>
                 ))

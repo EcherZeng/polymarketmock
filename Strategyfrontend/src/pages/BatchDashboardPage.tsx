@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useMemo } from "react"
 import { Link } from "react-router-dom"
-import { cn } from "@/lib/utils"
+import { cn, fmtDateTimeCst } from "@/lib/utils"
 import { fetchBatchTasks, cancelBatch } from "@/api/client"
 import type { BatchTask } from "@/types"
 
@@ -84,7 +84,7 @@ export default function BatchDashboardPage() {
                     </span>
                   </div>
                   <span className="text-xs text-muted-foreground">
-                    {t.created_at.replace("T", " ").slice(0, 19)}
+                    {fmtDateTimeCst(t.created_at)}
                   </span>
                 </div>
 

@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
-import { cn } from "@/lib/utils"
+import { cn, fmtDateTimeCst } from "@/lib/utils"
 import {
   fetchStrategies,
   fetchArchives,
@@ -168,7 +168,7 @@ export default function StrategyPage() {
     }
     const sorted = [...list]
     if (archiveSort === "time") {
-      sorted.sort((a, b) => (b.time_range?.end ?? "").localeCompare(a.time_range?.end ?? ""))
+      sorted.sort((a, b) => (b.time_range?.start ?? "").localeCompare(a.time_range?.start ?? ""))
     } else {
       sorted.sort((a, b) => a.slug.localeCompare(b.slug))
     }
@@ -685,7 +685,7 @@ export default function StrategyPage() {
                         {a.time_range.start && (
                           <>
                             <span>·</span>
-                            <span>{a.time_range.start.slice(11, 19)}</span>
+                            <span>{fmtDateTimeCst(a.time_range.start)}</span>
                           </>
                         )}
                       </div>
