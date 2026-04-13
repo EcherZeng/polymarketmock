@@ -143,24 +143,32 @@ function ParamInfoPopup({ schema }: { schema: ParamSchemaItem }) {
   )
 }
 
-// ── Dependency helpers ──────────────────────────────────────────────────────
+// ── Dependency helpers (DAG: depends_on supports string | string[]) ─────────
+
+/** Normalise depends_on to an array. */
+function normaliseDeps(deps: string | string[] | undefined): string[] {
+  if (!deps) return []
+  return Array.isArray(deps) ? deps : [deps]
+}
 
 interface DepGraph {
   parentToChildren: Map<string, string[]>
-  childToParent: Map<string, string>
+  childToParents: Map<string, string[]>
 }
 
 function buildDepGraph(schema: Record<string, ParamSchemaItem>): DepGraph {
   const parentToChildren = new Map<string, string[]>()
-  const childToParent = new Map<string, string>()
+  const childToParents = new Map<string, string[]>()
   for (const [key, s] of Object.entries(schema)) {
-    if (s.depends_on && s.depends_on in schema) {
-      childToParent.set(key, s.depends_on)
-      if (!parentToChildren.has(s.depends_on)) parentToChildren.set(s.depends_on, [])
-      parentToChildren.get(s.depends_on)!.push(key)
+    const parents = normaliseDeps(s.depends_on).filter(p => p in schema)
+    if (parents.length === 0) continue
+    childToParents.set(key, parents)
+    for (const parent of parents) {
+      if (!parentToChildren.has(parent)) parentToChildren.set(parent, [])
+      parentToChildren.get(parent)!.push(key)
     }
   }
-  return { parentToChildren, childToParent }
+  return { parentToChildren, childToParents }
 }
 
 function getDescendants(key: string, graph: DepGraph): string[] {
@@ -175,10 +183,14 @@ function getDescendants(key: string, graph: DepGraph): string[] {
 
 function getAncestors(key: string, graph: DepGraph): string[] {
   const result: string[] = []
-  let current = graph.childToParent.get(key)
-  while (current) {
+  const visited = new Set<string>()
+  const queue = [...(graph.childToParents.get(key) ?? [])]
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    if (visited.has(current)) continue
+    visited.add(current)
     result.push(current)
-    current = graph.childToParent.get(current)
+    queue.push(...(graph.childToParents.get(current) ?? []))
   }
   return result
 }
@@ -226,7 +238,9 @@ export default function StrategyConfigForm({
 
       const isActive = activeParams?.has(key) ?? true
       if (isActive) {
-        if (schema.depends_on && !activeParams?.has(schema.depends_on)) continue
+        // Skip child params whose ALL parents are inactive
+        const parents = normaliseDeps(schema.depends_on)
+        if (parents.length > 0 && !parents.some(p => activeParams?.has(p))) continue
         if (!activeMap.has(group)) activeMap.set(group, [])
         activeMap.get(group)!.push({ key, schema })
       } else {
@@ -303,16 +317,19 @@ export default function StrategyConfigForm({
     delete updatedValues[key]
 
     // Walk up ancestors: remove pool_hidden ones that have no remaining active children
-    let ancestor = depGraph.childToParent.get(key)
-    while (ancestor) {
-      const ancestorSchema = paramSchema[ancestor]
-      if (!ancestorSchema?.pool_hidden) break
-      const siblings = depGraph.parentToChildren.get(ancestor) ?? []
-      if (siblings.some((c) => next.has(c))) break
-      next.delete(ancestor)
-      delete updatedValues[ancestor]
-      ancestor = depGraph.childToParent.get(ancestor)
+    function cleanupPoolHiddenAncestors(removedKey: string) {
+      const parents = depGraph.childToParents.get(removedKey) ?? []
+      for (const parent of parents) {
+        const parentSchema = paramSchema[parent]
+        if (!parentSchema?.pool_hidden) continue
+        const children = depGraph.parentToChildren.get(parent) ?? []
+        if (children.some(c => next.has(c))) continue
+        next.delete(parent)
+        delete updatedValues[parent]
+        cleanupPoolHiddenAncestors(parent)
+      }
     }
+    cleanupPoolHiddenAncestors(key)
 
     onChange(updatedValues)
     onActiveParamsChange(next)
@@ -417,15 +434,16 @@ export default function StrategyConfigForm({
           const groupDef = paramGroups[groupKey]
           const groupLabel = groupDef ? t(groupDef) : groupKey
 
-          const rootParams = params.filter(p => !p.schema.depends_on)
-          const childParams = params.filter(p => !!p.schema.depends_on)
+          const rootParams = params.filter(p => normaliseDeps(p.schema.depends_on).length === 0)
+          const childParams = params.filter(p => normaliseDeps(p.schema.depends_on).length > 0)
 
-          // Build lookup for direct children
+          // Build lookup for direct children — assign each child to its first active parent for display
           const childrenByParent = new Map<string, GroupedParam[]>()
           for (const cp of childParams) {
-            const parent = cp.schema.depends_on!
-            if (!childrenByParent.has(parent)) childrenByParent.set(parent, [])
-            childrenByParent.get(parent)!.push(cp)
+            const parents = normaliseDeps(cp.schema.depends_on)
+            const displayParent = parents.find(p => activeParams?.has(p)) ?? parents[0]
+            if (!childrenByParent.has(displayParent)) childrenByParent.set(displayParent, [])
+            childrenByParent.get(displayParent)!.push(cp)
           }
 
           // Collect all descendants (flattened) for multi-level deps
