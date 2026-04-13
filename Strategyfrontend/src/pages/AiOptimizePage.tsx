@@ -135,7 +135,8 @@ export default function AiOptimizePage() {
         if (info.pool_hidden) return false
         if (!strategyKeys.has(key)) return false
         // Exclude child params whose parent toggle is off
-        if (info.depends_on && toggleOffKeys.has(info.depends_on)) return false
+        const deps = info.depends_on ? (Array.isArray(info.depends_on) ? info.depends_on : [info.depends_on]) : []
+        if (deps.some(d => toggleOffKeys.has(d))) return false
         return true
       })
       .map(([key, info]) => ({ key, ...info }))
@@ -183,7 +184,8 @@ export default function AiOptimizePage() {
         if (info.type === "bool") return false
         if (info.pool_hidden) return false
         if (!strategyKeys.has(key)) return false
-        if (info.depends_on && toggleOffKeys.has(info.depends_on)) return false
+        const deps = info.depends_on ? (Array.isArray(info.depends_on) ? info.depends_on : [info.depends_on]) : []
+        if (deps.some(d => toggleOffKeys.has(d))) return false
         return true
       })
       .map(([key, info]) => ({ key, ...info }))
@@ -216,7 +218,8 @@ export default function AiOptimizePage() {
     const activeKeys = Object.keys(fullConfig).filter((k) => {
       if (disabledToggles.has(k)) return false
       const info = paramSchema[k]
-      if (info?.depends_on && disabledToggles.has(info.depends_on)) return false
+      const deps = info?.depends_on ? (Array.isArray(info.depends_on) ? info.depends_on : [info.depends_on]) : []
+      if (deps.some(d => disabledToggles.has(d))) return false
       return true
     })
     const baseConfig: Record<string, unknown> = {}
