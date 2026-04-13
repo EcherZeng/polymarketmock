@@ -287,7 +287,7 @@ export default function StrategyConfigForm({
     onActiveParamsChange(next)
   }
 
-  // ── Remove with cascading children ────────────────────────────────────────
+  // ── Remove with cascading children + pool_hidden ancestor cleanup ────────
   function handleRemoveParam(key: string) {
     if (!activeParams || !onActiveParamsChange) return
     const next = new Set(activeParams)
@@ -301,6 +301,18 @@ export default function StrategyConfigForm({
 
     next.delete(key)
     delete updatedValues[key]
+
+    // Walk up ancestors: remove pool_hidden ones that have no remaining active children
+    let ancestor = depGraph.childToParent.get(key)
+    while (ancestor) {
+      const ancestorSchema = paramSchema[ancestor]
+      if (!ancestorSchema?.pool_hidden) break
+      const siblings = depGraph.parentToChildren.get(ancestor) ?? []
+      if (siblings.some((c) => next.has(c))) break
+      next.delete(ancestor)
+      delete updatedValues[ancestor]
+      ancestor = depGraph.childToParent.get(ancestor)
+    }
 
     onChange(updatedValues)
     onActiveParamsChange(next)

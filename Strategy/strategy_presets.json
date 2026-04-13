@@ -173,26 +173,6 @@
       "unit": "",
       "scope": "strategy"
     },
-    "btc_min_momentum": {
-      "group": "extra",
-      "visibility": "core",
-      "weight": "high",
-      "label": {
-        "zh": "BTC趋势过滤（最小动量阈值）",
-        "en": "BTC Trend Filter (Min Momentum)"
-      },
-      "desc": {
-        "zh": "启用BTC趋势过滤。回测前根据BTC价格的两段涨跌幅判断趋势方向和强度，|a1+a2| 必须大于此阈值才允许入场。值越大，仅允许更强的趋势通过。添加后可调整两个检测窗口时长。",
-        "en": "Enable BTC trend filter. Compute BTC price trend from two time windows before the session. |a1+a2| must exceed this threshold to allow entry. Higher values filter out weak trends. Both trend windows are auto-included and adjustable."
-      },
-      "type": "float",
-      "min": 0,
-      "max": 0.1,
-      "step": 0.001,
-      "unit": "",
-      "scope": "unified",
-      "default": 0.001
-    },
     "btc_trend_window_1": {
       "group": "extra",
       "visibility": "core",
@@ -212,7 +192,6 @@
       "step": 1,
       "unit": "分钟",
       "scope": "unified",
-      "depends_on": "btc_min_momentum",
       "default": 5
     },
     "btc_trend_window_2": {
@@ -234,8 +213,29 @@
       "step": 1,
       "unit": "分钟",
       "scope": "unified",
-      "depends_on": "btc_min_momentum",
+      "depends_on": "btc_trend_window_1",
       "default": 5
+    },
+    "btc_min_momentum": {
+      "group": "extra",
+      "visibility": "core",
+      "weight": "high",
+      "label": {
+        "zh": "BTC趋势过滤（最小动量阈值）",
+        "en": "BTC Trend Filter (Min Momentum)"
+      },
+      "desc": {
+        "zh": "启用BTC趋势过滤。回测前根据BTC价格的两段涨跌幅判断趋势方向和强度，|a1+a2| 必须大于此阈值才允许入场。值越大，仅允许更强的趋势通过。依赖两个检测窗口参数，添加时自动引入。",
+        "en": "Enable BTC trend filter. Compute BTC price trend from two time windows before the session. |a1+a2| must exceed this threshold to allow entry. Higher values filter out weak trends. Depends on both trend windows, which are auto-included."
+      },
+      "type": "float",
+      "min": 0,
+      "max": 0.1,
+      "step": 0.001,
+      "unit": "",
+      "scope": "unified",
+      "depends_on": "btc_trend_window_2",
+      "default": 0.001
     }
   },
   "param_groups": {
