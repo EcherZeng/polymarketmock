@@ -2,7 +2,7 @@
 
 通过 strategy_presets.json 中的参数存在性控制入场条件（选中即启用）:
   min_price               — 入场最低价格过滤
-  time_remaining_ratio    — 剩余时间比例门控
+  time_remaining_s        — 剩余时间门控（秒）
 
 仓位管理:
   position_min_pct / position_max_pct — 仓位比例区间
@@ -27,7 +27,7 @@ class UnifiedStrategy(UnifiedBaseStrategy):
         self._cfg = config
         # ── Price & time ── (None = filter disabled)
         self.min_price: float | None = config.get("min_price") if param_active(config, "min_price") else None
-        self.time_remaining_ratio: float | None = config.get("time_remaining_ratio") if param_active(config, "time_remaining_ratio") else None
+        self.time_remaining_s: int | None = int(config.get("time_remaining_s")) if param_active(config, "time_remaining_s") else None
 
         # ── Position sizing ──
         self.position_min_pct: float = config.get("position_min_pct", 0.10)
@@ -43,9 +43,9 @@ class UnifiedStrategy(UnifiedBaseStrategy):
             return []
 
         # 1. Time gate — skip if param not active
-        if self.time_remaining_ratio is not None:
-            remaining_ratio = (ctx.total_ticks - ctx.index) / ctx.total_ticks if ctx.total_ticks > 0 else 1.0
-            if remaining_ratio > self.time_remaining_ratio:
+        if self.time_remaining_s is not None:
+            remaining_seconds = ctx.total_ticks - ctx.index  # 1 tick ≈ 1 second
+            if remaining_seconds > self.time_remaining_s:
                 return []
 
         for token_id, snapshot in ctx.tokens.items():

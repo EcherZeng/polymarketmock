@@ -84,7 +84,7 @@ reverse_tick_window
 | 组 | 中文名 | 归档状态 |
 |---|---|---|
 | `risk` | 风控规则 | 部分归档（保留 take_profit_price、stop_loss_price、force_close_remaining_seconds） |
-| `entry` | 入场条件 | 部分归档（保留 min_price、time_remaining_ratio） |
+| `entry` | 入场条件 | 部分归档（保留 min_price、time_remaining_s） |
 | `momentum` | 动量检测 | 整组归档 |
 | `volatility` | 波动检测 | 整组归档 |
 | `position` | 仓位管理 | 保留（position_min_pct、position_max_pct） |

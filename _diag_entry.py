@@ -26,7 +26,7 @@ from core.runner import (
 # ── Test预设 当前参数 ────────────────────────────────────────────────────────
 PARAMS = {
     "min_price": 0.55,
-    "time_remaining_ratio": 0.5,
+    "time_remaining_s": 150,
     "momentum_window": 120,
     "momentum_min": 0.02,
     "use_momentum": True,
@@ -107,8 +107,8 @@ def simulate_slug(slug: str) -> dict:
                     price_history[tid] = price_history[tid][-app_config.price_history_window:]
 
         # time gate
-        remaining_ratio = (total_ticks - tick_idx) / total_ticks if total_ticks > 0 else 1.0
-        if remaining_ratio > p["time_remaining_ratio"]:
+        remaining_seconds = (total_ticks - tick_idx)  # 1 tick ≈ 1 second
+        if remaining_seconds > p["time_remaining_s"]:
             reject["time_gate"] += 1
             continue
 

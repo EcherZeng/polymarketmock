@@ -47,7 +47,7 @@ print(f"  use_std_check: {merged.get('use_std_check', 'NOT SET → defaults to T
 print(f"  use_drawdown_check: {merged.get('use_drawdown_check', 'NOT SET → defaults to True')}")
 print(f"  use_momentum_check: {merged.get('use_momentum_check', 'NOT SET → defaults to True')}")
 print(f"  min_price: {merged.get('min_price')}")
-print(f"  time_remaining_ratio: {merged.get('time_remaining_ratio')}")
+print(f"  time_remaining_s: {merged.get('time_remaining_s')}")
 print(f"  momentum_window: {merged.get('momentum_window')}")
 print(f"  momentum_min: {merged.get('momentum_min')}")
 print(f"  reverse_threshold: {merged.get('reverse_threshold')}")

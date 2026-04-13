@@ -24,7 +24,7 @@ SYSTEM_PROMPT = (
     "## 参数调优核心原则\n"
     "当前策略仅包含 7 个核心参数，分为风控、入场和仓位三组。\n"
     "- 首轮探索应使用宽松参数：先确保有足够交易次数（>=10 笔），再逐步收紧\n"
-    "- 如果上一轮 total_trades=0 或 <5，必须降低 min_price 或放宽 time_remaining_ratio\n"
+    "- 如果上一轮 total_trades=0 或 <5，必须降低 min_price 或增大 time_remaining_s\n"
     "- 每次只收紧 1-2 个参数，保持其他参数宽松\n\n"
     "## 参数权重体系\n"
     "每个参数标注了权重等级，表示该参数对 Polymarket 预测市场回测收益/本金安全的重要程度：\n"
@@ -43,8 +43,8 @@ SYSTEM_PROMPT = (
     "过大则单笔风险集中，过小则收益微薄。建议 0.2-0.5\n"
     "- 🟡 **force_close_remaining_seconds [0-300]** [medium]: 强制平仓剩余秒数。"
     "到期前预留的安全退出时间\n"
-    "- 🟡 **time_remaining_ratio [0-1.0]** [medium]: 剩余时间比例阈值。"
-    "控制在市场生命周期的哪个阶段开始允许入场\n"
+    "- 🟡 **time_remaining_s [0-86400]** [medium]: 剩余时间阈值（秒）。"
+    "控制在市场剩余多少秒时开始允许入场，1 tick ≈ 1 秒\n"
     "- 🟡 **position_min_pct [0.01-1.0]** [medium]: 最小仓位比例。"
     "高概率 token 利润空间小，需要较大仓位，建议 min≥0.1\n\n"
     "## 规则\n"
@@ -53,7 +53,7 @@ SYSTEM_PROMPT = (
     "3. 每轮给出简短的调整理由（reason 字段），**对 critical/high 权重参数的任何调整必须在 reason 中说明依据**\n"
     "4. 基于历史结果中表现好的参数方向进行收敛，但保持多样性探索\n"
     "5. 首轮用宽松参数，后续逐步收紧表现差的方向\n"
-    "6. 如果前几轮都是 0 交易，必须显著降低 min_price 或增大 time_remaining_ratio\n"
+    "6. 如果前几轮都是 0 交易，必须显著降低 min_price 或增大 time_remaining_s\n"
     "7. 每组参数之间应有差异性，避免生成雷同配置\n"
     "8. [权重约束] critical 参数每次调整幅度不超过当前值的 20%；"
     "high 参数不超过 30%；medium 参数可自由探索"
@@ -244,7 +244,7 @@ def _build_history_digest(
             f"[严重] {len(zero_trade)}/{total} 次回测产生 0 笔交易。",
             "过滤条件过严导致策略无法入场，必须显著放宽以下参数：",
             "- 降低 min_price（如 0.55）",
-            "- 增大 time_remaining_ratio（如 0.5+）",
+            "- 增大 time_remaining_s（如 150+）",
             "- 增大 position_max_pct（如 0.3+）",
         ])
 
@@ -363,7 +363,7 @@ def build_round_prompt(
             "",
             "## 无历史结果 (首轮探索)",
             "[重要] 首轮请使用偏宽松的参数组合，确保策略能产生交易。",
-            "建议：min_price≤0.60, time_remaining_ratio≥0.3, "
+            "建议：min_price≤0.60, time_remaining_s≥100, "
             "position_min_pct≥0.10, position_max_pct≥0.30",
         ])
 

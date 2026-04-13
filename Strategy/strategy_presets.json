@@ -101,28 +101,28 @@
       "unit": "",
       "scope": "strategy"
     },
-    "time_remaining_ratio": {
+    "time_remaining_s": {
       "group": "entry",
       "visibility": "core",
       "weight": "medium",
       "label": {
-        "zh": "剩余时间比例阈值",
-        "en": "Time Remaining Ratio"
+        "zh": "剩余时间阈值(秒)",
+        "en": "Time Remaining (s)"
       },
       "desc": {
-        "zh": "只允许在市场剩余时间比例（剩余 ticks / 总 ticks）低于此阈值时入场，避免在市场初期不确定性过高时进场。区间为 [0.0, 1.0]。",
-        "en": "Only allow entry when remaining time ratio (remaining ticks / total ticks) is below this threshold, avoiding early entry when uncertainty is high. Range [0.0, 1.0]."
+        "zh": "只允许在市场剩余时间（秒）低于此阈值时入场，避免在市场初期不确定性过高时进场。1 tick ≈ 1 秒。",
+        "en": "Only allow entry when remaining time (seconds) is below this threshold, avoiding early entry when uncertainty is high. 1 tick ≈ 1 second."
       },
-      "disable_value": 1,
+      "disable_value": 86400,
       "disable_note": {
-        "zh": "设为 1.0：剩余时间比例永远≤ 1.0，入场时间限制实际失效，任意时刻均可入场",
-        "en": "Set to 1.0: remaining ratio is always ≤ 1.0, time gate effectively disabled, entry allowed at any time"
+        "zh": "设为 86400（24小时）：剩余时间几乎不会超过此值，入场时间限制实际失效，任意时刻均可入场",
+        "en": "Set to 86400 (24h): remaining time rarely exceeds this, time gate effectively disabled, entry allowed at any time"
       },
-      "type": "float",
+      "type": "int",
       "min": 0,
-      "max": 1,
-      "step": 0.01,
-      "unit": "",
+      "max": 86400,
+      "step": 1,
+      "unit": "秒",
       "scope": "strategy"
     },
     "position_min_pct": {
