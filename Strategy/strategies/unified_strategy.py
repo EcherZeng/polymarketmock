@@ -3,6 +3,7 @@
 通过 strategy_presets.json 中的参数存在性控制入场条件（选中即启用）:
   min_price               — 入场最低价格过滤
   time_remaining_s        — 剩余时间门控（秒）
+  profit_margin           — 利润空间过滤（止盈目标与挂单价差值）
 
 仓位管理:
   position_min_pct / position_max_pct — 仓位比例区间
@@ -28,6 +29,7 @@ class UnifiedStrategy(UnifiedBaseStrategy):
         # ── Price & time ── (None = filter disabled)
         self.min_price: float | None = config.get("min_price") if param_active(config, "min_price") else None
         self.time_remaining_s: int | None = int(config.get("time_remaining_s")) if param_active(config, "time_remaining_s") else None
+        self.profit_margin: float | None = config.get("profit_margin") if param_active(config, "profit_margin") else None
 
         # ── Position sizing ──
         self.position_min_pct: float = config.get("position_min_pct", 0.10)
@@ -60,7 +62,14 @@ class UnifiedStrategy(UnifiedBaseStrategy):
             if self.min_price is not None and mid < self.min_price:
                 continue
 
-            # 3. Position sizing
+            # 3. Profit margin filter
+            if self.profit_margin is not None:
+                entry_ask = snapshot.best_ask if snapshot.best_ask > 0 else mid
+                tp_target = self._tp_price if self._tp_price is not None else 1.0
+                if abs(tp_target - entry_ask) < self.profit_margin:
+                    continue
+
+            # 4. Position sizing
             target_pct = (self.position_min_pct + self.position_max_pct) / 2
             buy_budget = ctx.balance * target_pct
             price_for_sizing = snapshot.best_ask if snapshot.best_ask > 0 else mid
