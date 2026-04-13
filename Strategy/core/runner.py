@@ -186,8 +186,6 @@ def run_backtest(
     balance = initial_balance
     positions: dict[str, float] = {tid: 0.0 for tid in token_ids}
 
-    # Price history for TickContext
-    price_history: dict[str, list[float]] = {tid: [] for tid in token_ids}
     recent_trades: list[dict] = []
 
     # Results
@@ -281,15 +279,6 @@ def run_backtest(
                 last_mid[tid] = snap.mid_price
             token_snapshots[tid] = snap
 
-        # 4.5) Forward-fill price_history: exactly 1 entry per tick per token
-        #       This ensures window params (momentum_window, volatility_window)
-        #       operate on second-aligned data, not sparse price events.
-        for tid in token_ids:
-            if last_mid[tid] > 0:
-                price_history[tid].append(last_mid[tid])
-                if len(price_history[tid]) > config.price_history_window:
-                    price_history[tid] = price_history[tid][-config.price_history_window:]
-
         # 5) Compute equity
         positions_value = sum(
             positions.get(tid, 0) * last_mid.get(tid, 0) for tid in token_ids
@@ -306,7 +295,6 @@ def run_backtest(
             positions=dict(positions),
             equity=round(equity, 6),
             initial_balance=initial_balance,
-            price_history={tid: list(h) for tid, h in price_history.items()},
             trade_history=recent_trades[-50:],
         )
 

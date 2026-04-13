@@ -1,15 +1,8 @@
 {
   "unified_rules": {
     "take_profit_price": 0.99,
-    "take_profit_pct": 0,
     "stop_loss_price": 0.65,
-    "stop_loss_pct": 0,
-    "force_close_remaining_seconds": 30,
-    "consecutive_loss_threshold": 3,
-    "loss_position_reduction_pct": 0.5,
-    "exit_use_orderbook_mode": false,
-    "exit_min_sell_price": 0.0,
-    "exit_reduction_pct": 1.0
+    "force_close_remaining_seconds": 30
   },
   "param_schema": {
     "take_profit_price": {
@@ -24,14 +17,14 @@
         "zh": "持仓标的中间价达到此价格时自动触发止盈平仓。价格区间为 [0.5, 1.0]。",
         "en": "Auto take-profit when the held token's mid price reaches this level. Range [0.5, 1.0]."
       },
-      "disable_value": 1.0,
+      "disable_value": 1,
       "disable_note": {
         "zh": "设为 1.0：市场价格最高趋近 1，止盈永不触发",
         "en": "Set to 1.0: price never reaches 1, TP never fires"
       },
       "type": "float",
       "min": 0.5,
-      "max": 1.0,
+      "max": 1,
       "step": 0.01,
       "unit": "",
       "scope": "unified"
@@ -48,69 +41,21 @@
         "zh": "持仓标的中间价跌破此价格时自动触发止损平仓。价格区间为 [0.0, 1.0]。",
         "en": "Auto stop-loss when the held token's mid price falls below this level. Range [0.0, 1.0]."
       },
-      "disable_value": 0.0,
+      "disable_value": 0,
       "disable_note": {
         "zh": "设为 0.0：价格不会跌至 0，止损永不触发",
         "en": "Set to 0.0: price never falls to 0, SL never fires"
       },
       "type": "float",
-      "min": 0.0,
-      "max": 1.0,
-      "step": 0.01,
-      "unit": "",
-      "scope": "unified"
-    },
-    "stop_loss_pct": {
-      "group": "risk",
-      "visibility": "core",
-      "weight": "critical",
-      "label": {
-        "zh": "止损比例（基于买入价）",
-        "en": "Stop Loss % (from entry)"
-      },
-      "desc": {
-        "zh": "当持仓标的价格相对买入价下跌超过此比例时触发止损。自动铆钉每笔买入价，适配 UP/DOWN 方向。与绝对止损价格独立生效，任一触发即平仓。设为 0 则禁用比例止损。区间 [0.0, 1.0]。",
-        "en": "Triggers stop-loss when held token's price drops by this fraction from its entry price. Anchored per-trade, works for both UP and DOWN tokens. Independent of absolute stop-loss price — either can trigger. Set to 0 to disable. Range [0.0, 1.0]."
-      },
-      "disable_value": 0.0,
-      "disable_note": {
-        "zh": "设为 0.0：禁用比例止损，仅使用绝对止损价格",
-        "en": "Set to 0.0: disable percentage stop-loss, only absolute price SL applies"
-      },
-      "type": "float",
-      "min": 0.0,
-      "max": 1.0,
-      "step": 0.01,
-      "unit": "",
-      "scope": "unified"
-    },
-    "take_profit_pct": {
-      "group": "risk",
-      "visibility": "core",
-      "weight": "high",
-      "label": {
-        "zh": "止盈比例（基于买入价）",
-        "en": "Take Profit % (from entry)"
-      },
-      "desc": {
-        "zh": "当持仓标的价格相对买入价上涨超过此比例时触发止盈。自动铆钉每笔买入价，适配 UP/DOWN 方向。与绝对止盈价格独立生效，任一触发即平仓。设为 0 则禁用比例止盈。区间 [0.0, 1.0]。",
-        "en": "Triggers take-profit when held token's price rises by this fraction from its entry price. Anchored per-trade, works for both UP and DOWN tokens. Independent of absolute TP price — either can trigger. Set to 0 to disable. Range [0.0, 1.0]."
-      },
-      "disable_value": 0.0,
-      "disable_note": {
-        "zh": "设为 0.0：禁用比例止盈，仅使用绝对止盈价格",
-        "en": "Set to 0.0: disable percentage take-profit, only absolute price TP applies"
-      },
-      "type": "float",
-      "min": 0.0,
-      "max": 1.0,
+      "min": 0,
+      "max": 1,
       "step": 0.01,
       "unit": "",
       "scope": "unified"
     },
     "force_close_remaining_seconds": {
       "group": "risk",
-      "visibility": "advanced",
+      "visibility": "core",
       "weight": "medium",
       "label": {
         "zh": "强制平仓剩余秒数",
@@ -132,119 +77,6 @@
       "unit": "秒",
       "scope": "unified"
     },
-    "consecutive_loss_threshold": {
-      "group": "risk",
-      "visibility": "advanced",
-      "weight": "medium",
-      "label": {
-        "zh": "连续亏损降仓阈值",
-        "en": "Consecutive Loss Threshold"
-      },
-      "desc": {
-        "zh": "连续亏损次数达到此阈值时，触发仓位缩减机制，降低后续每笔交易的仓位比例。区间为 [1, 20]。",
-        "en": "Triggers position reduction when consecutive losses reach this count. Range [1, 20]."
-      },
-      "disable_value": 20,
-      "disable_note": {
-        "zh": "设为 20（最大值）：几乎不可能连续亏损 20 次，降仓机制实际失效",
-        "en": "Set to 20 (max): virtually impossible to lose 20 times in a row, mechanism effectively disabled"
-      },
-      "type": "int",
-      "min": 1,
-      "max": 20,
-      "step": 1,
-      "unit": "次",
-      "scope": "unified"
-    },
-    "loss_position_reduction_pct": {
-      "group": "risk",
-      "visibility": "advanced",
-      "weight": "medium",
-      "label": {
-        "zh": "亏损降仓比例",
-        "en": "Loss Position Reduction (%)"
-      },
-      "desc": {
-        "zh": "触发连续亏损阈值后，每次入场仓位缩减的比例。0 = 不缩减，1 = 完全不入场。区间为 [0.0, 1.0]。",
-        "en": "Fraction by which position size is reduced after hitting the consecutive-loss threshold. 0 = no reduction, 1 = no new entries. Range [0.0, 1.0]."
-      },
-      "disable_value": 0.0,
-      "disable_note": {
-        "zh": "设为 0.0：即使触发阈值，仓位也不缩减，降仓机制实际失效",
-        "en": "Set to 0.0: no size reduction even after threshold hit, mechanism effectively disabled"
-      },
-      "type": "float",
-      "min": 0.0,
-      "max": 1.0,
-      "step": 0.05,
-      "unit": "",
-      "scope": "unified"
-    },
-    "exit_use_orderbook_mode": {
-      "group": "risk",
-      "visibility": "advanced",
-      "weight": "medium",
-      "label": {
-        "zh": "平仓时按盘口深度撮合",
-        "en": "Exit via Orderbook Reduction"
-      },
-      "desc": {
-        "zh": "关闭（默认）= 理想卖出：触发止盈/止损/强平时，按中间价直接成交，无滑点。\n开启 = 盘口撮合卖出：通过 orderbook 买方深度按 VWAP 撮合，模拟真实滑点。支持最低卖出价保护和每 tick 减仓比例控制；深度不足时部分成交，剩余仓位下一 tick 继续尝试。",
-        "en": "OFF (default) = Ideal sell: fill at mid price instantly, no slippage.\nON = Orderbook reduction: sell via VWAP against bid depth with min price floor and per-tick reduction ratio. Partial fills when depth insufficient; remainder retried next tick."
-      },
-      "type": "bool",
-      "scope": "unified"
-    },
-    "exit_min_sell_price": {
-      "group": "risk",
-      "visibility": "advanced",
-      "weight": "medium",
-      "label": {
-        "zh": "退出最低卖出价",
-        "en": "Exit Min Sell Price"
-      },
-      "desc": {
-        "zh": "挂单减仓模式下，低于此价格的买方挂单不参与撮合。防止止盈/止损时吃穿深度导致实际成交价远低于预期。区间为 [0.0, 1.0]。",
-        "en": "In orderbook reduction mode, bid levels below this price are skipped during VWAP matching. Prevents eating through the entire book at unfavorable prices. Range [0.0, 1.0]."
-      },
-      "disable_value": 0.0,
-      "disable_note": {
-        "zh": "设为 0.0：不设价格保护，所有买方挂单均可参与撮合",
-        "en": "Set to 0.0: no price floor, all bid levels are eligible"
-      },
-      "depends_on": "exit_use_orderbook_mode",
-      "type": "float",
-      "min": 0.0,
-      "max": 1.0,
-      "step": 0.01,
-      "unit": "",
-      "scope": "unified"
-    },
-    "exit_reduction_pct": {
-      "group": "risk",
-      "visibility": "advanced",
-      "weight": "medium",
-      "label": {
-        "zh": "每次退出减仓比例",
-        "en": "Exit Reduction Ratio"
-      },
-      "desc": {
-        "zh": "挂单减仓模式下，每次退出信号尝试卖出持仓的百分比。例如 0.5 表示每 tick 卖出当前持仓的 50%%，剩余仓位在后续 tick 继续尝试。区间为 [0.01, 1.0]。",
-        "en": "In orderbook reduction mode, the fraction of current position to sell per exit signal. E.g. 0.5 sells 50%% each tick; remainder retried next tick. Range [0.01, 1.0]."
-      },
-      "disable_value": 1.0,
-      "disable_note": {
-        "zh": "设为 1.0：每次尝试卖出全部持仓",
-        "en": "Set to 1.0: attempt to sell entire position each time"
-      },
-      "depends_on": "exit_use_orderbook_mode",
-      "type": "float",
-      "min": 0.01,
-      "max": 1.0,
-      "step": 0.05,
-      "unit": "",
-      "scope": "unified"
-    },
     "min_price": {
       "group": "entry",
       "visibility": "core",
@@ -264,7 +96,7 @@
       },
       "type": "float",
       "min": 0.01,
-      "max": 1.0,
+      "max": 1,
       "step": 0.01,
       "unit": "",
       "scope": "strategy"
@@ -281,266 +113,17 @@
         "zh": "只允许在市场剩余时间比例（剩余 ticks / 总 ticks）低于此阈值时入场，避免在市场初期不确定性过高时进场。区间为 [0.0, 1.0]。",
         "en": "Only allow entry when remaining time ratio (remaining ticks / total ticks) is below this threshold, avoiding early entry when uncertainty is high. Range [0.0, 1.0]."
       },
-      "disable_value": 1.0,
+      "disable_value": 1,
       "disable_note": {
         "zh": "设为 1.0：剩余时间比例永远≤ 1.0，入场时间限制实际失效，任意时刻均可入场",
         "en": "Set to 1.0: remaining ratio is always ≤ 1.0, time gate effectively disabled, entry allowed at any time"
       },
       "type": "float",
-      "min": 0.0,
-      "max": 1.0,
+      "min": 0,
+      "max": 1,
       "step": 0.01,
       "unit": "",
       "scope": "strategy"
-    },
-    "momentum_window": {
-      "group": "entry",
-      "visibility": "advanced",
-      "weight": "medium",
-      "label": {
-        "zh": "动量检测窗口",
-        "en": "Momentum Window"
-      },
-      "desc": {
-        "zh": "计算入场动量（价格涨幅）所用的历史价格窗口时长（秒）。刺活后： momentum = (窗口末 - 窗口初) / 窗口初。通过关闭“启用动量检测”开关可屏蔽此参数。区间为 [60, 3600]。",
-        "en": "History window (seconds) for computing entry momentum (price rise). momentum = (end - start) / start. Disable via the \"Enable Momentum Check\" toggle. Range [60, 3600]."
-      },
-      "disable_value": null,
-      "disable_note": {
-        "zh": "关闭“启用动量检测”开关即可屏蔽此参数",
-        "en": "Disable via the \"Enable Momentum Check\" toggle"
-      },
-      "type": "int",
-      "min": 60,
-      "max": 3600,
-      "step": 60,
-      "unit": "秒",
-      "scope": "strategy",
-      "depends_on": "use_momentum_check"
-    },
-    "momentum_min": {
-      "group": "entry",
-      "visibility": "advanced",
-      "weight": "medium",
-      "label": {
-        "zh": "最小涨幅",
-        "en": "Min Momentum"
-      },
-      "desc": {
-        "zh": "入场所需的最小涨幅（动量窗口内价格涨幅），过滤横盘或下跌行情的标的。通过关闭“启用动量检测”开关可屏蔽此参数。区间为 [0.0, 0.1]。",
-        "en": "Minimum price rise (within the momentum window) required for entry, filtering out flat or falling markets. Disable via the \"Enable Momentum Check\" toggle. Range [0.0, 0.1]."
-      },
-      "disable_value": 0.0,
-      "disable_note": {
-        "zh": "设为 0.0：无最小涨幅要求，动量过滤实际失效；建议直接关闭该开关",
-        "en": "Set to 0.0: no minimum momentum required, filter disabled; prefer turning off the toggle instead"
-      },
-      "type": "float",
-      "min": 0.0,
-      "max": 0.1,
-      "step": 0.0005,
-      "unit": "",
-      "scope": "strategy",
-      "depends_on": "use_momentum_check"
-    },
-    "direction_window": {
-      "group": "entry",
-      "visibility": "advanced",
-      "weight": "medium",
-      "label": {
-        "zh": "方向一致性检测窗口",
-        "en": "Direction Window"
-      },
-      "desc": {
-        "zh": "计算上涨 tick 占比时使用的历史窗口时长（秒）。窗口内上涨 tick 占比 > 50% 才允许入场。通过关闭“启用方向一致性检测”开匦可屏蔽。区间为 [60, 3600]。",
-        "en": "History window (seconds) for counting up-tick ratio. Entry requires up-ticks > 50% in the window. Disable via the \"Enable Direction Check\" toggle. Range [60, 3600]."
-      },
-      "disable_value": null,
-      "disable_note": {
-        "zh": "关闭“启用方向一致性检测”开关即可屏蔽此参数",
-        "en": "Disable via the \"Enable Direction Check\" toggle"
-      },
-      "type": "int",
-      "min": 60,
-      "max": 3600,
-      "step": 60,
-      "unit": "秒",
-      "scope": "strategy",
-      "depends_on": "use_direction_check"
-    },
-    "volatility_window": {
-      "group": "volatility",
-      "visibility": "advanced",
-      "weight": "medium",
-      "label": {
-        "zh": "波动检测窗口",
-        "en": "Volatility Window"
-      },
-      "desc": {
-        "zh": "振幅、标准差、最大回撤等波动类指标共用的历史窗口时长（秒）。窗口越长，计算结果越平滑但对短期变动效应越慢。区间为 [60, 3600]。",
-        "en": "Shared history window (seconds) for amplitude, std-dev, and max-drawdown calculations. Larger window gives smoother but slower-responding metrics. Range [60, 3600]."
-      },
-      "disable_value": null,
-      "disable_note": {
-        "zh": "此窗口为波动检测类参数共用，无法单独禁用；请关闭各对应的波动检测开关",
-        "en": "Shared by all volatility checks; disable each check individually via its toggle"
-      },
-      "type": "int",
-      "min": 60,
-      "max": 3600,
-      "step": 60,
-      "unit": "秒",
-      "scope": "strategy"
-    },
-    "amplitude_min": {
-      "group": "volatility",
-      "visibility": "advanced",
-      "weight": "low",
-      "label": {
-        "zh": "振幅下限",
-        "en": "Min Amplitude"
-      },
-      "desc": {
-        "zh": "入场所需的最小价格振幅（窗口内高低价之差 / 最低价），过滤波动过小、价格过于平稳的市场。通过关闭“启用振幅检测”开关可屏蔽。区间为 [0.0, 5.0]。",
-        "en": "Minimum price amplitude (window high-low / low) required for entry, filtering out flat markets. Disable via the \"Enable Amplitude Check\" toggle. Range [0.0, 5.0]."
-      },
-      "disable_value": 0.0,
-      "disable_note": {
-        "zh": "设为 0.0：振幅永远 ≥ 0，下限条件始终满足；建议直接关闭该开关",
-        "en": "Set to 0.0: amplitude always ≥ 0, lower bound always met; prefer turning off the toggle"
-      },
-      "type": "float",
-      "min": 0.0,
-      "max": 5.0,
-      "step": 0.01,
-      "unit": "",
-      "scope": "strategy",
-      "depends_on": "use_amplitude_check"
-    },
-    "amplitude_max": {
-      "group": "volatility",
-      "visibility": "advanced",
-      "weight": "low",
-      "label": {
-        "zh": "振幅上限",
-        "en": "Max Amplitude"
-      },
-      "desc": {
-        "zh": "入场所允许的最大价格振幅，防止在波动过大、大幅波动的市场中进场。通过关闭“启用振幅检测”开关可屏蔽。区间为 [0.0, 5.0]。",
-        "en": "Maximum price amplitude allowed for entry, preventing entry in highly volatile markets. Disable via the \"Enable Amplitude Check\" toggle. Range [0.0, 5.0]."
-      },
-      "disable_value": 5.0,
-      "disable_note": {
-        "zh": "设为 5.0（最大值）：振幅上限条件几乎始终满足；建议直接关闭该开关",
-        "en": "Set to 5.0 (max): upper bound almost always met; prefer turning off the toggle"
-      },
-      "type": "float",
-      "min": 0.0,
-      "max": 5.0,
-      "step": 0.01,
-      "unit": "",
-      "scope": "strategy",
-      "depends_on": "use_amplitude_check"
-    },
-    "max_std": {
-      "group": "volatility",
-      "visibility": "advanced",
-      "weight": "medium",
-      "label": {
-        "zh": "最大标准差",
-        "en": "Max Std Dev"
-      },
-      "desc": {
-        "zh": "入场所允许的最大相对标准差（标准差 / 均价），过高说明价格不稳定，热点止检不过高的氾动市场。通过关闭“启用标准差检测”开关可屏蔽。区间为 [0.0, 1.0]。",
-        "en": "Maximum relative standard deviation (std / mean) allowed for entry; high values indicate a volatile, unstable market. Disable via the \"Enable Std Dev Check\" toggle. Range [0.0, 1.0]."
-      },
-      "disable_value": 1.0,
-      "disable_note": {
-        "zh": "设为 1.0：窗口内相对标准差几乎不会达到 1.0，标准差过滤实际失效；建议直接关闭该开关",
-        "en": "Set to 1.0: relative std almost never reaches 1.0, filter effectively disabled; prefer turning off the toggle"
-      },
-      "type": "float",
-      "min": 0.0,
-      "max": 1.0,
-      "step": 0.01,
-      "unit": "",
-      "scope": "strategy",
-      "depends_on": "use_std_check"
-    },
-    "max_drawdown": {
-      "group": "volatility",
-      "visibility": "advanced",
-      "weight": "medium",
-      "label": {
-        "zh": "窗口最大回撤",
-        "en": "Max Drawdown"
-      },
-      "desc": {
-        "zh": "入场所允许的波动窗口内最大回撤比例（上涌到底部跌幅），过高则放弃入场，避免在价格已大峽回调后入场。通过关闭“启用回撤检测”开关可屏蔽。区间为 [0.0, 1.0]。",
-        "en": "Maximum drawdown ratio (peak-to-trough decline) within the volatility window allowed for entry; too high means price already dropped sharply. Disable via the \"Enable Drawdown Check\" toggle. Range [0.0, 1.0]."
-      },
-      "disable_value": 1.0,
-      "disable_note": {
-        "zh": "设为 1.0：窗口回撤 100% 几乎不会出现，回撤过滤实际失效；建议直接关闭该开关",
-        "en": "Set to 1.0: 100% drawdown almost never happens, filter effectively disabled; prefer turning off the toggle"
-      },
-      "type": "float",
-      "min": 0.0,
-      "max": 1.0,
-      "step": 0.01,
-      "unit": "",
-      "scope": "strategy",
-      "depends_on": "use_drawdown_check"
-    },
-    "reverse_tick_window": {
-      "group": "volatility",
-      "visibility": "advanced",
-      "weight": "low",
-      "label": {
-        "zh": "反向检测窗口",
-        "en": "Reverse Tick Window"
-      },
-      "desc": {
-        "zh": "检测近期是否存在反向回调的时间窗口（秒）。窗口内价格回撤超过 reverse_threshold 则放弃入场。通过关闭“启用反转检测”开关可屏蔽。区间为 [5, 300]。",
-        "en": "Time window (seconds) for detecting recent reversal. Abandons entry if price dropping by more than reverse_threshold within this window. Disable via the \"Enable Reverse Check\" toggle. Range [5, 300]."
-      },
-      "disable_value": null,
-      "disable_note": {
-        "zh": "关闭“启用反转检测”开关即可屏蔽此参数",
-        "en": "Disable via the \"Enable Reverse Check\" toggle"
-      },
-      "type": "int",
-      "min": 5,
-      "max": 300,
-      "step": 5,
-      "unit": "秒",
-      "scope": "strategy",
-      "depends_on": "use_reverse_check"
-    },
-    "reverse_threshold": {
-      "group": "volatility",
-      "visibility": "advanced",
-      "weight": "low",
-      "label": {
-        "zh": "反向波动阈值",
-        "en": "Reverse Threshold"
-      },
-      "desc": {
-        "zh": "反向窗口内价格最大回调超过此值则放弃入场，应对局部已出现反转的情况。通过关闭“启用反转检测”开关可屏蔽。区间为 [0.0, 0.1]。",
-        "en": "Max price retracement within the reverse window before abandoning entry, catching local reversals. Disable via the \"Enable Reverse Check\" toggle. Range [0.0, 0.1]."
-      },
-      "disable_value": 0.1,
-      "disable_note": {
-        "zh": "设为 0.1（最大值）：短期 10% 越势回调几乎不会出现，反转过滤实际失效；建议直接关闭该开关",
-        "en": "Set to 0.1 (max): 10% short-term reversal almost never occurs, filter effectively disabled; prefer turning off the toggle"
-      },
-      "type": "float",
-      "min": 0.0,
-      "max": 0.1,
-      "step": 0.001,
-      "unit": "",
-      "scope": "strategy",
-      "depends_on": "use_reverse_check"
     },
     "position_min_pct": {
       "group": "position",
@@ -561,7 +144,7 @@
       },
       "type": "float",
       "min": 0.01,
-      "max": 1.0,
+      "max": 1,
       "step": 0.01,
       "unit": "",
       "scope": "strategy"
@@ -578,176 +161,14 @@
         "zh": "单次入场使用的最大仓位比例（占可用资金），防止应仓过重。合理设置可控制单笔交易风险暖。区间为 [0.01, 1.0]。",
         "en": "Maximum position size (fraction of available capital) per entry, preventing excessive concentration. Range [0.01, 1.0]."
       },
-      "disable_value": 1.0,
+      "disable_value": 1,
       "disable_note": {
         "zh": "设为 1.0：不限制仓位上限，允许全仓入场（高风险，谨慎使用）",
         "en": "Set to 1.0: no cap on position size, full capital entry allowed (high risk, use with caution)"
       },
       "type": "float",
       "min": 0.01,
-      "max": 1.0,
-      "step": 0.01,
-      "unit": "",
-      "scope": "strategy"
-    },
-    "use_momentum_check": {
-      "group": "toggles",
-      "visibility": "advanced",
-      "weight": "low",
-      "label": {
-        "zh": "启用动量检测",
-        "en": "Enable Momentum Check"
-      },
-      "desc": {
-        "zh": "开启后会利用《动量检测窗口》和《最小涨幅》配合过滤步骤，只选取高涨幅趋势标的入场。未开启时跳过动量查验。",
-        "en": "When enabled, applies momentum (price rise in window) filter using Momentum Window and Min Momentum. When disabled, the momentum step is skipped entirely."
-      },
-      "type": "bool",
-      "scope": "strategy"
-    },
-    "use_direction_check": {
-      "group": "toggles",
-      "visibility": "advanced",
-      "weight": "low",
-      "label": {
-        "zh": "启用方向一致性检测",
-        "en": "Enable Direction Check"
-      },
-      "desc": {
-        "zh": "开启后会根据《方向一致性检测窗口》计算窗口内上涨 tick 占比，要求价格主要向上运动（上涨 > 50%）才允许入场。未开启时跳过方向查验。",
-        "en": "When enabled, checks that up-ticks exceed 50% in the Direction Window before entry. When disabled, the directional consistency step is skipped."
-      },
-      "type": "bool",
-      "scope": "strategy"
-    },
-    "use_std_check": {
-      "group": "toggles",
-      "visibility": "advanced",
-      "weight": "low",
-      "label": {
-        "zh": "启用标准差检测",
-        "en": "Enable Std Dev Check"
-      },
-      "desc": {
-        "zh": "开启后会计算波动窗口内的相对标准差，过高则放弃入场，过滤价格不稳定的泛动市场。未开启时跳过标准差查验。",
-        "en": "When enabled, computes relative std dev in the volatility window and rejects entry if it exceeds Max Std Dev, filtering unstable markets. When disabled, the std-dev step is skipped."
-      },
-      "type": "bool",
-      "scope": "strategy"
-    },
-    "use_drawdown_check": {
-      "group": "toggles",
-      "visibility": "advanced",
-      "weight": "low",
-      "label": {
-        "zh": "启用回撤检测",
-        "en": "Enable Drawdown Check"
-      },
-      "desc": {
-        "zh": "开启后会检测波动窗口内的最大回撤，过高则放弃入场，避免在价格已大幅回调后入场。未开启时跳过回撤查验。",
-        "en": "When enabled, measures peak-to-trough drawdown in the volatility window and rejects entry if it exceeds Max Drawdown, avoiding catching falling knives. When disabled, drawdown check is skipped."
-      },
-      "type": "bool",
-      "scope": "strategy"
-    },
-    "use_amplitude_check": {
-      "group": "toggles",
-      "visibility": "advanced",
-      "weight": "low",
-      "label": {
-        "zh": "启用振幅检测",
-        "en": "Enable Amplitude Check"
-      },
-      "desc": {
-        "zh": "开启后会计算波动窗口内的最高/最低振幅，要求振幅在 [振幅下限, 振幅上限] 范围内才允许入场。未开启时跳过振幅查验。",
-        "en": "When enabled, computes high-low amplitude in the volatility window and requires it to fall within [Min Amplitude, Max Amplitude]. When disabled, amplitude check is skipped."
-      },
-      "type": "bool",
-      "scope": "strategy"
-    },
-    "use_reverse_check": {
-      "group": "toggles",
-      "visibility": "advanced",
-      "weight": "low",
-      "label": {
-        "zh": "启用反转检测",
-        "en": "Enable Reverse Check"
-      },
-      "desc": {
-        "zh": "开启后会检测近期《反向检测窗口》内的价格回调，超过《反向波动阈值》则放弃入场，防止在局部已反转时追高。未开启时跳过反转查验。",
-        "en": "When enabled, detects recent reversal within the Reverse Tick Window and abandons entry if retracement exceeds Reverse Threshold, preventing chasing a turning market. When disabled, reverse check is skipped."
-      },
-      "type": "bool",
-      "scope": "strategy"
-    },
-    "max_spread": {
-      "group": "entry",
-      "visibility": "core",
-      "weight": "high",
-      "label": {
-        "zh": "最大 Spread 阈值",
-        "en": "Max Spread"
-      },
-      "desc": {
-        "zh": "入场 Spread（best_ask - best_bid）超过此值时跳过入场，避免在流动性不足的宽价差市场建仓。区间为 [0.01, 1.0]。",
-        "en": "Skip entry when the bid-ask spread exceeds this value, avoiding illiquid wide-spread markets. Range [0.01, 1.0]."
-      },
-      "disable_value": 1.0,
-      "disable_note": {
-        "zh": "设为 1.0：Spread 永远 ≤ 1，价差过滤实际失效",
-        "en": "Set to 1.0: spread never exceeds 1, filter effectively disabled"
-      },
-      "type": "float",
-      "min": 0.01,
-      "max": 1.0,
-      "step": 0.01,
-      "unit": "",
-      "scope": "strategy"
-    },
-    "max_ask_deviation": {
-      "group": "entry",
-      "visibility": "advanced",
-      "weight": "medium",
-      "label": {
-        "zh": "最大 Ask 偏离度",
-        "en": "Max Ask Deviation"
-      },
-      "desc": {
-        "zh": "best_ask 相对锚点价格的偏离比例上限。偏离过大就不入场，避免实际买入价远高于参考价。区间为 [0.01, 1.0]。",
-        "en": "Maximum ratio by which best_ask can deviate from the anchor price. Prevents buying at prices far above the reference. Range [0.01, 1.0]."
-      },
-      "disable_value": 1.0,
-      "disable_note": {
-        "zh": "设为 1.0：不限制 Ask 偏离度",
-        "en": "Set to 1.0: no ask deviation limit"
-      },
-      "type": "float",
-      "min": 0.01,
-      "max": 1.0,
-      "step": 0.01,
-      "unit": "",
-      "scope": "strategy"
-    },
-    "min_profit_room": {
-      "group": "entry",
-      "visibility": "advanced",
-      "weight": "high",
-      "label": {
-        "zh": "最小利润空间",
-        "en": "Min Profit Room"
-      },
-      "desc": {
-        "zh": "要求 1.0 - best_ask > 此值才入场，确保有足够的潜在利润空间。区间为 [0.0, 0.5]。",
-        "en": "Requires (1.0 - best_ask) > this value before entry, ensuring sufficient potential profit margin. Range [0.0, 0.5]."
-      },
-      "disable_value": 0.0,
-      "disable_note": {
-        "zh": "设为 0.0：不检查利润空间",
-        "en": "Set to 0.0: no profit room check"
-      },
-      "type": "float",
-      "min": 0.0,
-      "max": 0.5,
+      "max": 1,
       "step": 0.01,
       "unit": "",
       "scope": "strategy"
@@ -764,141 +185,53 @@
       "en": "Entry Conditions",
       "order": 2
     },
-    "volatility": {
-      "zh": "波动过滤",
-      "en": "Volatility Filters",
-      "order": 3
-    },
     "position": {
       "zh": "仓位管理",
       "en": "Position Sizing",
-      "order": 4
-    },
-    "toggles": {
-      "zh": "特性开关",
-      "en": "Feature Toggles",
       "order": 5
     }
   },
   "strategies": {
     "solid_core": {
       "take_profit_price": 0.85,
-      "take_profit_pct": 0.15,
       "stop_loss_price": 0.5,
-      "stop_loss_pct": 0.2,
       "force_close_remaining_seconds": 30,
-      "consecutive_loss_threshold": 3,
-      "loss_position_reduction_pct": 0.5,
       "min_price": 0.65,
       "time_remaining_ratio": 0.333,
-      "momentum_window": 600,
-      "momentum_min": 0.0025,
-      "volatility_window": 900,
-      "amplitude_min": 0.0015,
-      "amplitude_max": 0.002,
-      "max_std": 0.0012,
-      "max_drawdown": 0.0008,
       "position_min_pct": 0.2,
       "position_max_pct": 0.3,
-      "reverse_tick_window": 30,
-      "reverse_threshold": 0.002,
-      "use_momentum_check": true,
-      "use_direction_check": false,
-      "use_std_check": true,
-      "use_drawdown_check": true,
-      "use_amplitude_check": true,
-      "use_reverse_check": true,
-      "max_spread": 0.15,
-      "max_ask_deviation": 0.10,
-      "min_profit_room": 0.05,
       "builtin": true
     },
     "main_force": {
       "builtin": true,
-      "stop_loss_pct": 0.15,
-      "take_profit_pct": 0.12,
       "description": {
         "zh": "主力策略 — 中高概率市场临近到期时中等波动顺势建仓",
         "en": "Main Force — Moderate volatility trend position near expiry"
       },
       "min_price": 0.85,
       "time_remaining_ratio": 0.333,
-      "momentum_window": 600,
-      "momentum_min": 0.002,
-      "volatility_window": 900,
-      "amplitude_min": 0.0012,
-      "amplitude_max": 0.0022,
-      "max_std": 0.0015,
-      "max_drawdown": 0.001,
       "position_min_pct": 0.1,
-      "position_max_pct": 0.3,
-      "reverse_tick_window": 30,
-      "reverse_threshold": 0.002,
-      "use_momentum_check": true,
-      "use_direction_check": false,
-      "use_std_check": true,
-      "use_drawdown_check": true,
-      "use_amplitude_check": true,
-      "use_reverse_check": true,
-      "max_spread": 0.15,
-      "max_ask_deviation": 0.10,
-      "min_profit_room": 0.05
+      "position_max_pct": 0.3
     },
     "high_freq_coverage": {
       "builtin": true,
-      "stop_loss_pct": 0.1,
-      "take_profit_pct": 0.08,
       "description": {
         "zh": "高频覆盖策略 — 宽松条件下方向一致时快速入场覆盖",
         "en": "High Freq Coverage — Quick entry on consistent direction with relaxed conditions"
       },
       "min_price": 0.82,
       "time_remaining_ratio": 0.333,
-      "direction_window": 600,
-      "volatility_window": 900,
-      "amplitude_min": 0.001,
-      "amplitude_max": 0.0025,
       "position_min_pct": 0.05,
-      "position_max_pct": 0.2,
-      "reverse_tick_window": 30,
-      "reverse_threshold": 0.002,
-      "use_momentum_check": false,
-      "use_direction_check": true,
-      "use_std_check": false,
-      "use_drawdown_check": false,
-      "use_amplitude_check": true,
-      "use_reverse_check": true,
-      "max_spread": 0.20,
-      "max_ask_deviation": 0.15,
-      "min_profit_room": 0.03
+      "position_max_pct": 0.2
     },
     "Test预设": {
       "take_profit_price": 0.99,
-      "take_profit_pct": 0,
       "stop_loss_price": 0.38,
-      "stop_loss_pct": 0,
       "force_close_remaining_seconds": 2020,
-      "consecutive_loss_threshold": 20,
-      "loss_position_reduction_pct": 0,
       "min_price": 0.89,
       "time_remaining_ratio": 0.333,
-      "momentum_window": 120,
-      "momentum_min": 0.02,
-      "volatility_window": 120,
-      "amplitude_min": 0.0015,
-      "amplitude_max": 0.002,
-      "max_std": 0.0012,
-      "max_drawdown": 0.0008,
       "position_min_pct": 0.2,
-      "position_max_pct": 0.3,
-      "reverse_tick_window": 15,
-      "reverse_threshold": 0.03,
-      "use_momentum_check": false,
-      "use_direction_check": false,
-      "use_std_check": false,
-      "use_drawdown_check": false,
-      "use_amplitude_check": false,
-      "use_reverse_check": false
+      "position_max_pct": 0.3
     }
   }
 }

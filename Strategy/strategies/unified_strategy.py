@@ -1,15 +1,13 @@
 """统一策略 — 所有预设策略共用的参数化入场逻辑。
 
-通过 strategy_presets.json 中的参数存在性控制检查项（选中即启用）:
-  momentum_window / momentum_min — 动量检查
-  direction_window               — 方向一致性检查
-  volatility_window + amplitude_min/max — 振幅范围检查
-  volatility_window + max_std    — 波动率标准差检查
-  volatility_window + max_drawdown — 窗口最大回撤检查
-  reverse_tick_window / reverse_threshold — 反转检测检查
-  max_entry_count                — 单场买入次数限制
+通过 strategy_presets.json 中的参数存在性控制入场条件（选中即启用）:
+  min_price               — 入场最低价格过滤
+  time_remaining_ratio    — 剩余时间比例门控
 
-统一规则 (TP/SL/强制平仓/降仓) 由 UnifiedBaseStrategy 基类处理。
+仓位管理:
+  position_min_pct / position_max_pct — 仓位比例区间
+
+统一规则 (TP/SL/强制平仓) 由 UnifiedBaseStrategy 基类处理。
 """
 
 from __future__ import annotations
@@ -22,8 +20,8 @@ from core.unified_base import UnifiedBaseStrategy
 
 class UnifiedStrategy(UnifiedBaseStrategy):
     name = "unified"
-    description = "统一参数化策略 — 通过预设配置驱动不同入场条件组合"
-    version = "0.2.0"
+    description = "统一参数化策略 — 通过预设配置驱动入场条件"
+    version = "0.3.0"
 
     def init_strategy(self, config: dict) -> None:
         self._cfg = config
@@ -31,46 +29,11 @@ class UnifiedStrategy(UnifiedBaseStrategy):
         self.min_price: float | None = config.get("min_price") if param_active(config, "min_price") else None
         self.time_remaining_ratio: float | None = config.get("time_remaining_ratio") if param_active(config, "time_remaining_ratio") else None
 
-        # ── Spread / anchor gating ──
-        self.max_spread: float | None = config.get("max_spread") if param_active(config, "max_spread") else None
-        self.max_ask_deviation: float | None = config.get("max_ask_deviation") if param_active(config, "max_ask_deviation") else None
-        self.min_profit_room: float | None = config.get("min_profit_room") if param_active(config, "min_profit_room") else None
-
-        # ── Feature detection — derived from param presence (select = enable) ──
-        self.use_momentum: bool = param_active(config, "momentum_window")
-        self.use_direction: bool = param_active(config, "direction_window")
-        self.use_amplitude: bool = param_active(config, "amplitude_min") or param_active(config, "amplitude_max")
-        self.use_std: bool = param_active(config, "max_std")
-        self.use_drawdown: bool = param_active(config, "max_drawdown")
-        self.use_reverse: bool = param_active(config, "reverse_tick_window")
-
-        # ── Entry count limit ──
-        self.max_entry_count: int | None = int(config.get("max_entry_count", 0)) if param_active(config, "max_entry_count") else None
-
-        # ── Momentum params ──
-        self.momentum_window: int = int(config.get("momentum_window", 600))
-        self.momentum_min: float = config.get("momentum_min", 0.0020)
-
-        # ── Direction params ──
-        self.direction_window: int = int(config.get("direction_window", 600))
-
-        # ── Volatility / amplitude params ──
-        self.volatility_window: int = int(config.get("volatility_window", 900))
-        self.amplitude_min: float = config.get("amplitude_min", 0.0012)
-        self.amplitude_max: float = config.get("amplitude_max", 0.0022)
-        self.max_std: float = config.get("max_std", 0.0015)
-        self.max_drawdown_limit: float = config.get("max_drawdown", 0.0010)
-
         # ── Position sizing ──
         self.position_min_pct: float = config.get("position_min_pct", 0.10)
         self.position_max_pct: float = config.get("position_max_pct", 0.30)
 
-        # ── Reverse detection ──
-        self.reverse_tick_window: int = int(config.get("reverse_tick_window", 30))
-        self.reverse_threshold: float = config.get("reverse_threshold", 0.002)
-
         self._entered_tokens: set[str] = set()
-        self._entry_count: int = 0
 
     # ── Entry logic ──────────────────────────────────────────────────────────
 
@@ -79,21 +42,11 @@ class UnifiedStrategy(UnifiedBaseStrategy):
         if len(self._entered_tokens) >= len(ctx.tokens):
             return []
 
-        # Skip if entry count limit reached
-        if self.max_entry_count is not None and self._entry_count >= self.max_entry_count:
-            return []
-
         # 1. Time gate — skip if param not active
         if self.time_remaining_ratio is not None:
             remaining_ratio = (ctx.total_ticks - ctx.index) / ctx.total_ticks if ctx.total_ticks > 0 else 1.0
             if remaining_ratio > self.time_remaining_ratio:
                 return []
-
-        # Minimum history: only require reverse_tick_window (30) as hard floor.
-        # Individual checks (momentum, volatility, etc.) use slicing that
-        # naturally adapts to shorter histories — no need to gate on the
-        # largest window which may exceed the market's total duration.
-        min_history = self.reverse_tick_window
 
         for token_id, snapshot in ctx.tokens.items():
             if token_id in self._entered_tokens:
@@ -103,108 +56,11 @@ class UnifiedStrategy(UnifiedBaseStrategy):
             if mid <= 0:
                 continue
 
-            # Price filter: apply min_price to the token's actual market price.
-            # Only buy tokens whose raw mid_price meets the minimum threshold.
+            # 2. Price filter
             if self.min_price is not None and mid < self.min_price:
                 continue
 
-            # Spread gating: skip if orderbook is too thin
-            if self.max_spread is not None and snapshot.spread > self.max_spread:
-                continue
-
-            # Ask deviation: skip if best_ask deviates too far from anchor
-            if self.max_ask_deviation is not None:
-                anchor = snapshot.anchor_price if snapshot.anchor_price > 0 else mid
-                if snapshot.best_ask > 0 and anchor > 0:
-                    ask_dev = (snapshot.best_ask - anchor) / anchor
-                    if ask_dev > self.max_ask_deviation:
-                        continue
-
-            # Profit room: skip if too close to $1.00 (not enough upside)
-            if self.min_profit_room is not None and snapshot.best_ask > 0 and (1.0 - snapshot.best_ask) < self.min_profit_room:
-                continue
-
-            history = ctx.price_history.get(token_id, [])
-            if len(history) < min_history:
-                continue
-
-            # Price-level normalization for DOWN tokens (< 0.5).
-            # Relative metrics (amplitude, std, drawdown, momentum) are
-            # inflated at low price levels. Multiply by price_norm to bring
-            # them to UP-equivalent scale so thresholds work across sides.
-            is_down = mid < 0.5
-            price_norm = (mid / (1.0 - mid)) if is_down else 1.0
-
-            # 2. Momentum check (optional)
-            if self.use_momentum:
-                momentum_slice = history[-self.momentum_window:]
-                if momentum_slice[0] == 0:
-                    continue
-                momentum = (momentum_slice[-1] - momentum_slice[0]) / momentum_slice[0]
-                if momentum * price_norm < self.momentum_min:
-                    continue
-
-            # 3. Direction consistency check (optional) — no normalization needed
-            if self.use_direction:
-                dir_slice = history[-self.direction_window:]
-                up_count = sum(1 for i in range(1, len(dir_slice)) if dir_slice[i] > dir_slice[i - 1])
-                down_count = sum(1 for i in range(1, len(dir_slice)) if dir_slice[i] < dir_slice[i - 1])
-                if up_count + down_count == 0 or up_count <= down_count:
-                    continue
-
-            # 4. Amplitude check (optional)
-            if self.use_amplitude:
-                vol_window = min(self.volatility_window, len(history))
-                vol_slice = history[-vol_window:]
-                high, low = max(vol_slice), min(vol_slice)
-                if low == 0:
-                    continue
-                amplitude = (high - low) / low
-                norm_amplitude = amplitude * price_norm
-                if norm_amplitude < self.amplitude_min or norm_amplitude > self.amplitude_max:
-                    continue
-            else:
-                vol_window = min(self.volatility_window, len(history))
-                vol_slice = history[-vol_window:]
-
-            # 5. Std check (optional)
-            if self.use_std:
-                mean_price = sum(vol_slice) / len(vol_slice)
-                if mean_price == 0:
-                    continue
-                variance = sum((p - mean_price) ** 2 for p in vol_slice) / len(vol_slice)
-                std_pct = math.sqrt(variance) / mean_price
-                if std_pct * price_norm > self.max_std:
-                    continue
-
-            # 6. Max drawdown check (optional)
-            if self.use_drawdown:
-                peak = vol_slice[0]
-                max_dd = 0.0
-                for p in vol_slice:
-                    if p > peak:
-                        peak = p
-                    dd = (peak - p) / peak if peak > 0 else 0.0
-                    if dd > max_dd:
-                        max_dd = dd
-                if max_dd * price_norm > self.max_drawdown_limit:
-                    continue
-
-            # 7. Reverse movement check (optional)
-            if self.use_reverse:
-                reverse_window = min(self.reverse_tick_window, len(history))
-                recent = history[-reverse_window:]
-                has_reverse = any(
-                    recent[i - 1] > 0
-                    and (recent[i] - recent[i - 1]) / recent[i - 1] * price_norm < -self.reverse_threshold
-                    for i in range(1, len(recent))
-                )
-                if has_reverse:
-                    continue
-
-            # 8. Position sizing
-            # Use best_ask (not mid) for conservative share count so the computed
-            # amount stays within budget even before order-book walking.
+            # 3. Position sizing
             target_pct = (self.position_min_pct + self.position_max_pct) / 2
             buy_budget = ctx.balance * target_pct
             price_for_sizing = snapshot.best_ask if snapshot.best_ask > 0 else mid
@@ -216,7 +72,6 @@ class UnifiedStrategy(UnifiedBaseStrategy):
                 continue
 
             self._entered_tokens.add(token_id)
-            self._entry_count += 1
             return [Signal(token_id=token_id, side="BUY", amount=float(amount), max_cost=buy_budget)]
 
         return []
@@ -225,6 +80,5 @@ class UnifiedStrategy(UnifiedBaseStrategy):
         return {
             "entered": len(self._entered_tokens) > 0,
             "entered_tokens": sorted(self._entered_tokens),
-            "entry_count": self._entry_count,
             "strategy_type": "hold_to_settlement",
         }

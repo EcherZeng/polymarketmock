@@ -24,7 +24,6 @@ class StrategyEngineConfig(BaseSettings):
 
     # Strategy loading
     strategies_dir: Path = _STRATEGY_DIR / "strategies"
-    price_history_window: int = 1200  # must cover 15min volatility window (900) with margin
 
     # HTTP server
     server_port: int = 8072
