@@ -393,7 +393,8 @@ export default function StrategyPage() {
                     Object.entries(paramSchema)
                       .filter(([, s]) =>
                         s.visibility !== "advanced" &&
-                        !s.depends_on
+                        !s.depends_on &&
+                        !s.pool_hidden
                       )
                       .map(([k]) => k)
                   )

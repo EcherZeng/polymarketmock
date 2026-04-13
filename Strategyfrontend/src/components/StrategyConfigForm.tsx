@@ -437,24 +437,46 @@ export default function StrategyConfigForm({
           const rootParams = params.filter(p => normaliseDeps(p.schema.depends_on).length === 0)
           const childParams = params.filter(p => normaliseDeps(p.schema.depends_on).length > 0)
 
-          // Build lookup for direct children — assign each child to its first active parent for display
-          const childrenByParent = new Map<string, GroupedParam[]>()
+          // ── Merge co-parent roots into render groups ──────────────────
+          // Union-Find: roots that share a common child are rendered together
+          const ufMap = new Map<string, string>()
+          for (const rp of rootParams) ufMap.set(rp.key, rp.key)
+          const ufFind = (k: string): string => {
+            while (ufMap.get(k) !== k) { ufMap.set(k, ufMap.get(ufMap.get(k)!)!); k = ufMap.get(k)! }
+            return k
+          }
           for (const cp of childParams) {
-            const parents = normaliseDeps(cp.schema.depends_on)
-            const displayParent = parents.find(p => activeParams?.has(p)) ?? parents[0]
-            if (!childrenByParent.has(displayParent)) childrenByParent.set(displayParent, [])
-            childrenByParent.get(displayParent)!.push(cp)
+            const rDeps = normaliseDeps(cp.schema.depends_on).filter(p => ufMap.has(p))
+            for (let i = 1; i < rDeps.length; i++) {
+              const fa = ufFind(rDeps[0]), fb = ufFind(rDeps[i])
+              if (fa !== fb) ufMap.set(fa, fb)
+            }
           }
 
-          // Collect all descendants (flattened) for multi-level deps
-          function collectDescendants(parentKey: string): GroupedParam[] {
-            const direct = childrenByParent.get(parentKey) ?? []
-            const all: GroupedParam[] = []
-            for (const c of direct) {
-              all.push(c)
-              all.push(...collectDescendants(c.key))
+          // Build { roots[], children[] } per leader
+          const rgMap = new Map<string, { roots: GroupedParam[]; children: GroupedParam[] }>()
+          for (const rp of rootParams) {
+            const l = ufFind(rp.key)
+            if (!rgMap.has(l)) rgMap.set(l, { roots: [], children: [] })
+            rgMap.get(l)!.roots.push(rp)
+          }
+          for (const cp of childParams) {
+            const rDeps = normaliseDeps(cp.schema.depends_on).filter(p => ufMap.has(p))
+            if (rDeps.length > 0) {
+              const l = ufFind(rDeps[0])
+              rgMap.get(l)?.children.push(cp)
             }
-            return all
+          }
+
+          // Stable iteration order: follow rootParams order
+          const visited = new Set<string>()
+          const orderedGroups: { roots: GroupedParam[]; children: GroupedParam[] }[] = []
+          for (const rp of rootParams) {
+            const l = ufFind(rp.key)
+            if (visited.has(l)) continue
+            visited.add(l)
+            const g = rgMap.get(l)
+            if (g) orderedGroups.push(g)
           }
 
           return (
@@ -463,21 +485,20 @@ export default function StrategyConfigForm({
                 {groupLabel}
               </h3>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                {rootParams.map(({ key, schema }) => {
-                  const allDescendants = collectDescendants(key)
-                  if (allDescendants.length > 0) {
+                {orderedGroups.map(({ roots, children }) => {
+                  if (children.length > 0) {
                     return (
-                      <div key={key} className="col-span-full flex flex-col gap-2 rounded-md border bg-muted/10 p-3">
+                      <div key={roots[0].key} className="col-span-full flex flex-col gap-2 rounded-md border bg-muted/10 p-3">
                         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                          {renderParamInput(key, schema)}
+                          {roots.map(({ key: rk, schema: rs }) => renderParamInput(rk, rs))}
                         </div>
                         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 border-t border-dashed pt-2">
-                          {allDescendants.map(({ key: ck, schema: cs }) => renderParamInput(ck, cs))}
+                          {children.map(({ key: ck, schema: cs }) => renderParamInput(ck, cs))}
                         </div>
                       </div>
                     )
                   }
-                  return renderParamInput(key, schema)
+                  return roots.map(({ key, schema }) => renderParamInput(key, schema))
                 })}
               </div>
             </div>
