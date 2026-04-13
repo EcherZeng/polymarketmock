@@ -38,12 +38,20 @@ logger = logging.getLogger(__name__)
 
 
 def _build_time_grid(all_ts: list[str]) -> list[str]:
-    """Build a 1-second interval time grid from min to max."""
+    """Build a 1-second interval time grid from min to max.
+
+    Naive timestamps are treated as UTC to stay consistent with
+    the recording backend and Binance kline data.
+    """
     if not all_ts:
         return []
     sorted_ts = sorted(all_ts)
     dt_start = datetime.fromisoformat(sorted_ts[0])
     dt_end = datetime.fromisoformat(sorted_ts[-1])
+    if dt_start.tzinfo is None:
+        dt_start = dt_start.replace(tzinfo=timezone.utc)
+    if dt_end.tzinfo is None:
+        dt_end = dt_end.replace(tzinfo=timezone.utc)
     dt_cur = dt_start.replace(microsecond=0)
     grid: list[str] = []
     while dt_cur <= dt_end:

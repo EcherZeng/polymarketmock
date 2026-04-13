@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import timezone
 from pathlib import Path
 
 import duckdb
@@ -62,10 +63,12 @@ def _decode_rows(rows: list[dict], has_side: bool = False) -> list[dict]:
         # Decode token_id
         if "token_id" in r and isinstance(r["token_id"], (int,)):
             r["token_id"] = decode_token(r["token_id"])
-        # Decode timestamp
+        # Decode timestamp — force UTC when DuckDB returns naive datetime
         if "timestamp" in r:
             ts = r["timestamp"]
             if hasattr(ts, "isoformat"):
+                if hasattr(ts, "tzinfo") and ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
                 r["timestamp"] = ts.isoformat()
             else:
                 r["timestamp"] = str(ts)

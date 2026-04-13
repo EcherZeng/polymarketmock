@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 
@@ -13,8 +13,13 @@ BINANCE_KLINE_URL = "https://api.binance.com/api/v3/klines"
 
 
 def _iso_to_ms(ts: str) -> int:
-    """Convert ISO 8601 timestamp string to milliseconds since epoch."""
+    """Convert ISO 8601 timestamp string to milliseconds since epoch.
+
+    Treats naive (no tzinfo) strings as UTC to avoid system-timezone drift.
+    """
     dt = datetime.fromisoformat(ts)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
     return int(dt.timestamp() * 1000)
 
 
