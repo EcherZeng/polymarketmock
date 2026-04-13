@@ -40,19 +40,6 @@ export interface ParamGroupDef {
   order: number
 }
 
-export interface PresetsResponse {
-  unified_rules: Record<string, number>
-  strategies: Record<string, StrategyPreset>
-  param_schema: Record<string, ParamSchemaItem>
-  param_groups: Record<string, ParamGroupDef>
-}
-
-export interface StrategyPreset {
-  builtin?: boolean
-  description?: I18nLabel | string
-  [key: string]: unknown
-}
-
 // ── Strategy ────────────────────────────────────────────────────────────────
 
 export interface StrategyInfo {

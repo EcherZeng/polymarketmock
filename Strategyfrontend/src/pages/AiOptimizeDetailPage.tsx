@@ -2,8 +2,9 @@ import { useMemo, useState } from "react"
 import { useParams, Link } from "react-router-dom"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
-import { fetchAiOptimizeTask, stopAiOptimize, fetchPresets, savePreset } from "@/api/client"
-import type { AiOptimizeTaskDetail, PresetsResponse } from "@/types"
+import { fetchAiOptimizeTask, stopAiOptimize, savePreset } from "@/api/client"
+import { PARAM_SCHEMA } from "@/config/paramSchema"
+import type { AiOptimizeTaskDetail } from "@/types"
 import {
   Dialog,
   DialogContent,
@@ -55,11 +56,6 @@ export default function AiOptimizeDetailPage() {
     },
   })
 
-  const { data: presets } = useQuery<PresetsResponse>({
-    queryKey: ["presets"],
-    queryFn: fetchPresets,
-  })
-
   const stopMutation = useMutation({
     mutationFn: () => stopAiOptimize(taskId!),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["aiOptimizeTask", taskId] }),
@@ -71,12 +67,12 @@ export default function AiOptimizeDetailPage() {
     onSuccess: () => {
       setCreateDialogOpen(false)
       setPresetName("")
-      queryClient.invalidateQueries({ queryKey: ["presets"] })
+      queryClient.invalidateQueries({ queryKey: ["strategies"] })
     },
   })
 
   // ── Param schema lookup ─────────────────────────────────────────────
-  const paramSchema = presets?.param_schema ?? {}
+  const paramSchema = PARAM_SCHEMA
 
   const getParamLabel = (key: string): string => {
     const schema = paramSchema[key]

@@ -5,7 +5,6 @@ import { cn } from "@/lib/utils"
 import {
   fetchStrategies,
   fetchArchives,
-  fetchPresets,
   savePreset,
   deletePreset,
   runBacktest,
@@ -14,12 +13,12 @@ import {
   fetchTracked,
   fetchPortfolios,
 } from "@/api/client"
+import { PARAM_SCHEMA, PARAM_GROUPS, DEFAULT_UNIFIED_RULES } from "@/config/paramSchema"
 import type {
   StrategyInfo,
   ArchiveInfo,
   RunRequest,
   BatchRequest,
-  PresetsResponse,
   I18nLabel,
   Portfolio,
 } from "@/types"
@@ -85,11 +84,6 @@ export default function StrategyPage() {
     queryFn: fetchArchives,
   })
 
-  const { data: presetsData } = useQuery<PresetsResponse>({
-    queryKey: ["presets"],
-    queryFn: fetchPresets,
-  })
-
   const { data: trackedSlugs = [] } = useQuery<string[]>({
     queryKey: ["tracked"],
     queryFn: fetchTracked,
@@ -125,8 +119,8 @@ export default function StrategyPage() {
     },
   })
 
-  const paramSchema = presetsData?.param_schema ?? {}
-  const paramGroups = presetsData?.param_groups ?? {}
+  const paramSchema = PARAM_SCHEMA
+  const paramGroups = PARAM_GROUPS
 
   const activeStrategy = useMemo(
     () => strategies.find((s) => s.name === selectedStrategy),
@@ -143,7 +137,6 @@ export default function StrategyPage() {
       savePreset(args.name, { description: args.desc, params: args.params }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["strategies"] })
-      queryClient.invalidateQueries({ queryKey: ["presets"] })
       setSavePresetName("")
       setSavePresetDesc("")
     },
@@ -153,7 +146,6 @@ export default function StrategyPage() {
     mutationFn: (name: string) => deletePreset(name),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["strategies"] })
-      queryClient.invalidateQueries({ queryKey: ["presets"] })
     },
   })
 
@@ -389,7 +381,7 @@ export default function StrategyPage() {
               <button
                 onClick={() => {
                   // Base values from unified_rules + param_schema defaults
-                  const base: Record<string, unknown> = { ...(presetsData?.unified_rules ?? {}) }
+                  const base: Record<string, unknown> = { ...DEFAULT_UNIFIED_RULES }
                   for (const [k, s] of Object.entries(paramSchema)) {
                     if (!(k in base) && s.disable_value != null) base[k] = s.disable_value
                   }

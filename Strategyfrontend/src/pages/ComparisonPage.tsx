@@ -2,10 +2,11 @@ import { useQuery } from "@tanstack/react-query"
 import { useSearchParams, Link } from "react-router-dom"
 import { useMemo, useState } from "react"
 import { cn } from "@/lib/utils"
-import { fetchPortfolio, fetchPresets } from "@/api/client"
+import { fetchPortfolio } from "@/api/client"
+import { PARAM_SCHEMA } from "@/config/paramSchema"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
-import type { Portfolio, PresetsResponse } from "@/types"
+import type { Portfolio } from "@/types"
 
 export default function ComparisonPage() {
   const [searchParams] = useSearchParams()
@@ -25,11 +26,6 @@ export default function ComparisonPage() {
     // eslint-disable-next-line react-hooks/rules-of-hooks
     useQuery<Portfolio>(opts),
   )
-
-  const { data: presets } = useQuery<PresetsResponse>({
-    queryKey: ["presets"],
-    queryFn: fetchPresets,
-  })
 
   const isLoading = results.some((r) => r.isLoading)
   const portfolios = results
@@ -104,8 +100,8 @@ export default function ComparisonPage() {
   const displayKeys = diffOnly ? sortedKeys.filter((k) => diffKeys.has(k)) : sortedKeys
 
   const getParamLabel = (key: string) => {
-    if (!presets?.param_schema?.[key]) return key
-    return presets.param_schema[key].label?.zh ?? key
+    if (!PARAM_SCHEMA[key]) return key
+    return PARAM_SCHEMA[key].label?.zh ?? key
   }
 
   return (

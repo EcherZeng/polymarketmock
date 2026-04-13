@@ -13,7 +13,6 @@ import type {
   BatchRequest,
   BatchTask,
   BatchTaskDetail,
-  PresetsResponse,
   BtcKlineResponse,
   Portfolio,
   PortfolioItem,
@@ -34,11 +33,6 @@ export async function fetchStrategy(name: string): Promise<StrategyInfo> {
 }
 
 // ── Presets ──────────────────────────────────────────────────────────────────
-
-export async function fetchPresets(): Promise<PresetsResponse> {
-  const { data } = await api.get<PresetsResponse>("/presets")
-  return data
-}
 
 export async function savePreset(
   name: string,

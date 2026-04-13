@@ -15,45 +15,6 @@ class PresetBody(BaseModel):
     params: dict = Field(default_factory=dict)
 
 
-class UnifiedRulesBody(BaseModel):
-    take_profit_price: float = Field(ge=0, le=1)
-    stop_loss_price: float = Field(ge=0, le=1)
-    force_close_remaining_seconds: int = Field(ge=0)
-
-
-# ── List ─────────────────────────────────────────────────────────────────────
-
-
-@router.get("")
-async def list_presets():
-    """List all strategy presets with param schema for frontend form rendering."""
-    data = registry.get_presets_data()
-    return {
-        "unified_rules": data.get("unified_rules", {}),
-        "strategies": data.get("strategies", {}),
-        "param_schema": registry.get_param_schema(),
-        "param_groups": registry.get_param_groups(),
-    }
-
-
-# ── Unified rules (must come BEFORE /{name} to avoid path conflict) ─────────
-
-
-@router.get("/rules/unified")
-async def get_unified_rules():
-    """Get the current unified rules."""
-    data = registry.get_presets_data()
-    return {"unified_rules": data.get("unified_rules", {})}
-
-
-@router.put("/rules/unified")
-async def update_unified_rules(body: UnifiedRulesBody):
-    """Update the shared unified rules (TP/SL/force close/loss reduction)."""
-    rules = body.model_dump()
-    registry.update_unified_rules(rules)
-    return {"unified_rules": rules}
-
-
 # ── Single preset CRUD ───────────────────────────────────────────────────────
 
 

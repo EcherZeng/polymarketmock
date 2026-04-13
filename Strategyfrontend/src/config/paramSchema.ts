@@ -1,0 +1,233 @@
+/**
+ * Frontend-local parameter schema, group definitions, and default unified rules.
+ *
+ * This replaces the previous dependency on `GET /strategy/presets` for form
+ * rendering.  The backend keeps its own copy in `strategy_presets.json` for
+ * evaluation / AI-optimisation; the two sides only exchange param *values*.
+ */
+
+import type { ParamSchemaItem, ParamGroupDef } from "@/types"
+
+// ── Default unified rules (baseline values for new strategies) ──────────────
+
+export const DEFAULT_UNIFIED_RULES: Record<string, number> = {
+  take_profit_price: 0.99,
+  stop_loss_price: 0.65,
+  force_close_remaining_seconds: 30,
+}
+
+// ── Param groups ────────────────────────────────────────────────────────────
+
+export const PARAM_GROUPS: Record<string, ParamGroupDef> = {
+  risk: { zh: "风控规则", en: "Risk Management", order: 1 },
+  entry: { zh: "入场条件", en: "Entry Conditions", order: 2 },
+  position: { zh: "仓位管理", en: "Position Sizing", order: 5 },
+  extra: { zh: "BTC 短线配置", en: "BTC Short-term Config", order: 6 },
+}
+
+// ── Param schema ────────────────────────────────────────────────────────────
+
+export const PARAM_SCHEMA: Record<string, ParamSchemaItem> = {
+  take_profit_price: {
+    group: "risk",
+    visibility: "core",
+    weight: "high",
+    label: { zh: "止盈价格", en: "Take Profit Price" },
+    desc: {
+      zh: "持仓标的中间价达到此价格时自动触发止盈平仓。价格区间为 [0.5, 1.0]。",
+      en: "Auto take-profit when the held token's mid price reaches this level. Range [0.5, 1.0].",
+    },
+    disable_value: 1,
+    disable_note: {
+      zh: "设为 1.0：市场价格最高趋近 1，止盈永不触发",
+      en: "Set to 1.0: price never reaches 1, TP never fires",
+    },
+    type: "float",
+    min: 0.5,
+    max: 1,
+    step: 0.01,
+    unit: "",
+    scope: "unified",
+  },
+  stop_loss_price: {
+    group: "risk",
+    visibility: "core",
+    weight: "critical",
+    label: { zh: "止损价格", en: "Stop Loss Price" },
+    desc: {
+      zh: "持仓标的中间价跌破此价格时自动触发止损平仓。价格区间为 [0.0, 1.0]。",
+      en: "Auto stop-loss when the held token's mid price falls below this level. Range [0.0, 1.0].",
+    },
+    disable_value: 0,
+    disable_note: {
+      zh: "设为 0.0：价格不会跌至 0，止损永不触发",
+      en: "Set to 0.0: price never falls to 0, SL never fires",
+    },
+    type: "float",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    unit: "",
+    scope: "unified",
+  },
+  force_close_remaining_seconds: {
+    group: "risk",
+    visibility: "core",
+    weight: "medium",
+    label: { zh: "强制平仓剩余秒数", en: "Force Close Remaining (s)" },
+    desc: {
+      zh: "市场到期前剩余秒数不足此值时，强制平掉所有持仓，防止在到期时刻持有未结仓位。区间为 [0, 300]。",
+      en: "Force-close all positions when remaining seconds fall below this threshold, preventing open positions at expiry. Range [0, 300].",
+    },
+    disable_value: 0,
+    disable_note: {
+      zh: "设为 0：不提前强制平仓，持仓直至市场结算",
+      en: "Set to 0: no early force-close, positions held until settlement",
+    },
+    type: "int",
+    min: 0,
+    max: 300,
+    step: 1,
+    unit: "秒",
+    scope: "unified",
+  },
+  min_price: {
+    group: "entry",
+    visibility: "core",
+    weight: "critical",
+    label: { zh: "入场最低价格", en: "Entry Min Price" },
+    desc: {
+      zh: "只在中间价高于此阈值的标的上入场，用于过滤价格过低、流动性差的尾盘标的。区间为 [0.01, 1.0]。",
+      en: "Only consider tokens whose mid price is above this threshold, filtering out illiquid low-priced markets. Range [0.01, 1.0].",
+    },
+    disable_value: 0.01,
+    disable_note: {
+      zh: "设为 0.01（最小值）：所有入场候选均可通过，价格过滤实际失效",
+      en: "Set to 0.01 (min): all entry candidates pass, price filter effectively disabled",
+    },
+    type: "float",
+    min: 0.01,
+    max: 1,
+    step: 0.01,
+    unit: "",
+    scope: "strategy",
+  },
+  time_remaining_ratio: {
+    group: "entry",
+    visibility: "core",
+    weight: "medium",
+    label: { zh: "剩余时间比例阈值", en: "Time Remaining Ratio" },
+    desc: {
+      zh: "只允许在市场剩余时间比例（剩余 ticks / 总 ticks）低于此阈值时入场，避免在市场初期不确定性过高时进场。区间为 [0.0, 1.0]。",
+      en: "Only allow entry when remaining time ratio (remaining ticks / total ticks) is below this threshold, avoiding early entry when uncertainty is high. Range [0.0, 1.0].",
+    },
+    disable_value: 1,
+    disable_note: {
+      zh: "设为 1.0：剩余时间比例永远≤ 1.0，入场时间限制实际失效，任意时刻均可入场",
+      en: "Set to 1.0: remaining ratio is always ≤ 1.0, time gate effectively disabled, entry allowed at any time",
+    },
+    type: "float",
+    min: 0,
+    max: 1,
+    step: 0.01,
+    unit: "",
+    scope: "strategy",
+  },
+  position_min_pct: {
+    group: "position",
+    visibility: "core",
+    weight: "medium",
+    label: { zh: "最小仓位比例", en: "Min Position (%)" },
+    desc: {
+      zh: "单次入场使用的最小仓位比例（占可用资金），保证每次入场具有一定規模。区间为 [0.01, 1.0]。",
+      en: "Minimum position size (fraction of available capital) per entry, ensuring a minimum trade size. Range [0.01, 1.0].",
+    },
+    disable_value: 0.01,
+    disable_note: {
+      zh: "设为 0.01（最小值）：下限几乎无绳束，仓位大小由 position_max_pct 决定",
+      en: "Set to 0.01 (min): lower bound almost unconstrained, size determined by position_max_pct",
+    },
+    type: "float",
+    min: 0.01,
+    max: 1,
+    step: 0.01,
+    unit: "",
+    scope: "strategy",
+  },
+  position_max_pct: {
+    group: "position",
+    visibility: "core",
+    weight: "high",
+    label: { zh: "最大仓位比例", en: "Max Position (%)" },
+    desc: {
+      zh: "单次入场使用的最大仓位比例（占可用资金），防止应仓过重。合理设置可控制单笔交易风险暖。区间为 [0.01, 1.0]。",
+      en: "Maximum position size (fraction of available capital) per entry, preventing excessive concentration. Range [0.01, 1.0].",
+    },
+    disable_value: 1,
+    disable_note: {
+      zh: "设为 1.0：不限制仓位上限，允许全仓入场（高风险，谨慎使用）",
+      en: "Set to 1.0: no cap on position size, full capital entry allowed (high risk, use with caution)",
+    },
+    type: "float",
+    min: 0.01,
+    max: 1,
+    step: 0.01,
+    unit: "",
+    scope: "strategy",
+  },
+  btc_trend_window_1: {
+    group: "extra",
+    visibility: "core",
+    weight: "medium",
+    pool_hidden: true,
+    label: { zh: "BTC趋势窗口1", en: "BTC Trend Window 1" },
+    desc: {
+      zh: "第一段趋势检测窗口时长（分钟）。从session开始时刻往后的N分钟，用于计算第一段涨跌幅 a1。",
+      en: "Duration (minutes) of the first trend detection window from session start. Used to compute the first price change ratio a1.",
+    },
+    type: "int",
+    min: 1,
+    max: 10,
+    step: 1,
+    unit: "分钟",
+    scope: "unified",
+    default: 5,
+  },
+  btc_trend_window_2: {
+    group: "extra",
+    visibility: "core",
+    weight: "medium",
+    pool_hidden: true,
+    label: { zh: "BTC趋势窗口2", en: "BTC Trend Window 2" },
+    desc: {
+      zh: "第二段趋势检测窗口时长（分钟）。紧接窗口1之后的N分钟，用于计算第二段涨跌幅 a2。必须大于窗口1的值。",
+      en: "Duration (minutes) of the second trend detection window following window 1. Used to compute the second price change ratio a2. Must be greater than window 1.",
+    },
+    type: "int",
+    min: 1,
+    max: 10,
+    step: 1,
+    unit: "分钟",
+    scope: "unified",
+    depends_on: "btc_trend_window_1",
+    default: 5,
+  },
+  btc_min_momentum: {
+    group: "extra",
+    visibility: "core",
+    weight: "high",
+    label: { zh: "BTC趋势过滤（最小动量阈值）", en: "BTC Trend Filter (Min Momentum)" },
+    desc: {
+      zh: "启用BTC趋势过滤。回测前根据BTC价格的两段涨跌幅判断趋势方向和强度，|a1+a2| 必须大于此阈值才允许入场。值越大，仅允许更强的趋势通过。依赖两个检测窗口参数，添加时自动引入。",
+      en: "Enable BTC trend filter. Compute BTC price trend from two time windows before the session. |a1+a2| must exceed this threshold to allow entry. Higher values filter out weak trends. Depends on both trend windows, which are auto-included.",
+    },
+    type: "float",
+    min: 0,
+    max: 0.1,
+    step: 0.001,
+    unit: "",
+    scope: "unified",
+    depends_on: "btc_trend_window_2",
+    default: 0.001,
+  },
+}

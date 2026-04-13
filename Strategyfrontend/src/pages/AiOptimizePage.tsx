@@ -4,16 +4,15 @@ import { Link, useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import {
   fetchStrategies,
-  fetchPresets,
   fetchPortfolios,
   fetchAiOptimizeTasks,
   submitAiOptimize,
   stopAiOptimize,
   fetchAiModels,
 } from "@/api/client"
+import { PARAM_SCHEMA, PARAM_GROUPS } from "@/config/paramSchema"
 import type {
   StrategyInfo,
-  PresetsResponse,
   Portfolio,
   AiOptimizeTask,
   AiOptimizeRequest,
@@ -91,11 +90,6 @@ export default function AiOptimizePage() {
     queryFn: fetchStrategies,
   })
 
-  const { data: presetsData } = useQuery<PresetsResponse>({
-    queryKey: ["presets"],
-    queryFn: fetchPresets,
-  })
-
   const { data: portfolios = [] } = useQuery<Portfolio[]>({
     queryKey: ["portfolios"],
     queryFn: fetchPortfolios,
@@ -121,7 +115,7 @@ export default function AiOptimizePage() {
   )
 
   // ── Derived ─────────────────────────────────────────────────────────────
-  const paramSchema = presetsData?.param_schema ?? {}
+  const paramSchema = PARAM_SCHEMA
   const activeStrategy = strategies.find((s) => s.name === selectedStrategy)
   const selectedPortfolio = portfolios.find((p) => p.portfolio_id === selectedPortfolioId)
 
@@ -499,7 +493,7 @@ export default function AiOptimizePage() {
                       if (!groups.has(p.group)) groups.set(p.group, [])
                       groups.get(p.group)!.push(p)
                     }
-                    const groupDefs = presetsData?.param_groups ?? {}
+                    const groupDefs = PARAM_GROUPS
                     const sorted = [...groups.entries()].sort((a, b) =>
                       (groupDefs[a[0]]?.order ?? 99) - (groupDefs[b[0]]?.order ?? 99)
                     )

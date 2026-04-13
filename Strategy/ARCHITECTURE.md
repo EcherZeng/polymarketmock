@@ -2,6 +2,8 @@
 
 > 完全独立的 Python 进程。通过目录结构直接读取 `backend/data/` 下的 Parquet 历史数据，**不与 Backend 做任何 API 调用**。自身提供完整的 HTTP API，供前端页面控制策略选择、回测执行和结果评估。
 
+> 分层分目录重构实施方案见：`doc/layered-refactor-plan.md`（保持零业务变更的渐进迁移路径）。
+
 ---
 
 ## 1. 系统定位
