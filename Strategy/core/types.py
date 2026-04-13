@@ -12,6 +12,33 @@ def param_active(config: dict, key: str) -> bool:
     return key in config
 
 
+def btc_trend_enabled(config: dict) -> bool:
+    """Return True if BTC trend / momentum filter params are valid.
+
+    Checks:
+      - btc_min_momentum is present and > 0
+      - btc_trend_window_1 is present and >= 1
+      - btc_trend_window_2 is present and >= btc_trend_window_1
+
+    Extensible: add future momentum-related validations here
+    (e.g. volume confirmation, slope threshold).
+    """
+    if not param_active(config, "btc_min_momentum"):
+        return False
+    min_mom = config.get("btc_min_momentum")
+    if min_mom is None or min_mom < 0:
+        return False
+    w1 = config.get("btc_trend_window_1")
+    w2 = config.get("btc_trend_window_2")
+    if w1 is None or w2 is None:
+        return False
+    if w1 < 1 or w2 < 1:
+        return False
+    if w2 < w1:
+        return False
+    return True
+
+
 @dataclass
 class Signal:
     """Trading signal produced by a strategy."""

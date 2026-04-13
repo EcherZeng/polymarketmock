@@ -125,7 +125,7 @@ export default function AiOptimizePage() {
   const activeStrategy = strategies.find((s) => s.name === selectedStrategy)
   const selectedPortfolio = portfolios.find((p) => p.portfolio_id === selectedPortfolioId)
 
-  // Tunable params: non-bool params that exist in the selected strategy's default_config,
+  // Tunable params: non-bool, non-hidden params that exist in the selected strategy's default_config,
   // excluding child params whose parent toggle is OFF in the strategy config.
   const tunableParams = useMemo(() => {
     if (!activeStrategy) return []
@@ -138,6 +138,7 @@ export default function AiOptimizePage() {
     return Object.entries(paramSchema)
       .filter(([key, info]) => {
         if (info.type === "bool") return false
+        if (info.pool_hidden) return false
         if (!strategyKeys.has(key)) return false
         // Exclude child params whose parent toggle is off
         if (info.depends_on && toggleOffKeys.has(info.depends_on)) return false
@@ -186,6 +187,7 @@ export default function AiOptimizePage() {
     const newTunable = Object.entries(paramSchema)
       .filter(([key, info]) => {
         if (info.type === "bool") return false
+        if (info.pool_hidden) return false
         if (!strategyKeys.has(key)) return false
         if (info.depends_on && toggleOffKeys.has(info.depends_on)) return false
         return true

@@ -24,6 +24,8 @@ export interface ParamSchemaItem {
   scope: "unified" | "strategy"
   /** Parent param key: selecting this param auto-adds the parent. Removing the parent removes this child. */
   depends_on?: string
+  /** If true, this param is hidden from the parameter pool. It is auto-included when its parent is added. */
+  pool_hidden?: boolean
   /** The value to set when you want this parameter to have no effect on calculations. null means param is toggle-like (presence = enabled). */
   disable_value?: number | null
   /** Human-readable explanation of what disable_value achieves */

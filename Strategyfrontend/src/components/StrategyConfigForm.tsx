@@ -230,6 +230,8 @@ export default function StrategyConfigForm({
         if (!activeMap.has(group)) activeMap.set(group, [])
         activeMap.get(group)!.push({ key, schema })
       } else {
+        // Hide pool_hidden params from the pool — they are auto-included with parent
+        if (schema.pool_hidden) continue
         if (!poolMap.has(group)) poolMap.set(group, [])
         poolMap.get(group)!.push({ key, schema })
       }
@@ -267,6 +269,18 @@ export default function StrategyConfigForm({
     if (updatedValues[key] === undefined) {
       const s = paramSchema[key]
       if (s) updatedValues[key] = s.type === "bool" ? false : (s.default ?? s.disable_value ?? s.min ?? 0)
+    }
+
+    // Auto-include pool_hidden descendants
+    const descendants = getDescendants(key, depGraph)
+    for (const dk of descendants) {
+      const ds = paramSchema[dk]
+      if (ds?.pool_hidden && !next.has(dk)) {
+        next.add(dk)
+        if (updatedValues[dk] === undefined) {
+          updatedValues[dk] = ds.type === "bool" ? true : (ds.default ?? ds.min ?? 0)
+        }
+      }
     }
 
     onChange(updatedValues)

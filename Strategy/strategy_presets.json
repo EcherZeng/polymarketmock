@@ -2,8 +2,7 @@
   "unified_rules": {
     "take_profit_price": 0.99,
     "stop_loss_price": 0.65,
-    "force_close_remaining_seconds": 30,
-    "btc_trend_enabled": false
+    "force_close_remaining_seconds": 30
   },
   "param_schema": {
     "take_profit_price": {
@@ -174,26 +173,31 @@
       "unit": "",
       "scope": "strategy"
     },
-    "btc_trend_enabled": {
+    "btc_min_momentum": {
       "group": "extra",
       "visibility": "core",
-      "weight": "medium",
+      "weight": "high",
       "label": {
-        "zh": "启用BTC趋势过滤",
-        "en": "Enable BTC Trend Filter"
+        "zh": "BTC趋势过滤（最小动量阈值）",
+        "en": "BTC Trend Filter (Min Momentum)"
       },
       "desc": {
-        "zh": "开启后，回测前根据同时段BTC价格的两段涨跌幅判断趋势方向和强度，弱趋势或方向不一致时抑制所有入场信号。适用于15分钟场次。",
-        "en": "When enabled, compute BTC price trend from two time windows before the session. Suppress all entry signals if trend is weak or inconsistent. Designed for 15-minute sessions."
+        "zh": "启用BTC趋势过滤。回测前根据BTC价格的两段涨跌幅判断趋势方向和强度，|a1+a2| 必须大于此阈值才允许入场。值越大，仅允许更强的趋势通过。添加后可调整两个检测窗口时长。",
+        "en": "Enable BTC trend filter. Compute BTC price trend from two time windows before the session. |a1+a2| must exceed this threshold to allow entry. Higher values filter out weak trends. Both trend windows are auto-included and adjustable."
       },
-      "type": "bool",
+      "type": "float",
+      "min": 0,
+      "max": 0.1,
+      "step": 0.001,
+      "unit": "",
       "scope": "unified",
-      "default": false
+      "default": 0.001
     },
     "btc_trend_window_1": {
       "group": "extra",
       "visibility": "core",
       "weight": "medium",
+      "pool_hidden": true,
       "label": {
         "zh": "BTC趋势窗口1",
         "en": "BTC Trend Window 1"
@@ -208,13 +212,14 @@
       "step": 1,
       "unit": "分钟",
       "scope": "unified",
-      "depends_on": "btc_trend_enabled",
+      "depends_on": "btc_min_momentum",
       "default": 5
     },
     "btc_trend_window_2": {
       "group": "extra",
       "visibility": "core",
       "weight": "medium",
+      "pool_hidden": true,
       "label": {
         "zh": "BTC趋势窗口2",
         "en": "BTC Trend Window 2"
@@ -229,29 +234,8 @@
       "step": 1,
       "unit": "分钟",
       "scope": "unified",
-      "depends_on": "btc_trend_window_1",
-      "default": 10
-    },
-    "btc_min_momentum": {
-      "group": "extra",
-      "visibility": "core",
-      "weight": "high",
-      "label": {
-        "zh": "BTC最小动量阈值",
-        "en": "BTC Min Momentum"
-      },
-      "desc": {
-        "zh": "BTC两段涨跌幅之和的绝对值 |a1+a2| 必须大于此阈值才允许入场。值越大，仅允许更强的趋势通过；值越小，弱趋势也可入场。依赖窗口1和窗口2。",
-        "en": "The absolute sum |a1+a2| of the two BTC price change ratios must exceed this threshold to allow entry. Higher values filter out weak trends. Requires both trend windows."
-      },
-      "type": "float",
-      "min": 0,
-      "max": 0.1,
-      "step": 0.001,
-      "unit": "",
-      "scope": "unified",
-      "depends_on": "btc_trend_window_2",
-      "default": 0.001
+      "depends_on": "btc_min_momentum",
+      "default": 5
     }
   },
   "param_groups": {

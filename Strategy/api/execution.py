@@ -15,7 +15,7 @@ from core.btc_data import fetch_btc_klines
 from core.data_loader import load_archive
 from core.evaluator import compute_drawdown_curve, compute_drawdown_events, evaluate
 from core.runner import run_backtest
-from core.types import BacktestSession, param_active
+from core.types import BacktestSession, btc_trend_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +65,9 @@ async def run_single(req: RunRequest):
     if not registry.has(req.strategy):
         raise HTTPException(status_code=404, detail=f"Strategy '{req.strategy}' not found")
 
-    # Pre-fetch BTC klines if btc_trend_enabled is active
+    # Pre-fetch BTC klines if btc_min_momentum is active
     btc_klines: list[dict] | None = None
-    if param_active(req.config, "btc_trend_enabled") and req.config.get("btc_trend_enabled"):
+    if btc_trend_enabled(req.config):
         try:
             data = await asyncio.to_thread(load_archive, config.data_dir, req.slug)
             # Collect all timestamps to determine time range

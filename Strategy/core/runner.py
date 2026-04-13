@@ -27,6 +27,7 @@ from core.types import (
     FillInfo,
     TickContext,
     TokenSnapshot,
+    btc_trend_enabled,
     param_active,
 )
 
@@ -173,7 +174,7 @@ def run_backtest(
     # ── BTC trend filter ─────────────────────────────────────────────────
     btc_trend_info: dict | None = None
     btc_trend_pass = True  # default: allow entry
-    if param_active(merged_config, "btc_trend_enabled") and merged_config.get("btc_trend_enabled"):
+    if btc_trend_enabled(merged_config):
         w1 = merged_config.get("btc_trend_window_1", 5)
         w2 = merged_config.get("btc_trend_window_2", 5)
         min_mom = merged_config.get("btc_min_momentum", 0.001)
@@ -187,7 +188,7 @@ def run_backtest(
             )
         else:
             btc_trend_info = {"a1": 0.0, "a2": 0.0, "passed": True, "p0": 0.0, "p_w1": 0.0, "p_w2": 0.0, "error": "no_klines_provided"}
-            logger.warning("Backtest %s: btc_trend_enabled but no klines provided, allowing entry", session_id)
+            logger.warning("Backtest %s: btc_min_momentum active but no klines provided, allowing entry", session_id)
 
     # Build indexed data per token for efficient lookup
     ob_by_token = _build_index(data.orderbooks)

@@ -24,7 +24,7 @@ from core.evaluator import compute_drawdown_curve, compute_drawdown_events, eval
 from core.registry import StrategyRegistry
 from core.runner import run_backtest
 from core.btc_data import fetch_btc_klines
-from core.types import ArchiveData, BacktestSession, param_active
+from core.types import ArchiveData, BacktestSession, btc_trend_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -255,9 +255,9 @@ class BatchRunner:
                 # ── Step 2: Run backtest (strategy init + tick loop) ─────
                 slug_balance = override_balance if override_balance is not None else task.initial_balance
 
-                # Pre-fetch BTC klines if btc_trend_enabled
+                # Pre-fetch BTC klines if btc_min_momentum is active
                 btc_klines: list[dict] | None = None
-                if param_active(task.config, "btc_trend_enabled") and task.config.get("btc_trend_enabled"):
+                if btc_trend_enabled(task.config):
                     try:
                         all_ts: set[str] = set()
                         for row in (*data.prices, *data.orderbooks, *data.live_trades, *data.ob_deltas):
