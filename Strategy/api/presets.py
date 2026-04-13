@@ -19,8 +19,6 @@ class UnifiedRulesBody(BaseModel):
     take_profit_price: float = Field(ge=0, le=1)
     stop_loss_price: float = Field(ge=0, le=1)
     force_close_remaining_seconds: int = Field(ge=0)
-    consecutive_loss_threshold: int = Field(ge=1)
-    loss_position_reduction_pct: float = Field(ge=0, le=1)
 
 
 # ── List ─────────────────────────────────────────────────────────────────────

@@ -369,35 +369,30 @@ export default function StrategyPage() {
                   <div className="flex items-center justify-between">
                     <span className="font-medium">{s.name}</span>
                     <div className="flex items-center gap-2">
-                      {s.builtin && (
-                        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                          内置
-                        </span>
-                      )}
                       <span className="text-xs text-muted-foreground">v{s.version}</span>
                     </div>
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">{t(s.description)}</p>
-                  {!s.builtin && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        if (confirm(`确定删除自定义预设 "${s.name}"？`)) {
-                          deletePresetMutation.mutate(s.name)
-                        }
-                      }}
-                      className="mt-1 text-xs text-destructive hover:underline"
-                    >
-                      删除
-                    </button>
-                  )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (confirm(`确定删除自定义预设 "${s.name}"？`)) {
+                        deletePresetMutation.mutate(s.name)
+                      }
+                    }}
+                    className="mt-1 text-xs text-destructive hover:underline"
+                  >
+                    删除
+                  </button>
                 </button>
               ))}
               <button
                 onClick={() => {
-                  // Base values from first builtin strategy
-                  const builtinStrategy = strategies.find((s) => s.builtin)
-                  const base: Record<string, unknown> = { ...(builtinStrategy?.default_config ?? {}) }
+                  // Base values from unified_rules + param_schema defaults
+                  const base: Record<string, unknown> = { ...(presetsData?.unified_rules ?? {}) }
+                  for (const [k, s] of Object.entries(paramSchema)) {
+                    if (!(k in base) && s.disable_value != null) base[k] = s.disable_value
+                  }
 
                   setNewStrategyValues(base)
 

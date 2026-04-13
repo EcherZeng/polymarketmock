@@ -191,47 +191,5 @@
       "order": 5
     }
   },
-  "strategies": {
-    "solid_core": {
-      "take_profit_price": 0.85,
-      "stop_loss_price": 0.5,
-      "force_close_remaining_seconds": 30,
-      "min_price": 0.65,
-      "time_remaining_ratio": 0.333,
-      "position_min_pct": 0.2,
-      "position_max_pct": 0.3,
-      "builtin": true
-    },
-    "main_force": {
-      "builtin": true,
-      "description": {
-        "zh": "主力策略 — 中高概率市场临近到期时中等波动顺势建仓",
-        "en": "Main Force — Moderate volatility trend position near expiry"
-      },
-      "min_price": 0.85,
-      "time_remaining_ratio": 0.333,
-      "position_min_pct": 0.1,
-      "position_max_pct": 0.3
-    },
-    "high_freq_coverage": {
-      "builtin": true,
-      "description": {
-        "zh": "高频覆盖策略 — 宽松条件下方向一致时快速入场覆盖",
-        "en": "High Freq Coverage — Quick entry on consistent direction with relaxed conditions"
-      },
-      "min_price": 0.82,
-      "time_remaining_ratio": 0.333,
-      "position_min_pct": 0.05,
-      "position_max_pct": 0.2
-    },
-    "Test预设": {
-      "take_profit_price": 0.99,
-      "stop_loss_price": 0.38,
-      "force_close_remaining_seconds": 2020,
-      "min_price": 0.89,
-      "time_remaining_ratio": 0.333,
-      "position_min_pct": 0.2,
-      "position_max_pct": 0.3
-    }
-  }
+  "strategies": {}
 }
