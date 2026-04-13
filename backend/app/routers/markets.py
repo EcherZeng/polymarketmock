@@ -300,30 +300,35 @@ async def get_archive(slug: str):
 
 @router.delete("/archives/{slug:path}")
 async def delete_archive(slug: str):
-    """删除归档场次：硬删数据目录，软删索引元数据。"""
+    """删除归档场次：硬删数据目录，软删索引元数据。
+
+    当 Redis 元数据缺失时（如部署导致 Redis 重置），降级为仅删除
+    文件系统数据——关联的 Redis 键同样已不存在，无需清理。
+    """
     from app.storage.duckdb_store import delete_session
 
-    # 1. 获取元数据（删除前需要 market_id / token_ids 来清理 Redis）
+    # 1. 尝试获取元数据（用于清理关联 Redis 键）
     meta = await redis_store.get_archive_meta(slug)
-    if not meta:
-        raise HTTPException(status_code=404, detail=f"Archive not found: {slug}")
-    market_id = meta.get("market_id", "")
-    token_ids: list[str] = meta.get("token_ids", [])
 
     # 2. 硬删整个 session 目录（live + archive + meta.json）
-    delete_session(slug)
+    removed = delete_session(slug)
+    if not removed and not meta:
+        # 文件系统和 Redis 均无此 slug —— 真正不存在
+        raise HTTPException(status_code=404, detail=f"Archive not found: {slug}")
 
-    # 3. 硬删交易类 Redis 键
-    r = redis_store.get_redis()
-    if market_id:
-        await r.delete(f"live:trades:{market_id}")
-        await r.delete(f"live:seen:{market_id}")
-    for tid in token_ids:
-        await r.delete(f"realtime:trades:{tid}")
-        await r.delete(f"prev:book:{tid}")
-
-    # 4. 软删 Redis archive 元数据（保留 key，标记 deleted=true）
-    await redis_store.soft_delete_archive_meta(slug)
+    # 3. 清理关联 Redis 键（仅在元数据存在时执行）
+    if meta:
+        market_id = meta.get("market_id", "")
+        token_ids: list[str] = meta.get("token_ids", [])
+        r = redis_store.get_redis()
+        if market_id:
+            await r.delete(f"live:trades:{market_id}")
+            await r.delete(f"live:seen:{market_id}")
+        for tid in token_ids:
+            await r.delete(f"realtime:trades:{tid}")
+            await r.delete(f"prev:book:{tid}")
+        # 4. 软删 Redis archive 元数据（保留 key，标记 deleted=true）
+        await redis_store.soft_delete_archive_meta(slug)
 
     return {"deleted": slug}
 
