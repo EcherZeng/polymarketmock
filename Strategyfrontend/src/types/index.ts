@@ -185,6 +185,7 @@ export interface BacktestResult extends BacktestResultSummary {
   price_curve: PricePoint[]
   strategy_summary: Record<string, unknown>
   settlement_result: Record<string, number>
+  btc_trend_info?: BtcTrendInfo | null
 }
 
 export interface RunRequest {
@@ -202,6 +203,18 @@ export interface BatchRequest {
   config: Record<string, unknown>
   settlement_result?: Record<string, number>
   cumulative_capital?: boolean
+}
+
+// ── BTC Trend Filter ───────────────────────────────────────────────────────
+
+export interface BtcTrendInfo {
+  a1: number
+  a2: number
+  passed: boolean
+  p0: number
+  p_w1: number
+  p_w2: number
+  error: string | null
 }
 
 // ── BTC Kline (Binance) ────────────────────────────────────────────────────

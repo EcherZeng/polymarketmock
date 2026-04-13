@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -10,10 +11,13 @@ from pydantic import BaseModel, Field
 from api.state import registry
 import api.state as state
 from config import config
+from core.btc_data import fetch_btc_klines
 from core.data_loader import load_archive
 from core.evaluator import compute_drawdown_curve, compute_drawdown_events, evaluate
 from core.runner import run_backtest
 from core.types import BacktestSession
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -61,6 +65,24 @@ async def run_single(req: RunRequest):
     if not registry.has(req.strategy):
         raise HTTPException(status_code=404, detail=f"Strategy '{req.strategy}' not found")
 
+    # Pre-fetch BTC klines if btc_trend_enabled is active
+    btc_klines: list[dict] | None = None
+    if req.config.get("btc_trend_enabled"):
+        try:
+            data = await asyncio.to_thread(load_archive, config.data_dir, req.slug)
+            # Collect all timestamps to determine time range
+            all_ts: set[str] = set()
+            for row in (*data.prices, *data.orderbooks, *data.live_trades, *data.ob_deltas):
+                ts = row.get("timestamp", "")
+                if ts:
+                    all_ts.add(ts)
+            if all_ts:
+                sorted_ts = sorted(all_ts)
+                btc_klines = await fetch_btc_klines(sorted_ts[0], sorted_ts[-1])
+        except Exception as e:
+            logger.warning("BTC klines prefetch failed for %s: %s", req.slug, e)
+            # Don't block backtest on BTC data failure
+
     # Run in thread pool (DuckDB is sync)
     try:
         session = await asyncio.to_thread(
@@ -72,6 +94,7 @@ async def run_single(req: RunRequest):
             req.initial_balance,
             None,  # data
             req.settlement_result,
+            btc_klines,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -336,4 +359,5 @@ def _serialize_session(session) -> dict:
         "price_curve": session.price_curve,
         "strategy_summary": session.strategy_summary,
         "settlement_result": session.settlement_result,
+        "btc_trend_info": session.btc_trend_info,
     }

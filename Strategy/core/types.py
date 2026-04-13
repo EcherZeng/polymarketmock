@@ -187,3 +187,6 @@ class BacktestSession:
 
     # Capital mode
     capital_mode: str = "fixed"  # "fixed" | "cumulative"
+
+    # BTC trend filter result
+    btc_trend_info: dict | None = None

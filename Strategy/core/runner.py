@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from config import config
 from core.anchor_pricing import SPREAD_WIDE, compute_anchor_price
 from core.base_strategy import BaseStrategy
+from core.btc_data import compute_btc_trend
 from core.data_loader import load_archive
 from core.matching import execute_signal
 from core.orderbook_state import apply_delta, derive_snapshot_from_ob, init_working_ob
@@ -26,6 +27,7 @@ from core.types import (
     FillInfo,
     TickContext,
     TokenSnapshot,
+    param_active,
 )
 
 logger = logging.getLogger(__name__)
@@ -115,6 +117,7 @@ def run_backtest(
     initial_balance: float,
     data: ArchiveData | None = None,
     settlement_result: dict[str, float] | None = None,
+    btc_klines: list[dict] | None = None,
 ) -> BacktestSession:
     """Execute a single backtest synchronously.
 
@@ -158,6 +161,25 @@ def run_backtest(
         raise ValueError(f"Slug '{slug}' produced an empty time grid (no timestamps)")
 
     logger.info("Backtest %s: time grid %d ticks (%s → %s)", session_id, total_ticks, time_grid[0], time_grid[-1])
+
+    # ── BTC trend filter ─────────────────────────────────────────────────
+    btc_trend_info: dict | None = None
+    btc_trend_pass = True  # default: allow entry
+    if param_active(merged_config, "btc_trend_enabled") and merged_config.get("btc_trend_enabled"):
+        w1 = merged_config.get("btc_trend_window_1", 5)
+        w2 = merged_config.get("btc_trend_window_2", 5)
+        min_mom = merged_config.get("btc_min_momentum", 0.001)
+        if btc_klines:
+            btc_trend_info = compute_btc_trend(btc_klines, time_grid[0], w1, w2, min_mom)
+            btc_trend_pass = btc_trend_info["passed"]
+            logger.info(
+                "Backtest %s BTC trend: a1=%.6f a2=%.6f |a1+a2|=%.6f pass=%s",
+                session_id, btc_trend_info["a1"], btc_trend_info["a2"],
+                abs(btc_trend_info["a1"] + btc_trend_info["a2"]), btc_trend_pass,
+            )
+        else:
+            btc_trend_info = {"a1": 0.0, "a2": 0.0, "passed": True, "p0": 0.0, "p_w1": 0.0, "p_w2": 0.0, "error": "no_klines_provided"}
+            logger.warning("Backtest %s: btc_trend_enabled but no klines provided, allowing entry", session_id)
 
     # Build indexed data per token for efficient lookup
     ob_by_token = _build_index(data.orderbooks)
@@ -301,8 +323,10 @@ def run_backtest(
         # 7) Call strategy
         signals = strategy.on_tick(ctx)
 
-        # 8) Execute signals
+        # 8) Execute signals (filter BUY if BTC trend did not pass)
         for signal in signals:
+            if not btc_trend_pass and signal.side == "BUY":
+                continue
             snap = token_snapshots.get(signal.token_id)
             if snap is None:
                 continue
@@ -405,5 +429,6 @@ def run_backtest(
         final_equity=round(final_equity, 6),
         final_positions=dict(positions),
         settlement_result=resolved_settlement,
+        btc_trend_info=btc_trend_info,
     )
     return session

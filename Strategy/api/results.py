@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 import api.state as state
 from api.result_store import sanitize_floats
+from core.btc_data import fetch_btc_klines
 
 logger = logging.getLogger(__name__)
 
@@ -322,14 +323,6 @@ async def purge_runner_memory():
 
 # ── BTC Kline (Binance) ─────────────────────────────────────────────────────
 
-BINANCE_KLINE_URL = "https://api.binance.com/api/v3/klines"
-
-
-def _iso_to_ms(ts: str) -> int:
-    """Convert ISO 8601 timestamp string to milliseconds since epoch."""
-    dt = datetime.fromisoformat(ts)
-    return int(dt.timestamp() * 1000)
-
 
 @router.get("/results/{session_id}/btc-klines")
 async def get_btc_klines(session_id: str):
@@ -348,42 +341,13 @@ async def get_btc_klines(session_id: str):
 
     start_ts = source[0]["timestamp"]
     end_ts = source[-1]["timestamp"]
-    start_ms = _iso_to_ms(start_ts)
-    end_ms = _iso_to_ms(end_ts)
 
-    # Fetch from Binance
+    # Fetch from Binance via shared module
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                BINANCE_KLINE_URL,
-                params={
-                    "symbol": "BTCUSDT",
-                    "interval": "1m",
-                    "startTime": start_ms,
-                    "endTime": end_ms,
-                    "limit": 1000,
-                },
-            )
-            resp.raise_for_status()
-            raw = resp.json()
-    except httpx.HTTPError as e:
+        klines = await fetch_btc_klines(start_ts, end_ts)
+    except Exception as e:
         logger.warning("Binance kline request failed: %s", e)
         raise HTTPException(status_code=502, detail=f"Binance API error: {e}")
-
-    # Transform to structured response
-    klines = []
-    for k in raw:
-        klines.append({
-            "open_time": k[0],
-            "open": float(k[1]),
-            "high": float(k[2]),
-            "low": float(k[3]),
-            "close": float(k[4]),
-            "volume": float(k[5]),
-            "close_time": k[6],
-            "quote_volume": float(k[7]),
-            "trades": k[8],
-        })
 
     return {
         "symbol": "BTCUSDT",

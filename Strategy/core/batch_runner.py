@@ -23,6 +23,7 @@ from core.data_loader import load_archive
 from core.evaluator import compute_drawdown_curve, compute_drawdown_events, evaluate
 from core.registry import StrategyRegistry
 from core.runner import run_backtest
+from core.btc_data import fetch_btc_klines
 from core.types import ArchiveData, BacktestSession
 
 logger = logging.getLogger(__name__)
@@ -253,6 +254,22 @@ class BatchRunner:
 
                 # ── Step 2: Run backtest (strategy init + tick loop) ─────
                 slug_balance = override_balance if override_balance is not None else task.initial_balance
+
+                # Pre-fetch BTC klines if btc_trend_enabled
+                btc_klines: list[dict] | None = None
+                if task.config.get("btc_trend_enabled"):
+                    try:
+                        all_ts: set[str] = set()
+                        for row in (*data.prices, *data.orderbooks, *data.live_trades, *data.ob_deltas):
+                            ts = row.get("timestamp", "")
+                            if ts:
+                                all_ts.add(ts)
+                        if all_ts:
+                            sorted_ts = sorted(all_ts)
+                            btc_klines = await fetch_btc_klines(sorted_ts[0], sorted_ts[-1])
+                    except Exception as e:
+                        logger.warning("Batch %s slug %s BTC klines prefetch failed: %s", batch_id, slug, e)
+
                 t1 = time.monotonic()
                 try:
                     session = await asyncio.wait_for(
@@ -265,6 +282,7 @@ class BatchRunner:
                             slug_balance,
                             data,
                             task.settlement_result,
+                            btc_klines,
                         ),
                         timeout=slug_timeout,
                     )
