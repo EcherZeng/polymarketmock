@@ -61,7 +61,7 @@ export default function AiOptimizeDetailPage() {
 
   // Full detail query — fires once when task reaches a terminal state
   const isTerminal = progress_data ? TERMINAL.has(progress_data.status) : false
-  const { data: taskDetail, isLoading, isError } = useQuery<AiOptimizeTaskDetail>({
+  const { data: taskDetail, isError } = useQuery<AiOptimizeTaskDetail>({
     queryKey: ["aiOptimizeTaskDetail", taskId],
     queryFn: () => fetchAiOptimizeTask(taskId!),
     enabled: !!taskId && isTerminal,
