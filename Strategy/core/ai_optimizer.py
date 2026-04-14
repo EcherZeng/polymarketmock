@@ -31,15 +31,14 @@ from config import config
 from core.ai_config_parser import parse_ai_configs
 from core.ai_prompt_builder import SYSTEM_PROMPT, build_group_prompt
 from core.ai_types import OptimizeTask, RoundResult, task_from_dict, task_to_dict
+from core.backtest_executor import BacktestExecutor
 from core.btc_data import fetch_btc_klines
 from core.data_loader import load_archive
-from core.evaluator import compute_drawdown_curve, compute_drawdown_events, evaluate
 from core.llm_client import call_llm
 from core.market_profiler import profile_market
 from core.registry import StrategyRegistry
 from core.result_digest import digest_session
-from core.runner import run_backtest
-from core.types import ArchiveData, btc_trend_enabled, parse_slug_window
+from core.types import btc_trend_enabled, parse_slug_window
 
 logger = logging.getLogger(__name__)
 
@@ -53,17 +52,13 @@ class AIOptimizer:
     def __init__(
         self,
         registry: StrategyRegistry,
-        on_result: callable | None = None,
+        executor: BacktestExecutor,
         tasks_dir: Path | None = None,
-        semaphore: asyncio.Semaphore | None = None,
     ) -> None:
         self._registry = registry
-        # Use caller-supplied semaphore (service-level pool) when available;
-        # fall back to a local one so AIOptimizer can still be used standalone.
-        self._semaphore = semaphore or asyncio.Semaphore(config.max_concurrency)
+        self._executor = executor
         self._tasks: dict[str, OptimizeTask] = {}
         self._running: dict[str, asyncio.Task] = {}
-        self._on_result = on_result
         self._tasks_dir = tasks_dir
         if self._tasks_dir:
             self._tasks_dir.mkdir(parents=True, exist_ok=True)
@@ -384,11 +379,9 @@ class AIOptimizer:
                     len(task.slugs),
                 )
 
-            # ── Phase 2: Baseline (round 0) + AI rounds ───────────────────
-            # archive_sem limits slugs that simultaneously hold an ArchiveData
-            # object in memory.  Set equal to max_concurrency so peak memory
-            # stays at O(max_concurrency) archives — same as original design.
-            archive_sem = asyncio.Semaphore(config.max_concurrency)
+            # ── Phase 2: Baseline (round 0) + AI rounds ─────────────────────
+            # archive_sem lives in the executor (capacity = max_concurrency);
+            # no local creation needed.
             async with httpx.AsyncClient(timeout=120) as llm_http:
                 for round_num in range(0, task.max_rounds + 1):
                     if task.status == "cancelled":
@@ -521,7 +514,7 @@ class AIOptimizer:
                     # from N_cfg × N_slug to N_slug per round.
                     coros = [
                         self._run_one_slug_all_configs(
-                            task, round_num, merged_configs, slug, btc_cache, archive_sem
+                            task, round_num, merged_configs, slug, btc_cache
                         )
                         for slug in task.slugs
                     ]

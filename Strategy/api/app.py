@@ -15,6 +15,7 @@ from api.result_store import BatchStore, PortfolioStore, ResultStore
 from config import config
 from core.data_scanner import load_token_map
 from core.batch_runner import BatchRunner, BatchTask
+from core.backtest_executor import BacktestExecutor
 from core.types import BacktestSession
 
 logger = logging.getLogger(__name__)
@@ -88,17 +89,25 @@ async def lifespan(app: FastAPI):
             "workflows": workflows,
         })
 
-    # ── Service-level backtest pool ──────────────────────────────────────
-    # A single Semaphore shared by BatchRunner, AIOptimizer, and
-    # SensitivityAnalyzer so that total concurrent run_backtest threads
-    # never exceed max_concurrency (4 on 6-core, leaving room for the
-    # event loop + LLM HTTP I/O).
-    state.backtest_semaphore = asyncio.Semaphore(config.max_concurrency)
+    # ── Service-level backtest pool ─────────────────────────────────
+    # cpu_sem:     limits concurrent run_backtest threads (= max_concurrency).
+    # archive_sem: limits concurrent ArchiveData objects in memory (= max_concurrency).
+    # Both are shared by BacktestExecutor so the total memory/CPU cost is
+    # bounded regardless of how many callers (BatchRunner, AIOptimizer,
+    # SensitivityAnalyzer) run simultaneously.
+    state.backtest_semaphore = asyncio.Semaphore(config.max_concurrency)  # cpu_sem
+    archive_sem = asyncio.Semaphore(config.max_concurrency)
+
+    executor = BacktestExecutor(
+        state.registry,
+        cpu_sem=state.backtest_semaphore,
+        archive_sem=archive_sem,
+        on_result=_on_result,
+    )
 
     state.batch_runner = BatchRunner(
         state.registry,
-        semaphore=state.backtest_semaphore,
-        on_result=_on_result,
+        executor=executor,
         on_batch_complete=_on_batch_complete,
     )
 
@@ -115,9 +124,8 @@ async def lifespan(app: FastAPI):
     ai_tasks_dir = config.results_dir / "ai_tasks"
     state.ai_optimizer = AIOptimizer(
         state.registry,
-        on_result=_on_result,
+        executor=executor,
         tasks_dir=ai_tasks_dir,
-        semaphore=state.backtest_semaphore,
     )
     state.ai_optimizer.load_tasks()
 
