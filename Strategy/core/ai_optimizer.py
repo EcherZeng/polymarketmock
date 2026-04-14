@@ -31,6 +31,7 @@ from config import config
 from core.ai_config_parser import parse_ai_configs
 from core.ai_prompt_builder import SYSTEM_PROMPT, build_group_prompt
 from core.ai_types import OptimizeTask, RoundResult, task_from_dict, task_to_dict
+from core.btc_data import fetch_btc_klines
 from core.data_loader import load_archive
 from core.evaluator import compute_drawdown_curve, compute_drawdown_events, evaluate
 from core.llm_client import call_llm
@@ -38,7 +39,7 @@ from core.market_profiler import profile_market
 from core.registry import StrategyRegistry
 from core.result_digest import digest_session
 from core.runner import run_backtest
-from core.types import ArchiveData
+from core.types import ArchiveData, btc_trend_enabled, parse_slug_window
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +177,7 @@ class AIOptimizer:
         cfg_idx: int,
         merged_config: dict,
         slug: str,
+        btc_cache: "dict[str, list[dict] | None]",
     ) -> "tuple[int, str, dict | None]":
         """Load data on-demand, run one backtest, evaluate, persist.
 
@@ -183,6 +185,9 @@ class AIOptimizer:
         across the whole service stay within max_concurrency.  Data is loaded
         *inside* the semaphore guard and deleted immediately after run_backtest
         returns, so peak memory is O(max_concurrency) archive objects, not O(N).
+
+        BTC klines are supplied via btc_cache (pre-fetched once per task in
+        _run_optimization) to avoid ~2000 redundant Binance requests per task.
 
         Returns (cfg_idx, slug, digest) or (cfg_idx, slug, None) on failure.
         """
@@ -194,6 +199,12 @@ class AIOptimizer:
                 return cfg_idx, slug, None
 
             try:
+                # BTC klines are resolved from the task-level cache; no per-backtest
+                # network request needed.  btc_cache.get(slug) returns None when BTC
+                # filter is not enabled or prefetch failed — run_backtest handles None
+                # gracefully (allows entry, logs warning).
+                btc_klines: list[dict] | None = btc_cache.get(slug)
+
                 # Load data on-demand — never held beyond this backtest call
                 data = await asyncio.to_thread(load_archive, config.data_dir, slug)
                 try:
@@ -207,6 +218,7 @@ class AIOptimizer:
                             task.initial_balance,
                             data,
                             task.settlement_result,
+                            btc_klines,
                         ),
                         timeout=config.slug_timeout,
                     )
@@ -296,6 +308,32 @@ class AIOptimizer:
                 data = await asyncio.to_thread(load_archive, config.data_dir, slug)
                 task.market_profiles[slug] = profile_market(slug, data)
                 # data goes out of scope here — GC can reclaim immediately
+
+            # ── Pre-fetch BTC klines (task-level cache) ────────────────────
+            # All slugs share the same BTC window resolution; cache once here
+            # so each backtest call (N_rounds × N_configs × N_slugs) reuses the
+            # pre-fetched result instead of hitting Binance ~2000 extra times.
+            btc_cache: dict[str, list[dict] | None] = {}
+            if btc_trend_enabled(task.base_config):
+                for slug in task.slugs:
+                    try:
+                        slug_window = parse_slug_window(slug)
+                        if slug_window:
+                            btc_cache[slug] = await fetch_btc_klines(slug_window[0], slug_window[1])
+                        else:
+                            btc_cache[slug] = None
+                    except Exception as _btc_err:
+                        logger.warning(
+                            "AI optimizer %s btc prefetch failed slug %s: %s",
+                            task_id, slug, _btc_err,
+                        )
+                        btc_cache[slug] = None
+                logger.info(
+                    "AI optimizer %s btc prefetch done: %d/%d slugs cached",
+                    task_id,
+                    sum(1 for v in btc_cache.values() if v is not None),
+                    len(task.slugs),
+                )
 
             # ── Phase 2: Baseline (round 0) + AI rounds ───────────────────
             async with httpx.AsyncClient(timeout=120) as llm_http:
@@ -429,11 +467,20 @@ class AIOptimizer:
                     # the service-level pool caps total concurrency across ALL
                     # tasks (batch + AI + sensitivity).
                     coros = [
-                        self._run_one_backtest(task, round_num, cfg_idx, merged, slug)
+                        self._run_one_backtest(task, round_num, cfg_idx, merged, slug, btc_cache)
                         for cfg_idx, merged in merged_configs
                         for slug in task.slugs
                     ]
-                    raw_results: list[tuple[int, str, dict | None]] = await asyncio.gather(*coros)
+                    # return_exceptions=True: prevents one unexpected raise from
+                    # short-circuiting gather and silently discarding other results.
+                    # _run_one_backtest already wraps all exceptions; any residual
+                    # BaseException (e.g. MemoryError) surfaces here as a value
+                    # and is handled in the digest-collection loop below.
+                    raw_results_raw = await asyncio.gather(*coros, return_exceptions=True)
+                    raw_results: list[tuple[int, str, dict | None]] = [
+                        r if isinstance(r, tuple) else (0, "", None)
+                        for r in raw_results_raw
+                    ]
 
                     round_result = RoundResult(
                         round_number=round_num,
@@ -447,9 +494,8 @@ class AIOptimizer:
                             round_result.digests.append(digest)
                             task.all_digests.append(digest)
 
-                    # completed_runs: one unit per config (parallel slugs within a
-                    # config are atomic from a progress perspective)
-                    task.completed_runs += len(configs)
+                    # completed_runs: per (config × slug) — matches total_runs granularity
+                    task.completed_runs += len(merged_configs) * len(task.slugs)
 
                     # ── Group-level best tracking ─────────────────────────
                     # Build O(1) lookup: (cfg_idx, slug) → digest
@@ -528,7 +574,9 @@ class AIOptimizer:
                     )
 
             # ── Done ─────────────────────────────────────────────────────
-            if task.status != "cancelled":
+            # Only mark completed if the loop ran to natural end.
+            # "failed" set via break must not be silently overwritten.
+            if task.status not in ("cancelled", "failed"):
                 task.status = "completed"
             self._persist_task(task)
 
