@@ -2,6 +2,7 @@ import { useParams, Link } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { fetchResult, fetchBtcKlines } from "@/api/client"
 import type { BacktestResult, BtcKlineResponse } from "@/types"
+import { useMemo } from "react"
 import { fmtFullCst } from "@/lib/utils"
 import MetricsPanel from "@/components/MetricsPanel"
 import EquityCurveChart from "@/components/EquityCurveChart"
@@ -25,6 +26,15 @@ export default function ResultDetailPage() {
     queryFn: () => fetchBtcKlines(sessionId!),
     enabled: !!sessionId,
   })
+
+  // Determine BTC direction over the full session: compare session-start open vs session-end close.
+  // This is the ground truth for labeling UP vs DOWN tokens correctly.
+  const btcUpAtEnd = useMemo(() => {
+    if (!btcKlines || btcKlines.klines.length === 0) return undefined
+    const firstOpen = btcKlines.klines[0].open
+    const lastClose = btcKlines.klines[btcKlines.klines.length - 1].close
+    return lastClose >= firstOpen
+  }, [btcKlines])
 
   if (isLoading) {
     return <div className="py-12 text-center text-muted-foreground">加载中...</div>
@@ -111,6 +121,8 @@ export default function ResultDetailPage() {
           <PriceChart
             priceCurve={result.price_curve}
             trades={result.trades}
+            settlementResult={result.settlement_result}
+            btcUpAtEnd={btcUpAtEnd}
           />
         </div>
       )}

@@ -16,6 +16,10 @@ import { fmtTimeCst, fmtDateTimeCst } from "@/lib/utils"
 interface PriceChartProps {
   priceCurve: PricePoint[]
   trades: TradeRecord[]
+  /** settlement_result from BacktestResult: { token_id_str: 0.0 | 1.0 } */
+  settlementResult?: Record<string, number>
+  /** true = BTC closed higher than session-start open; false = BTC went down; undefined = unknown */
+  btcUpAtEnd?: boolean
 }
 
 // Shorten token_id for display
@@ -24,7 +28,7 @@ function shortToken(tid: string): string {
   return tid
 }
 
-export default function PriceChart({ priceCurve, trades }: PriceChartProps) {
+export default function PriceChart({ priceCurve, trades, settlementResult, btcUpAtEnd }: PriceChartProps) {
   // Discover unique token_ids and assign labels
   const tokenIds = useMemo(() => {
     const ids = [...new Set(priceCurve.map((p) => p.token_id))]
@@ -73,19 +77,48 @@ export default function PriceChart({ priceCurve, trades }: PriceChartProps) {
 
   if (merged.length === 0) return null
 
-  // Token label: try to determine UP/DOWN from price patterns
+  // Determine UP/DOWN labels using settlement_result + BTC direction.
+  // A binary market (btc-updown) has a YES/UP token and a NO/DOWN token.
+  // The UP token settles at 1.0 if BTC went UP, 0.0 if BTC went DOWN.
+  // Previous start-price heuristic was unreliable: when market expects BTC to fall,
+  // the DOWN (NO) token already has a higher price at session start — inverting the guess.
   const tokenLabels = useMemo(() => {
     if (tokenIds.length !== 2) return tokenIds.map((id) => shortToken(id))
-    // For binary markets: the token with higher price at start is likely UP
-    const firstRow = merged[0]
-    const p0 = Number(firstRow?.token_0 ?? 0)
-    const p1 = Number(firstRow?.token_1 ?? 0)
-    if (p0 > p1) return ["UP (Yes)", "DOWN (No)"]
-    if (p1 > p0) return ["DOWN (No)", "UP (Yes)"]
-    return [shortToken(tokenIds[0]), shortToken(tokenIds[1])]
-  }, [tokenIds, merged])
 
-  const tokenColors = ["hsl(142, 71%, 45%)", "hsl(0, 84%, 60%)", "hsl(217, 91%, 60%)", "hsl(47, 96%, 53%)"]
+    // Priority 1: settlement result + known BTC direction → fully accurate
+    if (settlementResult && btcUpAtEnd !== undefined) {
+      const winnerId = tokenIds.find((id) => (settlementResult[id] ?? 0) >= 0.95)
+      const loserId = tokenIds.find((id) => (settlementResult[id] ?? 1) <= 0.05)
+      if (winnerId && loserId) {
+        // If BTC went UP: winner is the UP (YES) token; if BTC went DOWN: winner is DOWN (NO)
+        const winnerLabel = btcUpAtEnd ? "UP (Yes)" : "DOWN (No)"
+        const loserLabel = btcUpAtEnd ? "DOWN (No)" : "UP (Yes)"
+        return tokenIds.map((id) => (id === winnerId ? winnerLabel : loserLabel))
+      }
+    }
+
+    // Priority 2: settlement result available but BTC direction unknown — label by outcome only
+    if (settlementResult) {
+      const winnerId = tokenIds.find((id) => (settlementResult[id] ?? 0) >= 0.95)
+      if (winnerId) {
+        return tokenIds.map((id) => (id === winnerId ? "结算胜出" : "结算淘汰"))
+      }
+    }
+
+    // Priority 3: no settlement info — show short token IDs (don't guess UP/DOWN)
+    return tokenIds.map((id) => shortToken(id))
+  }, [tokenIds, settlementResult, btcUpAtEnd])
+
+  // Colors always follow the label meaning: UP=green, DOWN=red; fallback for unlabeled
+  const tokenColors = useMemo(() => {
+    const extras = ["hsl(217, 91%, 60%)", "hsl(47, 96%, 53%)"]
+    return tokenIds.map((_, i) => {
+      const label = tokenLabels[i]
+      if (label === "UP (Yes)" || label === "结算胜出") return "hsl(142, 71%, 45%)"
+      if (label === "DOWN (No)" || label === "结算淘汰") return "hsl(0, 84%, 60%)"
+      return extras[i % extras.length]
+    })
+  }, [tokenIds, tokenLabels])
 
   return (
     <div className="h-72">
