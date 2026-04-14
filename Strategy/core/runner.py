@@ -249,6 +249,26 @@ def run_backtest(
     except Exception as e:
         raise ValueError(f"Strategy '{strategy_name}' on_init failed: {e}") from e
 
+    # ── Fast-forward cutoff (time_remaining_s optimisation) ─────────────────
+    # When time_remaining_s is active, strategy.on_tick returns [] for all ticks
+    # before (slug_end - time_remaining_s).  During this "warm-up" period we
+    # still need to maintain OB state (deltas are cumulative), but we can skip
+    # snapshot construction, TickContext allocation, and strategy dispatch.
+    # Equity/price curves are also skipped; the curves start at the first active
+    # tick, which is correct — the warm-up period has no trades and flat equity.
+    fast_forward_until: str | None = None
+    if param_active(merged_config, "time_remaining_s"):
+        _trs = int(merged_config["time_remaining_s"])
+        _slug_end_dt = datetime.fromisoformat(slug_end)
+        if _slug_end_dt.tzinfo is None:
+            _slug_end_dt = _slug_end_dt.replace(tzinfo=timezone.utc)
+        _ff_dt = _slug_end_dt - timedelta(seconds=_trs)
+        fast_forward_until = _ff_dt.isoformat()
+        logger.debug(
+            "Backtest %s: fast-forward until %s (%ds gate)",
+            session_id, fast_forward_until, _trs,
+        )
+
     # ── Tick loop ────────────────────────────────────────────────────────────
 
     for tick_idx, grid_ts in enumerate(time_grid):
@@ -281,6 +301,12 @@ def run_backtest(
         # Trim recent trades
         if len(recent_trades) > 200:
             recent_trades = recent_trades[-200:]
+
+        # ── Fast-forward: OB state is up-to-date; skip the expensive steps ──
+        # Strategy cannot enter during warm-up (time gate blocks on_tick),
+        # so snapshot / TickContext / equity recording are all wasteful here.
+        if fast_forward_until and grid_ts < fast_forward_until:
+            continue
 
         # 4) Build token snapshots
         token_snapshots: dict[str, TokenSnapshot] = {}
