@@ -237,6 +237,8 @@ export interface BatchTask {
   total: number
   completed: number
   created_at: string
+  started_at?: string
+  finished_at?: string
 }
 
 export interface BatchResultSummary {
@@ -352,6 +354,8 @@ export interface AiOptimizeTask {
   best_metric: number | null
   best_total_trades: number
   created_at: string
+  started_at?: string
+  finished_at?: string
 }
 
 export interface AiOptimizeConfigResult {
@@ -427,4 +431,6 @@ export interface AiOptimizeTaskProgress {
   best_total_trades: number
   error: string | null
   rounds_summary: AiOptimizeRoundProgress[]
+  started_at?: string
+  finished_at?: string
 }

@@ -109,6 +109,8 @@ async def list_optimization_tasks():
             "best_metric": t.best_metric if t.best_metric != float("-inf") else None,
             "best_total_trades": t.best_total_trades,
             "created_at": t.created_at,
+            "started_at": t.started_at,
+            "finished_at": t.finished_at,
         }
         for t in tasks
     ]
@@ -153,6 +155,8 @@ async def get_optimization_progress(task_id: str):
         "best_total_trades": task.best_total_trades,
         "error": task.error,
         "rounds_summary": rounds_summary,
+        "started_at": task.started_at,
+        "finished_at": task.finished_at,
     }
 
 

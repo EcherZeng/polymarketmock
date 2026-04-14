@@ -39,6 +39,8 @@ class OptimizeTask:
 
     status: str = "running"  # "running" | "completed" | "cancelled" | "failed"
     created_at: str = ""
+    started_at: str = ""
+    finished_at: str = ""
     current_round: int = 0
     total_runs: int = 0
     completed_runs: int = 0

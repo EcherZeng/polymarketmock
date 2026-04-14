@@ -175,6 +175,8 @@ async def list_tasks():
                 "total": t.total,
                 "completed": t.completed_count,
                 "created_at": t.created_at,
+                "started_at": t.started_at,
+                "finished_at": t.finished_at,
             })
 
     # Persisted completed batches (not in live)
@@ -190,6 +192,8 @@ async def list_tasks():
                     "total": b.get("total", 0),
                     "completed": b.get("completed", b.get("total", 0)),
                     "created_at": b.get("created_at", ""),
+                    "started_at": b.get("started_at", ""),
+                    "finished_at": b.get("finished_at", ""),
                 })
 
     return live
@@ -245,6 +249,8 @@ async def get_task(batch_id: str):
             "total": task.total,
             "completed": task.completed_count,
             "created_at": task.created_at,
+            "started_at": task.started_at,
+            "finished_at": task.finished_at,
             "cumulative_capital": task.cumulative_capital,
             "capital_chain": task.capital_chain,
             "results": results_summary,

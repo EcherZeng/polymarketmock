@@ -105,6 +105,8 @@ class BatchTask:
     cumulative_capital: bool = False
     status: str = "running"  # "running" | "completed" | "cancelled"
     created_at: str = ""
+    started_at: str = ""
+    finished_at: str = ""
     total: int = 0
     completed_count: int = 0
     results: dict[str, BacktestSession] = field(default_factory=dict)
@@ -184,6 +186,7 @@ class BatchRunner:
         no manual chunk loop or data_cache is needed.
         """
         task = self._tasks[batch_id]
+        task.started_at = datetime.now(timezone.utc).isoformat()
 
         async def run_one(slug: str, override_balance: float | None = None) -> BacktestSession | None:
             """Run a single slug backtest. Returns session on success (for cumulative mode)."""
@@ -404,6 +407,7 @@ class BatchRunner:
 
         if task.status != "cancelled":
             task.status = "completed"
+        task.finished_at = datetime.now(timezone.utc).isoformat()
         self._running.pop(batch_id, None)
 
         # Notify batch completion for persistence
@@ -429,6 +433,7 @@ class BatchRunner:
         if task is None:
             return False
         task.status = "cancelled"
+        task.finished_at = datetime.now(timezone.utc).isoformat()
         async_task = self._running.pop(batch_id, None)
         if async_task:
             async_task.cancel()

@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useMemo } from "react"
 import { Link } from "react-router-dom"
-import { cn, fmtDateTimeCst } from "@/lib/utils"
+import { cn, fmtDateTimeCst, fmtElapsed } from "@/lib/utils"
 import { fetchBatchTasks, cancelBatch } from "@/api/client"
 import type { BatchTask } from "@/types"
 
@@ -83,9 +83,15 @@ export default function BatchDashboardPage() {
                       {statusLabel[t.status] ?? t.status}
                     </span>
                   </div>
-                  <span className="text-xs text-muted-foreground">
-                    {fmtDateTimeCst(t.created_at)}
-                  </span>
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                    <span>{fmtDateTimeCst(t.created_at)}</span>
+                    {t.started_at && (
+                      <span className="text-muted-foreground/70">
+                        {t.status === "running" ? "已运行 " : "用时 "}
+                        {fmtElapsed(t.started_at, t.finished_at)}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div className="mt-2 flex items-center gap-4 text-sm text-muted-foreground">

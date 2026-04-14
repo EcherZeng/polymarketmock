@@ -270,6 +270,7 @@ class AIOptimizer:
     ) -> None:
         """Execute the multi-round optimization loop."""
         task = self._tasks[task_id]
+        task.started_at = datetime.now(timezone.utc).isoformat()
         param_schema = self._registry.get_param_schema()
         active_set = set(task.active_params)
 
@@ -559,6 +560,7 @@ class AIOptimizer:
             # "failed" set via break must not be silently overwritten.
             if task.status not in ("cancelled", "failed"):
                 task.status = "completed"
+            task.finished_at = datetime.now(timezone.utc).isoformat()
             self._persist_task(task)
 
         except Exception as e:
@@ -566,6 +568,7 @@ class AIOptimizer:
             logger.error("AI optimizer %s failed: %s\n%s", task_id, e, tb)
             task.status = "failed"
             task.error = str(e)
+            task.finished_at = datetime.now(timezone.utc).isoformat()
             task.errors.append({
                 "round": task.current_round,
                 "phase": "unknown",
@@ -583,6 +586,7 @@ class AIOptimizer:
         if task is None:
             return False
         task.status = "cancelled"
+        task.finished_at = datetime.now(timezone.utc).isoformat()
         async_task = self._running.pop(task_id, None)
         if async_task:
             async_task.cancel()
