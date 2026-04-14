@@ -19,6 +19,7 @@ import logging
 import time
 import traceback
 from collections.abc import Callable
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 
 from config import config
@@ -26,7 +27,52 @@ from core.data_loader import load_archive
 from core.evaluator import compute_drawdown_curve, compute_drawdown_events, evaluate
 from core.registry import StrategyRegistry
 from core.runner import run_backtest
-from core.types import BacktestSession
+from core.types import ArchiveData, BacktestSession
+
+
+# ── Worker process helpers (module-level so they are picklable) ───────────────
+
+_worker_registry: StrategyRegistry | None = None
+
+
+def _init_worker(strategies_dir: str) -> None:
+    """Called once per worker process. Sets up the strategy registry."""
+    import logging as _log
+    import sys
+    from pathlib import Path
+
+    # Ensure Strategy root dir is importable inside spawned workers.
+    strategy_root = str(Path(strategies_dir).parent)
+    if strategy_root not in sys.path:
+        sys.path.insert(0, strategy_root)
+
+    _log.basicConfig(level=logging.WARNING)
+
+    global _worker_registry
+    from core.registry import StrategyRegistry as _Reg  # may already be cached
+
+    _worker_registry = _Reg()
+    _worker_registry.scan(Path(strategies_dir))
+
+
+def _run_backtest_in_worker(
+    strategy: str,
+    slug: str,
+    cfg: dict,
+    initial_balance: float,
+    data: ArchiveData,
+    settlement_result: dict[str, float] | None,
+    btc_klines: list[dict] | None,
+) -> BacktestSession:
+    """Top-level worker entry point — executed in a separate OS process."""
+    global _worker_registry
+    if _worker_registry is None:
+        raise RuntimeError("Worker process not initialised (_worker_registry is None)")
+    from core.runner import run_backtest as _rb  # import cached after first call
+
+    return _rb(
+        _worker_registry, strategy, slug, cfg, initial_balance, data, settlement_result, btc_klines
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +144,18 @@ class BacktestExecutor:
         self._cpu_sem = cpu_sem
         self._archive_sem = archive_sem
         self._on_result = on_result
+        # One worker process per concurrency slot — bypasses CPython GIL for
+        # CPU-bound tick simulations.  Workers are initialised with a fresh
+        # StrategyRegistry so they can run_backtest without IPC of the registry.
+        self._process_pool = ProcessPoolExecutor(
+            max_workers=config.max_concurrency,
+            initializer=_init_worker,
+            initargs=(str(config.strategies_dir),),
+        )
+
+    def close(self) -> None:
+        """Shutdown the worker process pool (call from lifespan cleanup)."""
+        self._process_pool.shutdown(wait=False, cancel_futures=True)
 
     # ── Single run ───────────────────────────────────────────────────────────
 
@@ -151,10 +209,11 @@ class BacktestExecutor:
                 t1 = time.monotonic()
                 try:
                     async with self._cpu_sem:
+                        loop = asyncio.get_running_loop()
                         session = await asyncio.wait_for(
-                            asyncio.to_thread(
-                                run_backtest,
-                                self._registry,
+                            loop.run_in_executor(
+                                self._process_pool,
+                                _run_backtest_in_worker,
                                 strategy,
                                 slug,
                                 cfg,
@@ -260,10 +319,11 @@ class BacktestExecutor:
                     t1 = time.monotonic()
                     try:
                         async with self._cpu_sem:
+                            loop = asyncio.get_running_loop()
                             session = await asyncio.wait_for(
-                                asyncio.to_thread(
-                                    run_backtest,
-                                    self._registry,
+                                loop.run_in_executor(
+                                    self._process_pool,
+                                    _run_backtest_in_worker,
                                     strategy,
                                     slug,
                                     merged,

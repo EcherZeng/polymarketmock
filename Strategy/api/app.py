@@ -146,6 +146,7 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Strategy engine shutting down")
+    executor.close()
 
 
 app = FastAPI(
