@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useParams, Link } from "react-router-dom"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { cn, fmtTimeCst } from "@/lib/utils"
@@ -48,28 +48,54 @@ export default function AiOptimizeDetailPage() {
 
   const TERMINAL = new Set(["completed", "cancelled", "failed", "interrupted"])
 
-  // Lightweight progress query — polls every 3s while running
+  // Full detail query — fires once on initial load to provide all static fields
+  // (strategy, slugs, etc.). Re-fetched when task transitions to terminal state.
+  const { data: taskDetail, isLoading: detailLoading, isError } = useQuery<AiOptimizeTaskDetail>({
+    queryKey: ["aiOptimizeTaskDetail", taskId],
+    queryFn: () => fetchAiOptimizeTask(taskId!),
+    enabled: !!taskId,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  })
+
+  // Lightweight progress query — starts polling only after taskDetail is
+  // loaded and the task is not yet in a terminal state.
+  const isTerminal = taskDetail ? TERMINAL.has(taskDetail.status) : false
   const { data: progress_data } = useQuery<AiOptimizeTaskProgress>({
     queryKey: ["aiOptimizeTaskProgress", taskId],
     queryFn: () => fetchAiOptimizeTaskProgress(taskId!),
-    enabled: !!taskId,
+    enabled: !!taskId && !!taskDetail && !isTerminal,
     refetchInterval: (query) => {
       const status = query.state.data?.status
       return status && !TERMINAL.has(status) ? 3000 : false
     },
   })
 
-  // Full detail query — fires once when task reaches a terminal state
-  const isTerminal = progress_data ? TERMINAL.has(progress_data.status) : false
-  const { data: taskDetail, isError } = useQuery<AiOptimizeTaskDetail>({
-    queryKey: ["aiOptimizeTaskDetail", taskId],
-    queryFn: () => fetchAiOptimizeTask(taskId!),
-    enabled: !!taskId && isTerminal,
-    staleTime: Infinity,
-  })
+  // When progress reports a terminal state, invalidate taskDetail so it
+  // re-fetches the full result (rounds, best_config, ai_messages, etc.).
+  const progressStatus = progress_data?.status
+  useEffect(() => {
+    if (progressStatus && TERMINAL.has(progressStatus)) {
+      queryClient.invalidateQueries({ queryKey: ["aiOptimizeTaskDetail", taskId] })
+    }
+  }, [progressStatus, taskId, queryClient])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Merge: show detail fields when available, fall back to progress fields
-  const task = taskDetail ?? (progress_data as unknown as AiOptimizeTaskDetail | undefined)
+  // Merge: taskDetail provides all static fields; overlay live progress fields
+  // so the progress bar and status badge stay in sync during execution.
+  const task: AiOptimizeTaskDetail | undefined = taskDetail
+    ? progress_data
+      ? {
+          ...taskDetail,
+          status: progress_data.status,
+          current_round: progress_data.current_round,
+          completed_runs: progress_data.completed_runs,
+          total_runs: progress_data.total_runs,
+          best_metric: progress_data.best_metric,
+          best_total_trades: progress_data.best_total_trades,
+          error: progress_data.error ?? taskDetail.error,
+        }
+      : taskDetail
+    : undefined
 
   const stopMutation = useMutation({
     mutationFn: () => stopAiOptimize(taskId!),
@@ -113,11 +139,11 @@ export default function AiOptimizeDetailPage() {
 
   const [showJson, setShowJson] = useState(false)
 
-  // Show loading only on first fetch (no progress data yet)
-  if (!progress_data && !taskDetail) {
+  // Show loading only on first fetch (taskDetail not yet arrived)
+  if (detailLoading || (!taskDetail && !isError)) {
     return <div className="py-12 text-center text-muted-foreground">加载中...</div>
   }
-  if ((isError && isTerminal) || !task) {
+  if (isError || !task) {
     return (
       <div className="py-12 text-center text-muted-foreground">
         任务不存在 · <Link to="/ai-optimize" className="text-primary underline">返回列表</Link>
