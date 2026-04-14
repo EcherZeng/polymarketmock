@@ -16,7 +16,7 @@ applyTo: "Strategy/**,Strategyfrontend/**"
 
 - Backend stack is locked to FastAPI + Pydantic v2 + DuckDB + pandas/numpy + httpx (LLM calls only).
 - Frontend stack is locked to React + TypeScript + Vite + shadcn/ui + react-query + Recharts.
-- Do not introduce banned libraries: styled-components, MUI, Ant Design, Zustand, Redux, Redis, SQLAlchemy, Flask, Django, Next.js.
+- Do not introduce banned libraries: styled-components, MUI, Ant Design, Zustand, Redux, SQLAlchemy, Flask, Django, Next.js.
 - Never manually edit Strategyfrontend/src/components/ui/*. Use shadcn CLI to add UI primitives.
 
 ## Backend Coding Rules

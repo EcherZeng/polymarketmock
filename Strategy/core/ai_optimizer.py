@@ -101,6 +101,26 @@ class AIOptimizer:
         except Exception as e:
             logger.error("Failed to persist AI task %s: %s", task.task_id, e)
 
+    def _async_persist_task(self, task: OptimizeTask) -> None:
+        """Snapshot task in the event loop, then write to disk in a background thread.
+
+        Use for mid-round saves so serialising growing all_digests does not
+        block the asyncio event loop.  Final saves (completed/failed/cancelled)
+        must still call the synchronous _persist_task to guarantee flush before
+        the process exits or the caller awaits completion.
+        """
+        if not self._tasks_dir:
+            return
+        _snapshot = task_to_dict(task)
+        _path = self._tasks_dir / f"opt_{task.task_id}.json"
+        asyncio.create_task(
+            asyncio.to_thread(
+                lambda s=_snapshot, p=_path: p.write_text(
+                    json.dumps(s, ensure_ascii=False, default=str), encoding="utf-8"
+                )
+            )
+        )
+
     async def submit(
         self,
         strategy: str,
@@ -170,124 +190,143 @@ class AIOptimizer:
 
     # ── Per-backtest helper ───────────────────────────────────────────────────
 
-    async def _run_one_backtest(
+    # ── Per-slug group runner ────────────────────────────────────────────────
+
+    async def _run_one_slug_all_configs(
         self,
         task: "OptimizeTask",
         round_num: int,
-        cfg_idx: int,
-        merged_config: dict,
+        merged_configs: "list[tuple[int, dict]]",
         slug: str,
         btc_cache: "dict[str, list[dict] | None]",
-    ) -> "tuple[int, str, dict | None]":
-        """Load data on-demand, run one backtest, evaluate, persist.
+        archive_sem: asyncio.Semaphore,
+    ) -> "list[tuple[int, str, dict | None]]":
+        """Load slug archive once, run all merged_configs sequentially.
 
-        Acquires the shared backtest semaphore so total concurrent threads
-        across the whole service stay within max_concurrency.  Data is loaded
-        *inside* the semaphore guard and deleted immediately after run_backtest
-        returns, so peak memory is O(max_concurrency) archive objects, not O(N).
+        archive_sem (capacity = max_concurrency) bounds the number of
+        ArchiveData objects held in memory simultaneously to O(max_concurrency),
+        matching the original design while reducing load_archive calls from
+        N_cfg × N_slug to N_slug per round.
 
-        BTC klines are supplied via btc_cache (pre-fetched once per task in
-        _run_optimization) to avoid ~2000 redundant Binance requests per task.
+        task.completed_runs is incremented by 1 after each (cfg_idx, slug)
+        completes (success or failure), giving fine-grained progress tracking.
 
-        Returns (cfg_idx, slug, digest) or (cfg_idx, slug, None) on failure.
+        Returns a flat list of (cfg_idx, slug, digest | None) — one per config.
         """
         if task.status == "cancelled":
-            return cfg_idx, slug, None
+            return [(cfg_idx, slug, None) for cfg_idx, _ in merged_configs]
 
-        async with self._semaphore:
-            if task.status == "cancelled":
-                return cfg_idx, slug, None
+        results: list[tuple[int, str, dict | None]] = []
+        btc_klines: list[dict] | None = btc_cache.get(slug)
 
+        async with archive_sem:
             try:
-                # BTC klines are resolved from the task-level cache; no per-backtest
-                # network request needed.  btc_cache.get(slug) returns None when BTC
-                # filter is not enabled or prefetch failed — run_backtest handles None
-                # gracefully (allows entry, logs warning).
-                btc_klines: list[dict] | None = btc_cache.get(slug)
-
-                # Load data on-demand — never held beyond this backtest call
                 data = await asyncio.to_thread(load_archive, config.data_dir, slug)
-                try:
-                    session = await asyncio.wait_for(
-                        asyncio.to_thread(
-                            run_backtest,
-                            self._registry,
-                            task.strategy,
-                            slug,
-                            merged_config,
-                            task.initial_balance,
-                            data,
-                            task.settlement_result,
-                            btc_klines,
-                        ),
-                        timeout=config.slug_timeout,
-                    )
-                finally:
-                    del data  # release ASAP regardless of outcome
-
-                # Evaluate
-                metrics = evaluate(session)
-                session.metrics = metrics
-                session.drawdown_curve = compute_drawdown_curve(session.equity_curve)
-                session.drawdown_events = compute_drawdown_events(session.equity_curve)
-
-                # Persist individual result
-                if self._on_result:
-                    try:
-                        self._on_result(session)
-                    except Exception as e:
-                        task.persist_errors.append(
-                            f"[round_{round_num}] persist failed cfg {cfg_idx} slug {slug}: {e}"
-                        )
-                        logger.error("on_result callback failed: %s", e)
-
-                # Extract compact digest
-                digest = digest_session(session)
-                digest["round"] = round_num
-                digest["config_index"] = cfg_idx
-                return cfg_idx, slug, digest
-
-            except asyncio.TimeoutError:
-                err_msg = (
-                    f"[round_{round_num}] config {cfg_idx} slug {slug} "
-                    f"timed out after {config.slug_timeout}s"
-                )
-                logger.warning(
-                    "AI optimizer %s round %d config %d slug %s timed out",
-                    task.task_id, round_num, cfg_idx, slug,
-                )
-                task.errors.append({
-                    "round": round_num,
-                    "phase": "backtest",
-                    "config_index": cfg_idx,
-                    "slug": slug,
-                    "message": err_msg,
-                    "detail": "",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                })
-                return cfg_idx, slug, None
-
-            except asyncio.CancelledError:
-                raise  # propagate so asyncio.gather can exit cleanly
-
             except Exception as e:
                 tb = traceback.format_exc()
-                err_msg = f"[round_{round_num}] config {cfg_idx} slug {slug} error: {e}"
-                logger.error(
-                    "AI optimizer %s round %d config %d slug %s error: %s",
-                    task.task_id, round_num, cfg_idx, slug, e,
-                )
-                task.errors.append({
-                    "round": round_num,
-                    "phase": "backtest",
-                    "config_index": cfg_idx,
-                    "slug": slug,
-                    "message": err_msg,
-                    "detail": tb,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                })
-                return cfg_idx, slug, None
+                for cfg_idx, _ in merged_configs:
+                    task.errors.append({
+                        "round": round_num,
+                        "phase": "data_load",
+                        "config_index": cfg_idx,
+                        "slug": slug,
+                        "message": f"[round_{round_num}] load_archive failed slug {slug}: {e}",
+                        "detail": tb,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
+                    results.append((cfg_idx, slug, None))
+                    task.completed_runs += 1
+                return results
 
+            try:
+                for cfg_idx, merged in merged_configs:
+                    if task.status == "cancelled":
+                        results.append((cfg_idx, slug, None))
+                        continue
+
+                    async with self._semaphore:
+                        try:
+                            session = await asyncio.wait_for(
+                                asyncio.to_thread(
+                                    run_backtest,
+                                    self._registry,
+                                    task.strategy,
+                                    slug,
+                                    merged,
+                                    task.initial_balance,
+                                    data,
+                                    task.settlement_result,
+                                    btc_klines,
+                                ),
+                                timeout=config.slug_timeout,
+                            )
+                        except asyncio.TimeoutError:
+                            err_msg = (
+                                f"[round_{round_num}] config {cfg_idx} slug {slug} "
+                                f"timed out after {config.slug_timeout}s"
+                            )
+                            logger.warning(
+                                "AI optimizer %s round %d config %d slug %s timed out",
+                                task.task_id, round_num, cfg_idx, slug,
+                            )
+                            task.errors.append({
+                                "round": round_num,
+                                "phase": "backtest",
+                                "config_index": cfg_idx,
+                                "slug": slug,
+                                "message": err_msg,
+                                "detail": "",
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            })
+                            results.append((cfg_idx, slug, None))
+                            task.completed_runs += 1
+                            continue
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as e:
+                            tb = traceback.format_exc()
+                            err_msg = f"[round_{round_num}] config {cfg_idx} slug {slug} error: {e}"
+                            logger.error(
+                                "AI optimizer %s round %d config %d slug %s error: %s",
+                                task.task_id, round_num, cfg_idx, slug, e,
+                            )
+                            task.errors.append({
+                                "round": round_num,
+                                "phase": "backtest",
+                                "config_index": cfg_idx,
+                                "slug": slug,
+                                "message": err_msg,
+                                "detail": tb,
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            })
+                            results.append((cfg_idx, slug, None))
+                            task.completed_runs += 1
+                            continue
+
+                    # ── Evaluate + digest (outside CPU semaphore) ───────────
+                    metrics = evaluate(session)
+                    session.metrics = metrics
+                    session.drawdown_curve = compute_drawdown_curve(session.equity_curve)
+                    session.drawdown_events = compute_drawdown_events(session.equity_curve)
+
+                    if self._on_result:
+                        try:
+                            self._on_result(session)
+                        except Exception as e:
+                            task.persist_errors.append(
+                                f"[round_{round_num}] persist failed cfg {cfg_idx} slug {slug}: {e}"
+                            )
+                            logger.error("on_result callback failed: %s", e)
+
+                    digest = digest_session(session)
+                    digest["round"] = round_num
+                    digest["config_index"] = cfg_idx
+                    results.append((cfg_idx, slug, digest))
+                    task.completed_runs += 1  # per (cfg_idx, slug) completion
+            finally:
+                del data  # release archive memory once all configs are done
+
+        return results
     async def _run_optimization(
         self,
         task_id: str,
@@ -300,14 +339,24 @@ class AIOptimizer:
         active_set = set(task.active_params)
 
         try:
-            # ── Phase 1: Build market profiles ────────────────────────────
-            # Load each slug one at a time and discard the ArchiveData
-            # immediately after profiling.  This keeps memory at O(1) rather
-            # than O(N slugs) before any backtest even starts.
-            for slug in task.slugs:
-                data = await asyncio.to_thread(load_archive, config.data_dir, slug)
-                task.market_profiles[slug] = profile_market(slug, data)
-                # data goes out of scope here — GC can reclaim immediately
+            # ── Phase 1: Build market profiles (parallel IO) ──────────────
+            # IO + CPU merged in one to_thread call to avoid two thread-pool
+            # switches per slug.  io_sem (capacity 8) caps concurrent archive
+            # loads while still parallelising IO wait time.
+            # market_profiles[slug] is written after each await returns in the
+            # event loop — asyncio single-thread scheduling is the implicit lock.
+            io_sem = asyncio.Semaphore(8)
+
+            def _load_and_profile(s: str):
+                d = load_archive(config.data_dir, s)
+                return profile_market(s, d)  # d released after return
+
+            async def _profile_one_slug(s: str) -> None:
+                async with io_sem:
+                    prof = await asyncio.to_thread(_load_and_profile, s)
+                task.market_profiles[s] = prof  # safe: event-loop write
+
+            await asyncio.gather(*[_profile_one_slug(s) for s in task.slugs])
 
             # ── Pre-fetch BTC klines (task-level cache) ────────────────────
             # All slugs share the same BTC window resolution; cache once here
@@ -336,6 +385,10 @@ class AIOptimizer:
                 )
 
             # ── Phase 2: Baseline (round 0) + AI rounds ───────────────────
+            # archive_sem limits slugs that simultaneously hold an ArchiveData
+            # object in memory.  Set equal to max_concurrency so peak memory
+            # stays at O(max_concurrency) archives — same as original design.
+            archive_sem = asyncio.Semaphore(config.max_concurrency)
             async with httpx.AsyncClient(timeout=120) as llm_http:
                 for round_num in range(0, task.max_rounds + 1):
                     if task.status == "cancelled":
@@ -463,23 +516,21 @@ class AIOptimizer:
                         merged = self._registry.normalize_config(merged)
                         merged_configs.append((cfg_idx, merged))
 
-                    # Each coroutine acquires the semaphore independently, so
-                    # the service-level pool caps total concurrency across ALL
-                    # tasks (batch + AI + sensitivity).
+                    # One coroutine per slug: load archive once, run all configs
+                    # sequentially inside archive_sem.  Reduces load_archive calls
+                    # from N_cfg × N_slug to N_slug per round.
                     coros = [
-                        self._run_one_backtest(task, round_num, cfg_idx, merged, slug, btc_cache)
-                        for cfg_idx, merged in merged_configs
+                        self._run_one_slug_all_configs(
+                            task, round_num, merged_configs, slug, btc_cache, archive_sem
+                        )
                         for slug in task.slugs
                     ]
-                    # return_exceptions=True: prevents one unexpected raise from
-                    # short-circuiting gather and silently discarding other results.
-                    # _run_one_backtest already wraps all exceptions; any residual
-                    # BaseException (e.g. MemoryError) surfaces here as a value
-                    # and is handled in the digest-collection loop below.
-                    raw_results_raw = await asyncio.gather(*coros, return_exceptions=True)
+                    nested_results = await asyncio.gather(*coros, return_exceptions=True)
                     raw_results: list[tuple[int, str, dict | None]] = [
-                        r if isinstance(r, tuple) else (0, "", None)
-                        for r in raw_results_raw
+                        item
+                        for r in nested_results
+                        if isinstance(r, list)
+                        for item in r
                     ]
 
                     round_result = RoundResult(
@@ -493,9 +544,6 @@ class AIOptimizer:
                         if digest is not None:
                             round_result.digests.append(digest)
                             task.all_digests.append(digest)
-
-                    # completed_runs: per (config × slug) — matches total_runs granularity
-                    task.completed_runs += len(merged_configs) * len(task.slugs)
 
                     # ── Group-level best tracking ─────────────────────────
                     # Build O(1) lookup: (cfg_idx, slug) → digest
@@ -564,7 +612,7 @@ class AIOptimizer:
                     round_result.best_metric_value = max(_group_avgs) if _group_avgs else 0.0
                     round_result.duration_ms = (time.monotonic() - t_round) * 1000
                     task.rounds.append(round_result)
-                    self._persist_task(task)
+                    self._async_persist_task(task)
 
                     logger.info(
                         "AI optimizer %s round %d done: %d runs, best %s=%.4f, reason: %s",
