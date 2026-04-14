@@ -138,11 +138,14 @@ class BatchRunner:
         self,
         registry: StrategyRegistry,
         max_concurrency: int | None = None,
+        semaphore: asyncio.Semaphore | None = None,
         on_result: Callable[[BacktestSession], None] | None = None,
         on_batch_complete: Callable[[BatchTask], None] | None = None,
     ) -> None:
         self._registry = registry
-        self._semaphore = asyncio.Semaphore(max_concurrency or config.max_concurrency)
+        # Use caller-supplied semaphore (service-level pool) when available;
+        # fall back to a local one so BatchRunner can still be used standalone.
+        self._semaphore = semaphore or asyncio.Semaphore(max_concurrency or config.max_concurrency)
         self._tasks: dict[str, BatchTask] = {}
         self._running: dict[str, asyncio.Task] = {}
         self._on_result = on_result

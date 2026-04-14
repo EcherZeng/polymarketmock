@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -87,8 +88,16 @@ async def lifespan(app: FastAPI):
             "workflows": workflows,
         })
 
+    # ── Service-level backtest pool ──────────────────────────────────────
+    # A single Semaphore shared by BatchRunner, AIOptimizer, and
+    # SensitivityAnalyzer so that total concurrent run_backtest threads
+    # never exceed max_concurrency (4 on 6-core, leaving room for the
+    # event loop + LLM HTTP I/O).
+    state.backtest_semaphore = asyncio.Semaphore(config.max_concurrency)
+
     state.batch_runner = BatchRunner(
         state.registry,
+        semaphore=state.backtest_semaphore,
         on_result=_on_result,
         on_batch_complete=_on_batch_complete,
     )
@@ -108,6 +117,7 @@ async def lifespan(app: FastAPI):
         state.registry,
         on_result=_on_result,
         tasks_dir=ai_tasks_dir,
+        semaphore=state.backtest_semaphore,
     )
     state.ai_optimizer.load_tasks()
 
@@ -123,7 +133,7 @@ async def lifespan(app: FastAPI):
 
     # ── Init sensitivity analyzer ────────────────────────────────────
     from core.sensitivity import SensitivityAnalyzer
-    state.sensitivity_analyzer = SensitivityAnalyzer(state.registry)
+    state.sensitivity_analyzer = SensitivityAnalyzer(state.registry, semaphore=state.backtest_semaphore)
 
     yield
 

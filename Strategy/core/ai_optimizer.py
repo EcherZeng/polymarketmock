@@ -54,9 +54,12 @@ class AIOptimizer:
         registry: StrategyRegistry,
         on_result: callable | None = None,
         tasks_dir: Path | None = None,
+        semaphore: asyncio.Semaphore | None = None,
     ) -> None:
         self._registry = registry
-        self._semaphore = asyncio.Semaphore(config.max_concurrency)
+        # Use caller-supplied semaphore (service-level pool) when available;
+        # fall back to a local one so AIOptimizer can still be used standalone.
+        self._semaphore = semaphore or asyncio.Semaphore(config.max_concurrency)
         self._tasks: dict[str, OptimizeTask] = {}
         self._running: dict[str, asyncio.Task] = {}
         self._on_result = on_result
@@ -164,6 +167,115 @@ class AIOptimizer:
         self._running[task_id] = async_task
         return task_id
 
+    # ── Per-backtest helper ───────────────────────────────────────────────────
+
+    async def _run_one_backtest(
+        self,
+        task: "OptimizeTask",
+        round_num: int,
+        cfg_idx: int,
+        merged_config: dict,
+        slug: str,
+    ) -> "tuple[int, str, dict | None]":
+        """Load data on-demand, run one backtest, evaluate, persist.
+
+        Acquires the shared backtest semaphore so total concurrent threads
+        across the whole service stay within max_concurrency.  Data is loaded
+        *inside* the semaphore guard and deleted immediately after run_backtest
+        returns, so peak memory is O(max_concurrency) archive objects, not O(N).
+
+        Returns (cfg_idx, slug, digest) or (cfg_idx, slug, None) on failure.
+        """
+        if task.status == "cancelled":
+            return cfg_idx, slug, None
+
+        async with self._semaphore:
+            if task.status == "cancelled":
+                return cfg_idx, slug, None
+
+            try:
+                # Load data on-demand — never held beyond this backtest call
+                data = await asyncio.to_thread(load_archive, config.data_dir, slug)
+                try:
+                    session = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            run_backtest,
+                            self._registry,
+                            task.strategy,
+                            slug,
+                            merged_config,
+                            task.initial_balance,
+                            data,
+                            task.settlement_result,
+                        ),
+                        timeout=config.slug_timeout,
+                    )
+                finally:
+                    del data  # release ASAP regardless of outcome
+
+                # Evaluate
+                metrics = evaluate(session)
+                session.metrics = metrics
+                session.drawdown_curve = compute_drawdown_curve(session.equity_curve)
+                session.drawdown_events = compute_drawdown_events(session.equity_curve)
+
+                # Persist individual result
+                if self._on_result:
+                    try:
+                        self._on_result(session)
+                    except Exception as e:
+                        task.persist_errors.append(
+                            f"[round_{round_num}] persist failed cfg {cfg_idx} slug {slug}: {e}"
+                        )
+                        logger.error("on_result callback failed: %s", e)
+
+                # Extract compact digest
+                digest = digest_session(session)
+                digest["round"] = round_num
+                digest["config_index"] = cfg_idx
+                return cfg_idx, slug, digest
+
+            except asyncio.TimeoutError:
+                err_msg = (
+                    f"[round_{round_num}] config {cfg_idx} slug {slug} "
+                    f"timed out after {config.slug_timeout}s"
+                )
+                logger.warning(
+                    "AI optimizer %s round %d config %d slug %s timed out",
+                    task.task_id, round_num, cfg_idx, slug,
+                )
+                task.errors.append({
+                    "round": round_num,
+                    "phase": "backtest",
+                    "config_index": cfg_idx,
+                    "slug": slug,
+                    "message": err_msg,
+                    "detail": "",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+                return cfg_idx, slug, None
+
+            except asyncio.CancelledError:
+                raise  # propagate so asyncio.gather can exit cleanly
+
+            except Exception as e:
+                tb = traceback.format_exc()
+                err_msg = f"[round_{round_num}] config {cfg_idx} slug {slug} error: {e}"
+                logger.error(
+                    "AI optimizer %s round %d config %d slug %s error: %s",
+                    task.task_id, round_num, cfg_idx, slug, e,
+                )
+                task.errors.append({
+                    "round": round_num,
+                    "phase": "backtest",
+                    "config_index": cfg_idx,
+                    "slug": slug,
+                    "message": err_msg,
+                    "detail": tb,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+                return cfg_idx, slug, None
+
     async def _run_optimization(
         self,
         task_id: str,
@@ -176,302 +288,244 @@ class AIOptimizer:
         active_set = set(task.active_params)
 
         try:
-            # ── Phase 1: Load data + build market profiles (once) ────────
-            data_cache: dict[str, ArchiveData] = {}
+            # ── Phase 1: Build market profiles ────────────────────────────
+            # Load each slug one at a time and discard the ArchiveData
+            # immediately after profiling.  This keeps memory at O(1) rather
+            # than O(N slugs) before any backtest even starts.
             for slug in task.slugs:
                 data = await asyncio.to_thread(load_archive, config.data_dir, slug)
-                data_cache[slug] = data
                 task.market_profiles[slug] = profile_market(slug, data)
+                # data goes out of scope here — GC can reclaim immediately
 
-            # ── Phase 2: Baseline (round 0) + AI rounds (shared HTTP client) ─
+            # ── Phase 2: Baseline (round 0) + AI rounds ───────────────────
             async with httpx.AsyncClient(timeout=120) as llm_http:
-              for round_num in range(0, task.max_rounds + 1):
-                if task.status == "cancelled":
-                    break
-
-                task.current_round = round_num
-                t_round = time.monotonic()
-
-                if round_num == 0:
-                    # ── Round 0: Baseline — run user's original config ───
-                    baseline_params = {
-                        k: task.base_config[k]
-                        for k in param_keys
-                        if k in task.base_config
-                    }
-                    configs = [baseline_params]
-                    reason = "基准测试 — 使用策略原始参数建立 baseline"
-                    task.ai_messages.append({
-                        "round": round_num,
-                        "role": "system",
-                        "content_length": 0,
-                        "content": reason,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    })
-                else:
-                    # ── AI round: build per-group prompt ──────────────────
-                    # Collect baseline metrics (round 0)
-                    baseline_digests = [
-                        d for d in task.all_digests if d.get("round") == 0
-                    ]
-                    # Collect previous round's per-group results
-                    prev_round = round_num - 1
-                    prev_digests = [
-                        d for d in task.all_digests if d.get("round") == prev_round
-                    ]
-                    user_prompt = build_group_prompt(
-                        round_number=round_num,
-                        param_schema=param_schema,
-                        base_config=task.base_config,
-                        market_profiles=task.market_profiles,
-                        optimize_target=task.optimize_target,
-                        runs_per_round=task.runs_per_round,
-                        baseline_digests=baseline_digests,
-                        prev_round_digests=prev_digests,
-                        prev_round_number=prev_round,
-                        param_keys=param_keys,
-                        best_metric=task.best_metric,
-                        best_total_trades=task.best_total_trades,
-                    )
-
-                    task.ai_messages.append({
-                        "round": round_num,
-                        "role": "user",
-                        "content_length": len(user_prompt),
-                        "content": user_prompt,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    })
-
-                    try:
-                        raw_response = await call_llm(
-                            llm_http,
-                            config.llm_api_url, config.llm_api_key, llm_model,
-                            SYSTEM_PROMPT, user_prompt,
-                        )
-                    except Exception as e:
-                        tb = traceback.format_exc()
-                        err_msg = f"[round_{round_num}] LLM error: {e}"
-                        logger.error("AI optimizer %s round %d LLM call failed: %s", task_id, round_num, e)
-                        task.errors.append({
-                            "round": round_num,
-                            "phase": "llm_call",
-                            "message": err_msg,
-                            "detail": tb,
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                        })
-                        task.error = err_msg
-                        task.status = "failed"
-                        break
-
-                    task.ai_messages.append({
-                        "round": round_num,
-                        "role": "assistant",
-                        "content_length": len(raw_response),
-                        "content": raw_response,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    })
-
-                    try:
-                        configs, reason = parse_ai_configs(raw_response, param_schema, task.runs_per_round, active_set)
-                    except Exception as e:
-                        tb = traceback.format_exc()
-                        err_msg = f"[round_{round_num}] Parse error: {e}"
-                        logger.error("AI optimizer %s round %d parse failed: %s", task_id, round_num, e)
-                        task.errors.append({
-                            "round": round_num,
-                            "phase": "parse",
-                            "message": err_msg,
-                            "detail": tb,
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                        })
-                        task.error = err_msg
-                        task.status = "failed"
-                        break
-
-                    if not configs:
-                        err_msg = f"[round_{round_num}] AI produced no valid configs"
-                        logger.warning("AI optimizer %s round %d produced no configs", task_id, round_num)
-                        task.errors.append({
-                            "round": round_num,
-                            "phase": "parse",
-                            "message": err_msg,
-                            "detail": "",
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                        })
-                        task.error = err_msg
-                        task.status = "failed"
-                        break
-
-                # ── Run backtests for this round ─────────────────────────
-                round_result = RoundResult(
-                    round_number=round_num,
-                    configs=configs,
-                    ai_reasoning=reason,
-                )
-
-                for cfg_idx, ai_config in enumerate(configs):
+                for round_num in range(0, task.max_rounds + 1):
                     if task.status == "cancelled":
                         break
 
-                    # Merge: base_config overridden by AI-suggested params
-                    # Filter to active_params only — inactive params never enter
-                    merged_config = {**task.base_config, **ai_config}
-                    merged_config = {k: v for k, v in merged_config.items() if k in active_set}
-                    merged_config = self._registry.normalize_config(merged_config)
+                    task.current_round = round_num
+                    t_round = time.monotonic()
 
-                    # Collect per-slug results for group-level best tracking.
-                    # Best is determined by the average metric across all slugs
-                    # in this config group, not by any single slug's result.
-                    _cfg_metric_vals: list[float] = []
-                    _cfg_total_trades_vals: list[int] = []
-                    _cfg_first_session_id: str = ""
+                    if round_num == 0:
+                        # Round 0: baseline — run user's original config
+                        baseline_params = {
+                            k: task.base_config[k]
+                            for k in param_keys
+                            if k in task.base_config
+                        }
+                        configs = [baseline_params]
+                        reason = "基准测试 — 使用策略原始参数建立 baseline"
+                        task.ai_messages.append({
+                            "round": round_num,
+                            "role": "system",
+                            "content_length": 0,
+                            "content": reason,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        })
+                    else:
+                        # AI round: build prompt + call LLM
+                        baseline_digests = [
+                            d for d in task.all_digests if d.get("round") == 0
+                        ]
+                        prev_round = round_num - 1
+                        prev_digests = [
+                            d for d in task.all_digests if d.get("round") == prev_round
+                        ]
+                        user_prompt = build_group_prompt(
+                            round_number=round_num,
+                            param_schema=param_schema,
+                            base_config=task.base_config,
+                            market_profiles=task.market_profiles,
+                            optimize_target=task.optimize_target,
+                            runs_per_round=task.runs_per_round,
+                            baseline_digests=baseline_digests,
+                            prev_round_digests=prev_digests,
+                            prev_round_number=prev_round,
+                            param_keys=param_keys,
+                            best_metric=task.best_metric,
+                            best_total_trades=task.best_total_trades,
+                        )
 
-                    for slug in task.slugs:
-                        if task.status == "cancelled":
+                        task.ai_messages.append({
+                            "round": round_num,
+                            "role": "user",
+                            "content_length": len(user_prompt),
+                            "content": user_prompt,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        })
+
+                        try:
+                            raw_response = await call_llm(
+                                llm_http,
+                                config.llm_api_url, config.llm_api_key, llm_model,
+                                SYSTEM_PROMPT, user_prompt,
+                            )
+                        except Exception as e:
+                            tb = traceback.format_exc()
+                            err_msg = f"[round_{round_num}] LLM error: {e}"
+                            logger.error("AI optimizer %s round %d LLM call failed: %s", task_id, round_num, e)
+                            task.errors.append({
+                                "round": round_num,
+                                "phase": "llm_call",
+                                "message": err_msg,
+                                "detail": tb,
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            })
+                            task.error = err_msg
+                            task.status = "failed"
                             break
 
-                        async with self._semaphore:
-                            try:
-                                session = await asyncio.wait_for(
-                                    asyncio.to_thread(
-                                        run_backtest,
-                                        self._registry,
-                                        task.strategy,
-                                        slug,
-                                        merged_config,
-                                        task.initial_balance,
-                                        data_cache.get(slug),
-                                        task.settlement_result,
-                                    ),
-                                    timeout=config.slug_timeout,
-                                )
+                        task.ai_messages.append({
+                            "round": round_num,
+                            "role": "assistant",
+                            "content_length": len(raw_response),
+                            "content": raw_response,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        })
 
-                                # Evaluate
-                                metrics = evaluate(session)
-                                session.metrics = metrics
-                                session.drawdown_curve = compute_drawdown_curve(session.equity_curve)
-                                session.drawdown_events = compute_drawdown_events(session.equity_curve)
+                        try:
+                            configs, reason = parse_ai_configs(
+                                raw_response, param_schema, task.runs_per_round, active_set
+                            )
+                        except Exception as e:
+                            tb = traceback.format_exc()
+                            err_msg = f"[round_{round_num}] Parse error: {e}"
+                            logger.error("AI optimizer %s round %d parse failed: %s", task_id, round_num, e)
+                            task.errors.append({
+                                "round": round_num,
+                                "phase": "parse",
+                                "message": err_msg,
+                                "detail": tb,
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            })
+                            task.error = err_msg
+                            task.status = "failed"
+                            break
 
-                                # Persist individual result
-                                if self._on_result:
-                                    try:
-                                        self._on_result(session)
-                                    except Exception as e:
-                                        err_msg = f"[round_{round_num}] persist failed for config {cfg_idx} slug {slug}: {e}"
-                                        logger.error("on_result callback failed: %s", e)
-                                        task.persist_errors.append(err_msg)
+                        if not configs:
+                            err_msg = f"[round_{round_num}] AI produced no valid configs"
+                            logger.warning("AI optimizer %s round %d produced no configs", task_id, round_num)
+                            task.errors.append({
+                                "round": round_num,
+                                "phase": "parse",
+                                "message": err_msg,
+                                "detail": "",
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            })
+                            task.error = err_msg
+                            task.status = "failed"
+                            break
 
-                                # Extract digest (compact)
-                                digest = digest_session(session)
-                                digest["round"] = round_num
-                                digest["config_index"] = cfg_idx
-                                round_result.digests.append(digest)
-                                task.all_digests.append(digest)
+                    # ── Parallel gather: all (cfg × slug) pairs this round ──
+                    # Prepare merged configs once to avoid re-merging inside coroutines
+                    merged_configs: list[tuple[int, dict]] = []
+                    for cfg_idx, ai_config in enumerate(configs):
+                        merged = {**task.base_config, **ai_config}
+                        merged = {k: v for k, v in merged.items() if k in active_set}
+                        merged = self._registry.normalize_config(merged)
+                        merged_configs.append((cfg_idx, merged))
 
-                                # Accumulate per-slug values for group-level best tracking
-                                slug_metric_val = getattr(metrics, task.optimize_target, None)
-                                if slug_metric_val is not None:
-                                    _cfg_metric_vals.append(slug_metric_val)
-                                    _cfg_total_trades_vals.append(metrics.total_trades)
+                    # Each coroutine acquires the semaphore independently, so
+                    # the service-level pool caps total concurrency across ALL
+                    # tasks (batch + AI + sensitivity).
+                    coros = [
+                        self._run_one_backtest(task, round_num, cfg_idx, merged, slug)
+                        for cfg_idx, merged in merged_configs
+                        for slug in task.slugs
+                    ]
+                    raw_results: list[tuple[int, str, dict | None]] = await asyncio.gather(*coros)
+
+                    round_result = RoundResult(
+                        round_number=round_num,
+                        configs=configs,
+                        ai_reasoning=reason,
+                    )
+
+                    # Collect digests
+                    for _, _, digest in raw_results:
+                        if digest is not None:
+                            round_result.digests.append(digest)
+                            task.all_digests.append(digest)
+
+                    # completed_runs: one unit per config (parallel slugs within a
+                    # config are atomic from a progress perspective)
+                    task.completed_runs += len(configs)
+
+                    # ── Group-level best tracking ─────────────────────────
+                    # Build O(1) lookup: (cfg_idx, slug) → digest
+                    digest_map: dict[tuple[int, str], dict] = {
+                        (ci, s): d for ci, s, d in raw_results if d is not None
+                    }
+
+                    _MIN_TRADES_FOR_BEST = 5
+                    for cfg_idx, merged in merged_configs:
+                        _cfg_metric_vals: list[float] = []
+                        _cfg_total_trades_vals: list[int] = []
+                        _cfg_first_session_id: str = ""
+
+                        for slug in task.slugs:
+                            d = digest_map.get((cfg_idx, slug))
+                            if d:
+                                m = d.get("metrics", {})
+                                metric_val = m.get(task.optimize_target)
+                                if metric_val is not None:
+                                    _cfg_metric_vals.append(metric_val)
+                                    _cfg_total_trades_vals.append(m.get("total_trades", 0))
                                     if not _cfg_first_session_id:
-                                        _cfg_first_session_id = session.session_id
+                                        _cfg_first_session_id = d.get("session_id", "")
 
-                            except asyncio.TimeoutError:
-                                err_msg = f"[round_{round_num}] config {cfg_idx} slug {slug} timed out after {config.slug_timeout}s"
-                                logger.warning(
-                                    "AI optimizer %s round %d config %d slug %s timed out",
-                                    task_id, round_num, cfg_idx, slug,
-                                )
-                                task.errors.append({
-                                    "round": round_num,
-                                    "phase": "backtest",
-                                    "config_index": cfg_idx,
-                                    "slug": slug,
-                                    "message": err_msg,
-                                    "detail": "",
-                                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                                })
-                            except Exception as e:
-                                tb = traceback.format_exc()
-                                err_msg = f"[round_{round_num}] config {cfg_idx} slug {slug} error: {e}"
-                                logger.error(
-                                    "AI optimizer %s round %d config %d slug %s error: %s",
-                                    task_id, round_num, cfg_idx, slug, e,
-                                )
-                                task.errors.append({
-                                    "round": round_num,
-                                    "phase": "backtest",
-                                    "config_index": cfg_idx,
-                                    "slug": slug,
-                                    "message": err_msg,
-                                    "detail": tb,
-                                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                                })
+                        if _cfg_metric_vals:
+                            group_metric = sum(_cfg_metric_vals) / len(_cfg_metric_vals)
+                            group_total_trades = sum(_cfg_total_trades_vals)
+                            avg_trades_per_slug = group_total_trades / len(_cfg_metric_vals)
 
-                        task.completed_runs += 1
+                            new_enough = avg_trades_per_slug >= _MIN_TRADES_FOR_BEST
+                            best_avg_trades = (
+                                task.best_total_trades / len(task.slugs)
+                                if task.slugs else task.best_total_trades
+                            )
+                            old_enough = best_avg_trades >= _MIN_TRADES_FOR_BEST
 
-                    # Group-level best update — compare this config's *average* metric
-                    # across all slugs. This prevents a config that happens to be
-                    # great on one slug but poor overall from being selected as best.
-                    if _cfg_metric_vals:
-                        _MIN_TRADES_FOR_BEST = 5
-                        group_metric = sum(_cfg_metric_vals) / len(_cfg_metric_vals)
-                        group_total_trades = sum(_cfg_total_trades_vals)
-                        avg_trades_per_slug = group_total_trades / len(_cfg_metric_vals)
-
-                        new_enough = avg_trades_per_slug >= _MIN_TRADES_FOR_BEST
-                        # For the old-best reliability check, use avg trades per slug
-                        best_avg_trades = (
-                            task.best_total_trades / len(task.slugs)
-                            if task.slugs else task.best_total_trades
-                        )
-                        old_enough = best_avg_trades >= _MIN_TRADES_FOR_BEST
-
-                        should_update = False
-                        if task.best_metric == float("-inf"):
-                            # No best yet — accept anything
-                            should_update = True
-                        elif new_enough and not old_enough:
-                            # New group has sufficient trades, old doesn't — always replace
-                            should_update = True
-                        elif not new_enough and old_enough:
-                            # Old is reliable, new is fluke — never replace
                             should_update = False
-                        else:
-                            # Both same reliability tier — use group metric comparison
-                            should_update = group_metric > task.best_metric
+                            if task.best_metric == float("-inf"):
+                                should_update = True
+                            elif new_enough and not old_enough:
+                                should_update = True
+                            elif not new_enough and old_enough:
+                                should_update = False
+                            else:
+                                should_update = group_metric > task.best_metric
 
-                        if should_update:
-                            task.best_metric = group_metric
-                            task.best_config = merged_config
-                            task.best_session_id = _cfg_first_session_id
-                            task.best_total_trades = group_total_trades
+                            if should_update:
+                                task.best_metric = group_metric
+                                task.best_config = merged
+                                task.best_session_id = _cfg_first_session_id
+                                task.best_total_trades = group_total_trades
 
-                # Round summary — best_metric_value = best *group-average* metric
-                # across configs this round (not raw max of individual slug results)
-                _rnd_config_metrics: dict[int, list[float]] = {}
-                for _d in round_result.digests:
-                    _ci = _d.get("config_index", -1)
-                    if _d.get("metrics"):
-                        _v = _d["metrics"].get(task.optimize_target, None)
-                        if _v is not None:
-                            _rnd_config_metrics.setdefault(_ci, []).append(_v)
-                _group_avgs = [
-                    sum(vals) / len(vals)
-                    for vals in _rnd_config_metrics.values()
-                    if vals
-                ]
-                round_result.best_metric_value = max(_group_avgs) if _group_avgs else 0.0
-                round_result.duration_ms = (time.monotonic() - t_round) * 1000
-                task.rounds.append(round_result)
-                self._persist_task(task)
+                    # ── Round summary ─────────────────────────────────────
+                    _rnd_config_metrics: dict[int, list[float]] = {}
+                    for _d in round_result.digests:
+                        _ci = _d.get("config_index", -1)
+                        if _d.get("metrics"):
+                            _v = _d["metrics"].get(task.optimize_target, None)
+                            if _v is not None:
+                                _rnd_config_metrics.setdefault(_ci, []).append(_v)
+                    _group_avgs = [
+                        sum(vals) / len(vals)
+                        for vals in _rnd_config_metrics.values()
+                        if vals
+                    ]
+                    round_result.best_metric_value = max(_group_avgs) if _group_avgs else 0.0
+                    round_result.duration_ms = (time.monotonic() - t_round) * 1000
+                    task.rounds.append(round_result)
+                    self._persist_task(task)
 
-                logger.info(
-                    "AI optimizer %s round %d done: %d runs, best %s=%.4f, reason: %s",
-                    task_id, round_num, len(round_result.digests),
-                    task.optimize_target, round_result.best_metric_value,
-                    reason[:100],
-                )
+                    logger.info(
+                        "AI optimizer %s round %d done: %d runs, best %s=%.4f, reason: %s",
+                        task_id, round_num, len(round_result.digests),
+                        task.optimize_target, round_result.best_metric_value,
+                        reason[:100],
+                    )
 
             # ── Done ─────────────────────────────────────────────────────
             if task.status != "cancelled":

@@ -56,10 +56,11 @@ class SensitivityResult:
 class SensitivityAnalyzer:
     """Run parameter sweep backtests for sensitivity analysis."""
 
-    def __init__(self, registry: StrategyRegistry) -> None:
+    def __init__(self, registry: StrategyRegistry, semaphore: asyncio.Semaphore | None = None) -> None:
         self._registry = registry
         self._tasks: dict[str, SensitivityResult] = {}
-        self._sem = asyncio.Semaphore(config.max_concurrency)
+        # Use caller-supplied semaphore (service-level pool) when available.
+        self._sem = semaphore or asyncio.Semaphore(config.max_concurrency)
 
     async def submit(
         self,
