@@ -305,7 +305,27 @@ def run_backtest(
         # ── Fast-forward: OB state is up-to-date; skip the expensive steps ──
         # Strategy cannot enter during warm-up (time gate blocks on_tick),
         # so snapshot / TickContext / equity recording are all wasteful here.
+        # Price curve is still sampled so the chart shows full slug history.
         if fast_forward_until and grid_ts < fast_forward_until:
+            if tick_idx % max(1, total_ticks // 1000) == 0:
+                for tid in token_ids:
+                    if last_mid.get(tid, 0) > 0:
+                        ff_snap = derive_snapshot_from_ob(tid, working_obs[tid])
+                        if ff_snap.mid_price == 0 and last_mid[tid] > 0:
+                            ff_snap.mid_price = last_mid[tid]
+                            ff_snap.best_bid = last_mid[tid]
+                            ff_snap.best_ask = last_mid[tid]
+                        price_curve.append({
+                            "timestamp": grid_ts,
+                            "token_id": tid,
+                            "mid_price": round(ff_snap.mid_price or last_mid[tid], 6),
+                            "anchor_price": round(ff_snap.anchor_price or last_trade_prices.get(tid, 0) or last_mid[tid], 6),
+                            "anchor_source": ff_snap.anchor_source,
+                            "best_bid": round(ff_snap.best_bid, 6),
+                            "best_ask": round(ff_snap.best_ask, 6),
+                            "spread": round(ff_snap.spread, 6),
+                            "last_trade_price": round(last_trade_prices.get(tid, 0), 6),
+                        })
             continue
 
         # 4) Build token snapshots

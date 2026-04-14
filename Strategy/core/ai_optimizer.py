@@ -521,8 +521,18 @@ class AIOptimizer:
                                 should_update = True
                             elif not new_enough and old_enough:
                                 should_update = False
-                            else:
+                            elif new_enough:
+                                # both reliable → compare metric directly
                                 should_update = group_metric > task.best_metric
+                            else:
+                                # both unreliable — use avg_trades as primary key
+                                # to prevent 0-trade configs (metric=0.0) from
+                                # beating configs with real (but negative) metrics
+                                if avg_trades_per_slug > best_avg_trades:
+                                    should_update = True
+                                elif avg_trades_per_slug == best_avg_trades:
+                                    should_update = group_metric > task.best_metric
+                                # else: fewer avg trades → reject
 
                             if should_update:
                                 task.best_metric = group_metric
