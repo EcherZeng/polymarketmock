@@ -133,6 +133,28 @@ export const PARAM_SCHEMA: Record<string, ParamSchemaItem> = {
     unit: "秒",
     scope: "strategy",
   },
+  profit_margin: {
+    group: "entry",
+    visibility: "advanced",
+    weight: "high",
+    label: { zh: "利润空间", en: "Profit Margin" },
+    desc: {
+      zh: "入场时，止盈目标价格（无止盈则为 1）与当前最低挂单价格（best_ask 的等效价格）的差值必须大于此阈值才允许入场。差值越大代表潜在利润空间越充足。区间为 [0.01, 0.50]。",
+      en: "The gap between take-profit target (or 1.0 if TP inactive) and the effective best-ask entry price must exceed this threshold to allow entry. Larger values demand more profit room. Range [0.01, 0.50].",
+    },
+    disable_value: 0,
+    disable_note: {
+      zh: "设为 0：利润空间门槛设为 0，任意价差均可入场，利润空间过滤实际失效",
+      en: "Set to 0: profit gap threshold at 0, any spread qualifies, profit margin filter effectively disabled",
+    },
+    default: 0.1,
+    type: "float",
+    min: 0.01,
+    max: 0.5,
+    step: 0.01,
+    unit: "",
+    scope: "strategy",
+  },
   position_min_pct: {
     group: "position",
     visibility: "core",

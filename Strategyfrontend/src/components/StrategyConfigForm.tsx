@@ -1,4 +1,4 @@
-﻿import { useMemo, useState, useRef, useCallback } from "react"
+﻿import { useMemo, useState, useRef, useCallback, useEffect } from "react"
 import { InfoIcon, XIcon, PlusIcon, ChevronRightIcon } from "lucide-react"
 import type { ParamSchemaItem, ParamGroupDef } from "@/types"
 import { cn } from "@/lib/utils"
@@ -193,6 +193,74 @@ function getAncestors(key: string, graph: DepGraph): string[] {
     queue.push(...(graph.childToParents.get(current) ?? []))
   }
   return result
+}
+
+// ── NumericInput ─────────────────────────────────────────────────────────────
+// Keeps a local string draft so intermediate states like "0.0" or "0.0" aren't
+// collapsed to "0" on every keystroke. The numeric value is committed to the
+// parent only on blur (or when the string represents a complete, valid number
+// that doesn't end with "." / "-").
+interface NumericInputProps {
+  value: number | undefined
+  onChange: (value: number) => void
+  min?: number
+  max?: number
+  step?: number
+  className?: string
+}
+
+function NumericInput({ value, onChange, min, max, className }: NumericInputProps) {
+  const [draft, setDraft] = useState<string>(value !== undefined ? String(value) : "")
+  const committedRef = useRef<number | undefined>(value)
+
+  // Sync from parent when value changes externally (e.g. preset load)
+  useEffect(() => {
+    if (value !== committedRef.current) {
+      committedRef.current = value
+      setDraft(value !== undefined ? String(value) : "")
+    }
+  }, [value])
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const raw = e.target.value
+    setDraft(raw)
+    // Only commit if the string is a complete valid number (not mid-typing like "0." or "-")
+    if (raw !== "" && !raw.endsWith(".") && raw !== "-") {
+      const num = Number(raw)
+      if (!Number.isNaN(num)) {
+        committedRef.current = num
+        onChange(num)
+      }
+    }
+  }
+
+  function handleBlur() {
+    const num = Number(draft)
+    if (draft === "" || Number.isNaN(num)) {
+      // Revert to last committed value
+      const fallback = committedRef.current
+      setDraft(fallback !== undefined ? String(fallback) : "")
+      return
+    }
+    // Clamp to min/max
+    const clamped = (min !== undefined && num < min) ? min
+      : (max !== undefined && num > max) ? max
+      : num
+    committedRef.current = clamped
+    setDraft(String(clamped))
+    if (clamped !== value) onChange(clamped)
+  }
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={draft}
+      onChange={handleChange}
+      onBlur={handleBlur}
+      className={className}
+    />
+  )
 }
 
 // ── types ───────────────────────────────────────────────────────────────────
@@ -401,10 +469,9 @@ export default function StrategyConfigForm({
             </button>
           )}
         </label>
-        <input
-          type="number"
-          value={currentVal !== undefined ? String(currentVal) : ""}
-          onChange={(e) => handleChange(key, e.target.value, schema)}
+        <NumericInput
+          value={currentVal !== undefined ? Number(currentVal) : undefined}
+          onChange={(num) => handleChange(key, String(num), schema)}
           min={schema.min}
           max={schema.max}
           step={schema.step ?? (schema.type === "int" ? 1 : 0.0001)}
