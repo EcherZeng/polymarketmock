@@ -114,6 +114,48 @@ async def list_optimization_tasks():
     ]
 
 
+@router.get("/{task_id}/progress")
+async def get_optimization_progress(task_id: str):
+    """Lightweight progress endpoint for polling during task execution.
+
+    Returns only the fields needed to update the progress bar and status
+    display.  Omits rounds, ai_messages, market_profiles, and slug_metrics
+    so the response stays under ~1KB regardless of how many rounds have run.
+    Call the full GET /{task_id} endpoint after the task reaches a terminal
+    state (completed / failed / cancelled) to load detailed results.
+    """
+    if state.ai_optimizer is None:
+        raise HTTPException(status_code=503, detail="AI optimizer not initialized")
+
+    task = state.ai_optimizer.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Compact per-round summary (no per-slug breakdown, no ai_reasoning body)
+    rounds_summary = [
+        {
+            "round": r.round_number,
+            "runs_completed": len(r.digests),
+            "best_metric_value": r.best_metric_value,
+            "duration_ms": round(r.duration_ms, 1),
+        }
+        for r in task.rounds
+    ]
+
+    return {
+        "task_id": task.task_id,
+        "status": task.status,
+        "current_round": task.current_round,
+        "max_rounds": task.max_rounds,
+        "completed_runs": task.completed_runs,
+        "total_runs": task.total_runs,
+        "best_metric": task.best_metric if task.best_metric != float("-inf") else None,
+        "best_total_trades": task.best_total_trades,
+        "error": task.error,
+        "rounds_summary": rounds_summary,
+    }
+
+
 @router.get("/{task_id}")
 async def get_optimization_task(task_id: str):
     """Get detailed optimization task progress and results."""

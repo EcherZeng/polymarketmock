@@ -408,3 +408,23 @@ export interface AiOptimizeTaskDetail extends AiOptimizeTask {
     timestamp: string
   }>
 }
+
+export interface AiOptimizeRoundProgress {
+  round: number
+  runs_completed: number
+  best_metric_value: number
+  duration_ms: number
+}
+
+export interface AiOptimizeTaskProgress {
+  task_id: string
+  status: "running" | "completed" | "cancelled" | "failed" | "interrupted"
+  current_round: number
+  max_rounds: number
+  completed_runs: number
+  total_runs: number
+  best_metric: number | null
+  best_total_trades: number
+  error: string | null
+  rounds_summary: AiOptimizeRoundProgress[]
+}

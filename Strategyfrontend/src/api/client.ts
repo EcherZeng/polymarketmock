@@ -380,6 +380,13 @@ export async function fetchAiOptimizeTasks(): Promise<import("@/types").AiOptimi
   return data
 }
 
+export async function fetchAiOptimizeTaskProgress(
+  taskId: string,
+): Promise<import("@/types").AiOptimizeTaskProgress> {
+  const { data } = await api.get(`/ai-optimize/${taskId}/progress`)
+  return data
+}
+
 export async function fetchAiOptimizeTask(
   taskId: string,
 ): Promise<import("@/types").AiOptimizeTaskDetail> {

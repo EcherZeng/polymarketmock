@@ -2,9 +2,9 @@ import { useMemo, useState } from "react"
 import { useParams, Link } from "react-router-dom"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { cn, fmtTimeCst } from "@/lib/utils"
-import { fetchAiOptimizeTask, stopAiOptimize, savePreset } from "@/api/client"
+import { fetchAiOptimizeTask, fetchAiOptimizeTaskProgress, stopAiOptimize, savePreset } from "@/api/client"
 import { PARAM_SCHEMA } from "@/config/paramSchema"
-import type { AiOptimizeTaskDetail } from "@/types"
+import type { AiOptimizeTaskDetail, AiOptimizeTaskProgress } from "@/types"
 import {
   Dialog,
   DialogContent,
@@ -46,19 +46,37 @@ export default function AiOptimizeDetailPage() {
   const [expandedRoundSlugs, setExpandedRoundSlugs] = useState<Record<string, boolean>>({})
   const [expandedAiMsgIdx, setExpandedAiMsgIdx] = useState<number | null>(null)
 
-  const { data: task, isLoading, isError } = useQuery<AiOptimizeTaskDetail>({
-    queryKey: ["aiOptimizeTask", taskId],
-    queryFn: () => fetchAiOptimizeTask(taskId!),
+  const TERMINAL = new Set(["completed", "cancelled", "failed", "interrupted"])
+
+  // Lightweight progress query — polls every 3s while running
+  const { data: progress_data } = useQuery<AiOptimizeTaskProgress>({
+    queryKey: ["aiOptimizeTaskProgress", taskId],
+    queryFn: () => fetchAiOptimizeTaskProgress(taskId!),
     enabled: !!taskId,
     refetchInterval: (query) => {
       const status = query.state.data?.status
-      return status === "running" ? 3000 : false
+      return status && !TERMINAL.has(status) ? 3000 : false
     },
   })
 
+  // Full detail query — fires once when task reaches a terminal state
+  const isTerminal = progress_data ? TERMINAL.has(progress_data.status) : false
+  const { data: taskDetail, isLoading, isError } = useQuery<AiOptimizeTaskDetail>({
+    queryKey: ["aiOptimizeTaskDetail", taskId],
+    queryFn: () => fetchAiOptimizeTask(taskId!),
+    enabled: !!taskId && isTerminal,
+    staleTime: Infinity,
+  })
+
+  // Merge: show detail fields when available, fall back to progress fields
+  const task = taskDetail ?? (progress_data as unknown as AiOptimizeTaskDetail | undefined)
+
   const stopMutation = useMutation({
     mutationFn: () => stopAiOptimize(taskId!),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["aiOptimizeTask", taskId] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["aiOptimizeTaskProgress", taskId] })
+      queryClient.invalidateQueries({ queryKey: ["aiOptimizeTaskDetail", taskId] })
+    },
   })
 
   const createPresetMutation = useMutation({
@@ -95,10 +113,11 @@ export default function AiOptimizeDetailPage() {
 
   const [showJson, setShowJson] = useState(false)
 
-  if (isLoading) {
+  // Show loading only on first fetch (no progress data yet)
+  if (!progress_data && !taskDetail) {
     return <div className="py-12 text-center text-muted-foreground">加载中...</div>
   }
-  if (isError || !task) {
+  if ((isError && isTerminal) || !task) {
     return (
       <div className="py-12 text-center text-muted-foreground">
         任务不存在 · <Link to="/ai-optimize" className="text-primary underline">返回列表</Link>
@@ -106,7 +125,7 @@ export default function AiOptimizeDetailPage() {
     )
   }
 
-  const progress = task.total_runs > 0 ? (task.completed_runs / task.total_runs) * 100 : 0
+  const progressPct = task.total_runs > 0 ? (task.completed_runs / task.total_runs) * 100 : 0
 
   return (
     <div className="flex flex-col gap-6">
@@ -153,7 +172,7 @@ export default function AiOptimizeDetailPage() {
       <div className="rounded-lg border p-4">
         <div className="flex items-center justify-between text-sm">
           <span>回测进度: {task.completed_runs} / {task.total_runs}</span>
-          <span>{progress.toFixed(0)}%</span>
+          <span>{progressPct.toFixed(0)}%</span>
         </div>
         <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted">
           <div
@@ -163,7 +182,7 @@ export default function AiOptimizeDetailPage() {
                 : task.status === "failed" ? "bg-red-400"
                 : "bg-blue-500",
             )}
-            style={{ width: `${progress}%` }}
+            style={{ width: `${progressPct}%` }}
           />
         </div>
         {task.error && (
