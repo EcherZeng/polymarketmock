@@ -188,6 +188,10 @@ class BatchRunner:
         task = self._tasks[batch_id]
         task.started_at = datetime.now(timezone.utc).isoformat()
 
+        # Throttle concurrent outbound HTTP requests (BTC klines prefetch)
+        # to avoid firing hundreds of connections at once.
+        _http_sem = asyncio.Semaphore(config.max_concurrency * 2)
+
         async def run_one(slug: str, override_balance: float | None = None) -> BacktestSession | None:
             """Run a single slug backtest. Returns session on success (for cumulative mode)."""
             wf = task.workflows[slug]
@@ -199,21 +203,22 @@ class BatchRunner:
 
             wf.status = "running"
 
-            # ── BTC klines prefetch ──────────────────────────────────────
+            slug_balance = (
+                override_balance if override_balance is not None else task.initial_balance
+            )
+
+            # ── BTC klines prefetch (throttled by _http_sem) ─────────────
             btc_klines: list[dict] | None = None
             if btc_trend_enabled(task.config):
                 try:
                     slug_window = parse_slug_window(slug)
                     if slug_window:
-                        btc_klines = await fetch_btc_klines(slug_window[0], slug_window[1])
+                        async with _http_sem:
+                            btc_klines = await fetch_btc_klines(slug_window[0], slug_window[1])
                 except Exception as e:
                     logger.warning(
                         "Batch %s slug %s BTC klines prefetch failed: %s", batch_id, slug, e
                     )
-
-            slug_balance = (
-                override_balance if override_balance is not None else task.initial_balance
-            )
 
             # ── Delegate to executor ─────────────────────────────────────
             result = await self._executor.run_one(
