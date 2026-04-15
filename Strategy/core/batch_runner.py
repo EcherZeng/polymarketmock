@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 
 from config import config
 from core.backtest_executor import BacktestExecutor
-from core.btc_data import fetch_btc_klines
+from core.btc_data import clear_kline_cache, fetch_btc_klines
 from core.registry import StrategyRegistry
 from core.types import BacktestSession, btc_trend_enabled, parse_slug_window
 
@@ -422,6 +422,9 @@ class BatchRunner:
             task.status = "completed"
         task.finished_at = datetime.now(timezone.utc).isoformat()
         self._running.pop(batch_id, None)
+
+        # Free BTC kline cache after batch finishes
+        clear_kline_cache()
 
         # Notify batch completion for persistence
         if self._on_batch_complete:

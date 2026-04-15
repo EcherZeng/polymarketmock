@@ -11,6 +11,27 @@ logger = logging.getLogger(__name__)
 
 BINANCE_KLINE_URL = "https://api.binance.com/api/v3/klines"
 
+# ── Module-level shared client and cache ─────────────────────────────────────
+
+_shared_client: httpx.AsyncClient | None = None
+_kline_cache: dict[tuple[int, int], list[dict]] = {}
+
+
+def _get_client() -> httpx.AsyncClient:
+    """Lazy-init a shared httpx client (connection pooling across requests)."""
+    global _shared_client
+    if _shared_client is None or _shared_client.is_closed:
+        _shared_client = httpx.AsyncClient(
+            timeout=15.0,
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+    return _shared_client
+
+
+def clear_kline_cache() -> None:
+    """Clear the in-memory kline cache (call between batch runs if needed)."""
+    _kline_cache.clear()
+
 
 def _iso_to_ms(ts: str) -> int:
     """Convert ISO 8601 timestamp string to milliseconds since epoch.
@@ -55,25 +76,32 @@ async def fetch_btc_klines(
     start_ms = _iso_to_ms(start_ts)
     end_ms = _iso_to_ms(end_ts)
 
+    # Cache hit — many slugs share overlapping time windows
+    cache_key = (start_ms, end_ms)
+    if cache_key in _kline_cache:
+        return _kline_cache[cache_key]
+
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                BINANCE_KLINE_URL,
-                params={
-                    "symbol": "BTCUSDT",
-                    "interval": interval,
-                    "startTime": start_ms,
-                    "endTime": end_ms,
-                    "limit": limit,
-                },
-            )
-            resp.raise_for_status()
-            raw = resp.json()
+        client = _get_client()
+        resp = await client.get(
+            BINANCE_KLINE_URL,
+            params={
+                "symbol": "BTCUSDT",
+                "interval": interval,
+                "startTime": start_ms,
+                "endTime": end_ms,
+                "limit": limit,
+            },
+        )
+        resp.raise_for_status()
+        raw = resp.json()
     except httpx.HTTPError as e:
         logger.warning("Binance kline request failed: %s", e)
         raise
 
-    return _transform_klines(raw)
+    result = _transform_klines(raw)
+    _kline_cache[cache_key] = result
+    return result
 
 
 def compute_btc_trend(

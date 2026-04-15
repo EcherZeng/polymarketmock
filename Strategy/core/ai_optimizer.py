@@ -277,18 +277,17 @@ class AIOptimizer:
         try:
             # ── Phase 1: Build market profiles (parallel IO) ──────────────
             # IO + CPU merged in one to_thread call to avoid two thread-pool
-            # switches per slug.  io_sem (capacity 8) caps concurrent archive
-            # loads while still parallelising IO wait time.
-            # market_profiles[slug] is written after each await returns in the
-            # event loop — asyncio single-thread scheduling is the implicit lock.
-            io_sem = asyncio.Semaphore(8)
+            # switches per slug.  Reuse executor's archive_sem so that
+            # profiling + batch runs share the same memory budget.
+            # Previously used a local io_sem(8) which could stack with
+            # batch runner's archive_sem(4) → 12 ArchiveData in memory.
 
             def _load_and_profile(s: str):
                 d = load_archive(config.data_dir, s)
                 return profile_market(s, d)  # d released after return
 
             async def _profile_one_slug(s: str) -> None:
-                async with io_sem:
+                async with self._executor._archive_sem:
                     prof = await asyncio.to_thread(_load_and_profile, s)
                 task.market_profiles[s] = prof  # safe: event-loop write
 
