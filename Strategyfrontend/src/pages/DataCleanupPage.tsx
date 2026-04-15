@@ -1,8 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState, useMemo } from "react"
+import { toast } from "sonner"
 import { cn, fmtFullCst } from "@/lib/utils"
 import { fetchIncomplete, cleanupSlugs, deleteArchive } from "@/api/client"
-import type { IncompleteResponse } from "@/api/client"
+import type { IncompleteResponse, CleanupResponse } from "@/api/client"
 
 function fmtSize(mb: number) {
   return mb >= 1 ? `${mb.toFixed(1)} MB` : `${(mb * 1024).toFixed(0)} KB`
@@ -30,18 +31,34 @@ export default function DataCleanupPage() {
   const deleteSingleMut = useMutation({
     mutationFn: deleteArchive,
     onSuccess: () => {
+      toast.success("数据源已删除")
       queryClient.invalidateQueries({ queryKey: ["incomplete"] })
       queryClient.invalidateQueries({ queryKey: ["archives"] })
+    },
+    onError: (err: Error) => {
+      toast.error(`删除失败: ${err.message}`)
     },
   })
 
   const bulkDeleteMut = useMutation({
     mutationFn: (slugs: string[]) => cleanupSlugs(slugs),
-    onSuccess: () => {
+    onSuccess: (resp: CleanupResponse) => {
       setSelected(new Set())
       setConfirmBulk(false)
       queryClient.invalidateQueries({ queryKey: ["incomplete"] })
       queryClient.invalidateQueries({ queryKey: ["archives"] })
+      if (resp.errors && resp.errors.length > 0) {
+        toast.error(
+          `${resp.deleted_count} 个已删除，${resp.errors.length} 个失败` +
+            (resp.error_detail ? `\n${resp.error_detail}` : ""),
+        )
+      } else if (resp.deleted_count > 0) {
+        toast.success(`已删除 ${resp.deleted_count} 个数据源`)
+      }
+    },
+    onError: (err: Error) => {
+      setConfirmBulk(false)
+      toast.error(`批量删除失败: ${err.message}`)
     },
   })
 

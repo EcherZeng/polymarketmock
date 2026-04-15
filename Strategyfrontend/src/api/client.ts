@@ -237,6 +237,8 @@ export interface CleanupResponse {
   deleted: string[]
   not_found: string[]
   deleted_count: number
+  errors?: string[]
+  error_detail?: string
 }
 
 export async function fetchIncomplete(

@@ -1,38 +1,45 @@
- > [strategyfrontend build 6/6] RUN npm run build:
-1.747
-1.747 > strategyfrontend@0.0.0 build
-1.747 > tsc -b && vite build
-1.747
-15.46 src/components/ReturnDistributionChart.tsx(127,15): error TS2322: Type '(value: number, name: string) => [string, string] | [number, string]' is not assignable to type 'Formatter<ValueType, NameType> & ((value: ValueType, name: NameType, item: TooltipPayloadEntry, index: number, payload: TooltipPayload) => ReactNode | [...])'.
-15.46   Type '(value: number, name: string) => [string, string] | [number, string]' is not assignable to type 'Formatter<ValueType, NameType>'.
-15.46     Types of parameters 'value' and 'value' are incompatible.
-15.46       Type 'ValueType | undefined' is not assignable to type 'number'.
-15.46         Type 'undefined' is not assignable to type 'number'.
-16.90 npm notice
-16.90 npm notice New major version of npm available! 10.8.2 -> 11.12.1
-16.90 npm notice Changelog: https://github.com/npm/cli/releases/tag/v11.12.1
-16.90 npm notice To update run: npm install -g npm@11.12.1
-16.90 npm notice
-------
-[+] up 0/4
- ⠙ Image polymarketmock-frontend         Building                                                                  18.6s
- ⠙ Image polymarketmock-strategyfrontend Building                                                                  18.6s
- ⠙ Image polymarketmock-backend          Building                                                                  18.6s
- ⠙ Image polymarketmock-strategy         Building                                                                  18.6s
-Dockerfile:8
+[plugin:vite:oxc] Transform failed with 3 errors:
 
---------------------
+[PARSE_ERROR] Error: Identifier `mean` has already been declared
+    ╭─[ src/components/ReturnDistributionChart.tsx:30:9 ]
+    │
+ 30 │   const mean = pctReturns.reduce((a, b) => a + b, 0) / pctReturns.length
+    │         ──┬─  
+    │           ╰─── `mean` has already been declared here
+    │ 
+ 45 │   const mean = pctReturns.reduce((a, b) => a + b, 0) / pctReturns.length
+    │         ──┬─  
+    │           ╰─── It can not be redeclared here
+────╯
 
-   6 |     RUN npm ci
+[PARSE_ERROR] Error: Identifier `variance` has already been declared
+    ╭─[ src/components/ReturnDistributionChart.tsx:31:9 ]
+    │
+ 31 │   const variance = pctReturns.length > 1
+    │         ────┬───  
+    │             ╰───── `variance` has already been declared here
+    │ 
+ 46 │   const variance = pctReturns.reduce((a, x) => a + (x - mean) ** 2, 0) / pctReturns.length
+    │         ────┬───  
+    │             ╰───── It can not be redeclared here
+────╯
 
-   7 |     COPY . .
-
-   8 | >>> RUN npm run build
-
-   9 |
-
-  10 |     # ── Stage 2: nginx serve ─────────────────────────────────────────────────────
-
---------------------
-
-target strategyfrontend: failed to solve: process "/bin/sh -c npm run build" did not complete successfully: exit code: 2
+[PARSE_ERROR] Error: Identifier `std` has already been declared
+    ╭─[ src/components/ReturnDistributionChart.tsx:34:9 ]
+    │
+ 34 │   const std = Math.sqrt(variance)
+    │         ─┬─  
+    │          ╰─── `std` has already been declared here
+    │ 
+ 47 │   const std = Math.sqrt(variance)
+    │         ─┬─  
+    │          ╰─── It can not be redeclared here
+────╯
+C:/Users/v-yujieceng/Documents/Ls/poly/polymarketmock/Strategyfrontend/src/components/ReturnDistributionChart.tsx
+    at transformWithOxc (file:///C:/Users/v-yujieceng/Documents/Ls/poly/polymarketmock/Strategyfrontend/node_modules/vite/dist/node/chunks/node.js:3720:19)
+    at TransformPluginContext.transform (file:///C:/Users/v-yujieceng/Documents/Ls/poly/polymarketmock/Strategyfrontend/node_modules/vite/dist/node/chunks/node.js:3788:26)
+    at EnvironmentPluginContainer.transform (file:///C:/Users/v-yujieceng/Documents/Ls/poly/polymarketmock/Strategyfrontend/node_modules/vite/dist/node/chunks/node.js:30048:51)
+    at async loadAndTransform (file:///C:/Users/v-yujieceng/Documents/Ls/poly/polymarketmock/Strategyfrontend/node_modules/vite/dist/node/chunks/node.js:24177:26)
+    at async viteTransformMiddleware (file:///C:/Users/v-yujieceng/Documents/Ls/poly/polymarketmock/Strategyfrontend/node_modules/vite/dist/node/chunks/node.js:24986:20)
+Click outside, press Esc key, or fix the code to dismiss.
+You can also disable this overlay by setting server.hmr.overlay to false in vite.config.ts.

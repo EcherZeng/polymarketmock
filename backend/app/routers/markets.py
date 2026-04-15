@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -10,6 +11,8 @@ from pydantic import BaseModel
 from app.config import settings
 from app.services import polymarket_proxy as proxy
 from app.storage import redis_store
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -302,13 +305,18 @@ async def get_archive(slug: str):
 async def delete_archive(slug: str):
     """删除归档场次：硬删数据目录，软删索引元数据。
 
-    当 Redis 元数据缺失时（如部署导致 Redis 重置），降级为仅删除
-    文件系统数据——关联的 Redis 键同样已不存在，无需清理。
+    当 Redis 元数据缺失或连接异常时（如部署导致 Redis 重置），
+    降级为仅删除文件系统数据——关联的 Redis 键同样已不存在，无需清理。
     """
     from app.storage.duckdb_store import delete_session
 
     # 1. 尝试获取元数据（用于清理关联 Redis 键）
-    meta = await redis_store.get_archive_meta(slug)
+    #    Redis 异常不应阻断文件系统删除
+    meta: dict | None = None
+    try:
+        meta = await redis_store.get_archive_meta(slug)
+    except Exception as exc:
+        logger.warning("delete_archive: Redis read failed for %s, proceeding with filesystem-only delete: %s", slug, exc)
 
     # 2. 硬删整个 session 目录（live + archive + meta.json）
     removed = delete_session(slug)
@@ -318,17 +326,20 @@ async def delete_archive(slug: str):
 
     # 3. 清理关联 Redis 键（仅在元数据存在时执行）
     if meta:
-        market_id = meta.get("market_id", "")
-        token_ids: list[str] = meta.get("token_ids", [])
-        r = redis_store.get_redis()
-        if market_id:
-            await r.delete(f"live:trades:{market_id}")
-            await r.delete(f"live:seen:{market_id}")
-        for tid in token_ids:
-            await r.delete(f"realtime:trades:{tid}")
-            await r.delete(f"prev:book:{tid}")
-        # 4. 软删 Redis archive 元数据（保留 key，标记 deleted=true）
-        await redis_store.soft_delete_archive_meta(slug)
+        try:
+            market_id = meta.get("market_id", "")
+            token_ids: list[str] = meta.get("token_ids", [])
+            r = redis_store.get_redis()
+            if market_id:
+                await r.delete(f"live:trades:{market_id}")
+                await r.delete(f"live:seen:{market_id}")
+            for tid in token_ids:
+                await r.delete(f"realtime:trades:{tid}")
+                await r.delete(f"prev:book:{tid}")
+            # 4. 软删 Redis archive 元数据（保留 key，标记 deleted=true）
+            await redis_store.soft_delete_archive_meta(slug)
+        except Exception as exc:
+            logger.warning("delete_archive: Redis cleanup failed for %s (files already removed): %s", slug, exc)
 
     return {"deleted": slug}
 

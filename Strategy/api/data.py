@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 
 import httpx
@@ -11,6 +12,8 @@ from pydantic import BaseModel
 
 from config import config
 from core.data_scanner import scan_archives, scan_live_markets
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -121,17 +124,30 @@ async def cleanup_incomplete(req: DeleteRequest):
     deleted: list[str] = []
     not_found: list[str] = []
     errors: list[str] = []
-    async with httpx.AsyncClient(base_url=config.backend_url, timeout=30) as client:
-        for slug in req.slugs:
-            if not re.match(r"^[\w\-]+$", slug):
-                continue
-            resp = await client.delete(f"/api/archives/{slug}")
-            if resp.status_code == 200:
-                deleted.append(slug)
-            elif resp.status_code == 404:
-                not_found.append(slug)
-            else:
-                errors.append(slug)
+    error_detail: str = ""
+    try:
+        async with httpx.AsyncClient(base_url=config.backend_url, timeout=30) as client:
+            for slug in req.slugs:
+                if not re.match(r"^[\w\-]+$", slug):
+                    continue
+                try:
+                    resp = await client.delete(f"/api/archives/{slug}")
+                    if resp.status_code == 200:
+                        deleted.append(slug)
+                    elif resp.status_code == 404:
+                        not_found.append(slug)
+                    else:
+                        errors.append(slug)
+                        logger.warning("Backend delete %s returned %s: %s", slug, resp.status_code, resp.text[:200])
+                except httpx.HTTPError as exc:
+                    errors.append(slug)
+                    error_detail = str(exc)
+                    logger.warning("Backend delete %s failed: %s", slug, exc)
+    except httpx.ConnectError as exc:
+        error_detail = f"Cannot connect to backend at {config.backend_url}: {exc}"
+        logger.error(error_detail)
+        errors.extend(s for s in req.slugs if s not in deleted and s not in not_found and s not in errors)
+
     result: dict = {
         "deleted": deleted,
         "not_found": not_found,
@@ -139,6 +155,8 @@ async def cleanup_incomplete(req: DeleteRequest):
     }
     if errors:
         result["errors"] = errors
+    if error_detail:
+        result["error_detail"] = error_detail
     return result
 
 
@@ -147,12 +165,19 @@ async def delete_single_archive(slug: str):
     """删除单个数据源目录（代理到 Backend 执行删除）。"""
     if not re.match(r"^[\w\-]+$", slug):
         raise HTTPException(status_code=400, detail="Invalid slug format")
-    async with httpx.AsyncClient(base_url=config.backend_url, timeout=30) as client:
-        resp = await client.delete(f"/api/archives/{slug}")
+    try:
+        async with httpx.AsyncClient(base_url=config.backend_url, timeout=30) as client:
+            resp = await client.delete(f"/api/archives/{slug}")
+    except httpx.ConnectError as exc:
+        logger.error("Cannot connect to backend at %s: %s", config.backend_url, exc)
+        raise HTTPException(status_code=502, detail=f"Cannot connect to backend: {exc}")
+    except httpx.HTTPError as exc:
+        logger.error("Backend request failed for %s: %s", slug, exc)
+        raise HTTPException(status_code=502, detail=f"Backend request failed: {exc}")
     if resp.status_code == 404:
         raise HTTPException(status_code=404, detail=f"Session '{slug}' not found")
     if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail="Backend delete failed")
+        raise HTTPException(status_code=502, detail=f"Backend delete failed ({resp.status_code}): {resp.text[:200]}")
     return resp.json()
 
 
