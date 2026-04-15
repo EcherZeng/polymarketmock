@@ -28,15 +28,15 @@ services:
     deploy:
       resources:
         limits:
-          memory: 3G
+          memory: 6G
         reservations:
           memory: 512M
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8072/health', timeout=5).raise_for_status()"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 15s
+      retries: 5
+      start_period: 120s
 
 networks:
   polymarket:
