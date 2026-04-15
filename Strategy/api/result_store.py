@@ -110,12 +110,10 @@ class ResultStore:
     # ── LRU cache helpers ────────────────────────────────────────────────────
 
     def _cache_put(self, key: str, value: dict) -> None:
-        if key in self._cache:
-            self._cache.move_to_end(key)
-        else:
-            self._cache[key] = value
-            while len(self._cache) > self._cache_size:
-                self._cache.popitem(last=False)
+        self._cache[key] = value
+        self._cache.move_to_end(key)
+        while len(self._cache) > self._cache_size:
+            self._cache.popitem(last=False)
 
     # ── CRUD ─────────────────────────────────────────────────────────────────
 
@@ -237,12 +235,10 @@ class BatchStore:
         return count
 
     def _cache_put(self, key: str, value: dict) -> None:
-        if key in self._cache:
-            self._cache.move_to_end(key)
-        else:
-            self._cache[key] = value
-            while len(self._cache) > self._cache_size:
-                self._cache.popitem(last=False)
+        self._cache[key] = value
+        self._cache.move_to_end(key)
+        while len(self._cache) > self._cache_size:
+            self._cache.popitem(last=False)
 
     def put(self, batch_id: str, batch_data: dict) -> None:
         summary = {k: batch_data[k] for k in _BATCH_SUMMARY_KEYS if k in batch_data}
