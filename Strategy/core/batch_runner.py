@@ -148,6 +148,10 @@ class BatchRunner:
         self._tasks: dict[str, BatchTask] = {}
         self._running: dict[str, asyncio.Task] = {}
         self._on_batch_complete = on_batch_complete
+        # Shared across ALL concurrent batches to cap total outbound HTTP
+        # connections (BTC klines prefetch).  Per-batch locals would allow
+        # N_batches × limit concurrent requests.
+        self._http_sem = asyncio.Semaphore(config.max_concurrency * 2)
 
     async def submit(
         self,
@@ -188,10 +192,6 @@ class BatchRunner:
         task = self._tasks[batch_id]
         task.started_at = datetime.now(timezone.utc).isoformat()
 
-        # Throttle concurrent outbound HTTP requests (BTC klines prefetch)
-        # to avoid firing hundreds of connections at once.
-        _http_sem = asyncio.Semaphore(config.max_concurrency * 2)
-
         async def run_one(slug: str, override_balance: float | None = None) -> BacktestSession | None:
             """Run a single slug backtest. Returns session on success (for cumulative mode)."""
             wf = task.workflows[slug]
@@ -213,7 +213,7 @@ class BatchRunner:
                 try:
                     slug_window = parse_slug_window(slug)
                     if slug_window:
-                        async with _http_sem:
+                        async with self._http_sem:
                             btc_klines = await fetch_btc_klines(slug_window[0], slug_window[1])
                 except Exception as e:
                     logger.warning(
@@ -349,11 +349,14 @@ class BatchRunner:
 
             # Release full session immediately — summary is already saved.
             # This keeps memory at O(max_concurrency) instead of O(batch_size).
-            final_equity = session.final_equity
+            # IMPORTANT: return None, NOT session.  asyncio.gather holds all
+            # return values in an internal list until every coroutine finishes;
+            # returning the full session would accumulate O(batch_size) objects.
             task.results.pop(slug, None)
+            del session
 
             task.completed_count += 1
-            return session
+            return None
 
         # ── Process slugs ────────────────────────────────────────────────
         slugs = task.slugs
@@ -372,12 +375,13 @@ class BatchRunner:
                     "end_balance": None,
                     "status": "pending",
                 })
-                session = await run_one(slug, override_balance=current_balance)
+                await run_one(slug, override_balance=current_balance)
                 chain_entry = task.capital_chain[-1]
-                if session is not None and session.status == "completed":
-                    chain_entry["end_balance"] = round(session.final_equity, 6)
+                summary = task.results_summary.get(slug)
+                if summary is not None and summary.status == "completed":
+                    chain_entry["end_balance"] = round(summary.final_equity, 6)
                     chain_entry["status"] = "completed"
-                    current_balance = session.final_equity
+                    current_balance = summary.final_equity
                     # Capital exhausted — stop all subsequent slugs
                     if current_balance <= 0:
                         chain_entry["status"] = "capital_exhausted"
