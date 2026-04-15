@@ -121,6 +121,22 @@ export default function BatchDetailPage() {
     )
   }, [results, returnFilter])
 
+  const filteredStats = useMemo(() => {
+    if (returnFilter === "all" || filteredResults.length === 0) return null
+    const returns = filteredResults.map(([, r]) => r.total_return_pct)
+    const sorted = [...returns].sort((a, b) => a - b)
+    const mid = Math.floor(sorted.length / 2)
+    const median = sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+    return {
+      count: filteredResults.length,
+      sumReturn: returns.reduce((a, b) => a + b, 0) * 100,
+      avgReturn: returns.reduce((a, b) => a + b, 0) / returns.length * 100,
+      medianReturn: median * 100,
+      avgSharpe: filteredResults.reduce((a, [, r]) => a + r.sharpe_ratio, 0) / filteredResults.length,
+      totalTrades: filteredResults.reduce((a, [, r]) => a + r.total_trades, 0),
+    }
+  }, [filteredResults, returnFilter])
+
   const totalPages = Math.max(1, Math.ceil(filteredResults.length / pageSize))
   const safePage = Math.min(currentPage, totalPages)
   const pagedResults = useMemo(() => {
@@ -489,6 +505,9 @@ export default function BatchDetailPage() {
                   {f === "all" ? "全部" : f === "positive" ? "收益增加" : "收益减少"}
                 </button>
               ))}
+              <span className="text-xs text-muted-foreground">
+                {filteredResults.length} / {results.length} 条
+              </span>
               {/* Select all filtered */}
               {filteredResults.length > pageSize && (
                 <button
@@ -516,6 +535,34 @@ export default function BatchDetailPage() {
               )}
             </div>
           </div>
+          {filteredStats && (
+            <div className="flex flex-wrap items-center gap-4 border-b bg-muted/30 px-4 py-2 text-xs">
+              <span className="font-medium text-muted-foreground">
+                {returnFilter === "positive" ? "收益增加" : "收益减少"}小计
+              </span>
+              <span>场次: <b>{filteredStats.count}</b></span>
+              <span>
+                收益率总和:{" "}
+                <b className={filteredStats.sumReturn >= 0 ? "text-emerald-600" : "text-red-500"}>
+                  {filteredStats.sumReturn >= 0 ? "+" : ""}{filteredStats.sumReturn.toFixed(2)}%
+                </b>
+              </span>
+              <span>
+                平均收益率:{" "}
+                <b className={filteredStats.avgReturn >= 0 ? "text-emerald-600" : "text-red-500"}>
+                  {filteredStats.avgReturn >= 0 ? "+" : ""}{filteredStats.avgReturn.toFixed(2)}%
+                </b>
+              </span>
+              <span>
+                中位收益率:{" "}
+                <b className={filteredStats.medianReturn >= 0 ? "text-emerald-600" : "text-red-500"}>
+                  {filteredStats.medianReturn >= 0 ? "+" : ""}{filteredStats.medianReturn.toFixed(2)}%
+                </b>
+              </span>
+              <span>平均 Sharpe: <b>{filteredStats.avgSharpe.toFixed(4)}</b></span>
+              <span>总交易数: <b>{filteredStats.totalTrades}</b></span>
+            </div>
+          )}
           <div className="overflow-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/30">

@@ -23,6 +23,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import AddItemsToPortfolioDialog from "@/components/AddItemsToPortfolioDialog"
+import ReturnDistributionChart from "@/components/ReturnDistributionChart"
 import type { Portfolio } from "@/types"
 
 export default function PortfolioDetailPage() {
@@ -40,6 +41,7 @@ export default function PortfolioDetailPage() {
   const [newChildName, setNewChildName] = useState("")
   const [selectedChildIds, setSelectedChildIds] = useState<Set<string>>(new Set())
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set())
+  const [strategyConfigOpen, setStrategyConfigOpen] = useState(false)
 
   const { data: portfolio, isLoading } = useQuery<Portfolio>({
     queryKey: ["portfolio", portfolioId],
@@ -168,6 +170,22 @@ export default function PortfolioDetailPage() {
     }
     return items
   }, [portfolio, returnFilter, memberSearch])
+
+  const filteredStats = useMemo(() => {
+    if (returnFilter === "all" || filteredItems.length === 0) return null
+    const returns = filteredItems.map((it) => it.total_return_pct)
+    const sorted = [...returns].sort((a, b) => a - b)
+    const mid = Math.floor(sorted.length / 2)
+    const median = sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+    return {
+      count: filteredItems.length,
+      sumReturn: returns.reduce((a, b) => a + b, 0) * 100,
+      avgReturn: returns.reduce((a, b) => a + b, 0) / returns.length * 100,
+      medianReturn: median * 100,
+      avgSharpe: filteredItems.reduce((a, it) => a + it.sharpe_ratio, 0) / filteredItems.length,
+      totalTrades: filteredItems.reduce((a, it) => a + it.total_trades, 0),
+    }
+  }, [filteredItems, returnFilter])
 
   const existingSessionIds = useMemo(
     () => new Set(portfolio?.items.map((it) => it.session_id) ?? []),
@@ -305,11 +323,20 @@ export default function PortfolioDetailPage() {
       {/* Strategy group header */}
       {portfolio.is_strategy_group && portfolio.group_strategy && portfolio.group_config && (
         <div className="rounded-lg border bg-muted/30 p-4">
-          <div className="flex items-center gap-2">
-            <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
-              策略组
-            </span>
-            <span className="text-sm font-semibold">{portfolio.group_strategy}</span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
+                策略组
+              </span>
+              <span className="text-sm font-semibold">{portfolio.group_strategy}</span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setStrategyConfigOpen(true)}
+            >
+              查看策略
+            </Button>
           </div>
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
             {Object.entries(portfolio.group_config).map(([key, val]) => (
@@ -319,8 +346,46 @@ export default function PortfolioDetailPage() {
               </div>
             ))}
           </div>
+
+          {/* Return distribution chart */}
+          {portfolio.items.length >= 2 && (
+            <div className="mt-4">
+              <h3 className="mb-1 text-xs font-medium text-muted-foreground">收益率分布</h3>
+              <ReturnDistributionChart
+                returns={portfolio.items.map((it) => it.total_return_pct)}
+              />
+            </div>
+          )}
         </div>
       )}
+
+      {/* Strategy config dialog */}
+      <Dialog open={strategyConfigOpen} onOpenChange={setStrategyConfigOpen}>
+        <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              策略配置 — {portfolio.group_strategy}
+            </DialogTitle>
+          </DialogHeader>
+          {portfolio.group_config && (
+            <div className="divide-y rounded-md border">
+              {Object.entries(portfolio.group_config).map(([key, val]) => (
+                <div key={key} className="flex items-start justify-between px-4 py-2.5">
+                  <span className="text-sm text-muted-foreground">{key}</span>
+                  <span className="ml-4 break-all text-right font-mono text-sm font-medium">
+                    {typeof val === "object" ? JSON.stringify(val, null, 2) : String(val)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStrategyConfigOpen(false)}>
+              关闭
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Container children section ──────────────────────────────────── */}
       {portfolio.is_container && (
@@ -676,6 +741,34 @@ export default function PortfolioDetailPage() {
               </span>
             </div>
           </div>
+          {filteredStats && (
+            <div className="flex flex-wrap items-center gap-4 border-b bg-muted/30 px-4 py-2 text-xs">
+              <span className="font-medium text-muted-foreground">
+                {returnFilter === "positive" ? "收益增加" : "收益减少"}小计
+              </span>
+              <span>场次: <b>{filteredStats.count}</b></span>
+              <span>
+                收益率总和:{" "}
+                <b className={filteredStats.sumReturn >= 0 ? "text-emerald-600" : "text-red-500"}>
+                  {filteredStats.sumReturn >= 0 ? "+" : ""}{filteredStats.sumReturn.toFixed(2)}%
+                </b>
+              </span>
+              <span>
+                平均收益率:{" "}
+                <b className={filteredStats.avgReturn >= 0 ? "text-emerald-600" : "text-red-500"}>
+                  {filteredStats.avgReturn >= 0 ? "+" : ""}{filteredStats.avgReturn.toFixed(2)}%
+                </b>
+              </span>
+              <span>
+                中位收益率:{" "}
+                <b className={filteredStats.medianReturn >= 0 ? "text-emerald-600" : "text-red-500"}>
+                  {filteredStats.medianReturn >= 0 ? "+" : ""}{filteredStats.medianReturn.toFixed(2)}%
+                </b>
+              </span>
+              <span>平均 Sharpe: <b>{filteredStats.avgSharpe.toFixed(4)}</b></span>
+              <span>总交易数: <b>{filteredStats.totalTrades}</b></span>
+            </div>
+          )}
           <div className="overflow-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/30">
