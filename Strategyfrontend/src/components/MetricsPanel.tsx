@@ -110,7 +110,7 @@ export default function MetricsPanel({ metrics }: MetricsPanelProps) {
     },
     {
       label: "盈亏比",
-      value: metrics.profit_factor === Infinity ? "∞" : metrics.profit_factor.toFixed(2),
+      value: metrics.profit_factor >= 999 || metrics.profit_factor === Infinity ? "∞ (全胜)" : metrics.profit_factor.toFixed(2),
       color: metrics.profit_factor > 1 ? "green" : "red",
     },
     { label: "总交易数", value: `${metrics.total_trades}` },
