@@ -1,13 +1,28 @@
-"""Persistent stores — JSON files on disk for backtest results and batch summaries."""
+"""Persistent stores — JSON files on disk for backtest results and batch summaries.
+
+All stores use **lazy loading**: on startup only file names are scanned to
+build an index (O(1) memory per entry).  Full JSON is read from disk on
+demand via ``get()``.  Recently-accessed items are kept in an LRU cache so
+hot-path reads (e.g. detail page) stay fast.
+
+``values()`` returns lightweight metadata extracted from file names or a
+quick first-line peek, NOT the full payload.
+"""
 
 from __future__ import annotations
 
 import json
 import math
 import logging
+import os
+import time
+from collections import OrderedDict
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# Default LRU cache size — number of full objects kept in memory.
+_DEFAULT_CACHE_SIZE = 64
 
 
 def sanitize_floats(obj):
@@ -25,43 +40,92 @@ def sanitize_floats(obj):
     return obj
 
 
-class ResultStore:
-    """In-memory + on-disk store for individual backtest results.
+def _read_json(path: Path) -> dict | None:
+    """Read and parse a JSON file, returning None on any error."""
+    try:
+        raw = path.read_text("utf-8")
+        return json.loads(raw)
+    except Exception as e:
+        logger.warning("Failed to read %s: %s", path.name, e)
+        return None
 
-    Each result is persisted as ``{session_id}.json`` inside *results_dir*.
-    On startup, ``load()`` reads them back so data survives restarts.
+
+# ── Result summary keys (extracted at scan time for list endpoints) ──────────
+_RESULT_SUMMARY_KEYS = (
+    "session_id", "strategy", "slug", "initial_balance", "final_equity",
+    "status", "created_at", "duration_seconds", "metrics",
+)
+
+
+class ResultStore:
+    """Lazy-loading on-disk store for individual backtest results.
+
+    ``load()`` only scans file names and extracts lightweight summaries.
+    ``get(id)`` reads the full JSON from disk (cached via LRU).
+    ``values()`` returns pre-extracted summaries — NOT full payloads.
     """
 
-    def __init__(self, results_dir: Path) -> None:
+    def __init__(self, results_dir: Path, cache_size: int = _DEFAULT_CACHE_SIZE) -> None:
         self._dir = results_dir
         self._dir.mkdir(parents=True, exist_ok=True)
-        self._data: dict[str, dict] = {}
+        # id → lightweight summary (always in memory)
+        self._index: dict[str, dict] = {}
+        # id → full payload LRU cache
+        self._cache: OrderedDict[str, dict] = OrderedDict()
+        self._cache_size = cache_size
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
     def load(self) -> int:
-        """Load all persisted results from disk. Returns count loaded."""
+        """Scan persisted results and build lightweight index. Returns count."""
+        t0 = time.monotonic()
+        files = list(self._dir.glob("*.json"))
+        total_bytes = 0
         count = 0
-        for f in self._dir.glob("*.json"):
+        errors = 0
+        for f in files:
             try:
+                fsize = f.stat().st_size
+                total_bytes += fsize
                 raw = f.read_text("utf-8")
                 data = json.loads(raw)
                 sid = data.get("session_id")
                 if sid:
-                    self._data[sid] = data
+                    # Keep only summary fields in index
+                    self._index[sid] = {
+                        k: data[k] for k in _RESULT_SUMMARY_KEYS if k in data
+                    }
                     count += 1
             except Exception as e:
-                logger.warning("Failed to load result %s: %s", f.name, e)
-        if count:
-            logger.info("Loaded %d persisted results from %s", count, self._dir)
+                errors += 1
+                logger.warning("Failed to index result %s: %s", f.name, e)
+        dt_ms = (time.monotonic() - t0) * 1000
+        logger.info(
+            "ResultStore: scanned %d files (%.1f MB) in %.0f ms — "
+            "indexed %d results, %d errors",
+            len(files), total_bytes / (1024 * 1024), dt_ms, count, errors,
+        )
         return count
+
+    # ── LRU cache helpers ────────────────────────────────────────────────────
+
+    def _cache_put(self, key: str, value: dict) -> None:
+        if key in self._cache:
+            self._cache.move_to_end(key)
+        else:
+            self._cache[key] = value
+            while len(self._cache) > self._cache_size:
+                self._cache.popitem(last=False)
 
     # ── CRUD ─────────────────────────────────────────────────────────────────
 
     def put(self, session_id: str, result: dict) -> None:
-        """Store in memory and persist to disk."""
+        """Store summary in index, full payload in cache, and persist to disk."""
         result = sanitize_floats(result)
-        self._data[session_id] = result
+        self._index[session_id] = {
+            k: result[k] for k in _RESULT_SUMMARY_KEYS if k in result
+        }
+        self._cache_put(session_id, result)
         try:
             path = self._dir / f"{session_id}.json"
             path.write_text(
@@ -72,63 +136,115 @@ class ResultStore:
             logger.error("Failed to persist result %s: %s", session_id, e)
 
     def get(self, session_id: str) -> dict | None:
-        return self._data.get(session_id)
+        """Get full result — from cache or disk."""
+        if session_id not in self._index:
+            return None
+        # Cache hit
+        if session_id in self._cache:
+            self._cache.move_to_end(session_id)
+            return self._cache[session_id]
+        # Disk read
+        path = self._dir / f"{session_id}.json"
+        data = _read_json(path)
+        if data is not None:
+            self._cache_put(session_id, data)
+        return data
 
     def values(self) -> list[dict]:
-        return list(self._data.values())
+        """Return lightweight summaries (NOT full payloads)."""
+        return list(self._index.values())
 
     def __contains__(self, session_id: str) -> bool:
-        return session_id in self._data
+        return session_id in self._index
 
     def __len__(self) -> int:
-        return len(self._data)
+        return len(self._index)
 
     def delete(self, session_id: str) -> bool:
-        if session_id not in self._data:
+        if session_id not in self._index:
             return False
-        del self._data[session_id]
+        del self._index[session_id]
+        self._cache.pop(session_id, None)
         path = self._dir / f"{session_id}.json"
         path.unlink(missing_ok=True)
         return True
 
     def clear(self) -> int:
-        count = len(self._data)
-        self._data.clear()
+        count = len(self._index)
+        self._index.clear()
+        self._cache.clear()
         for f in self._dir.glob("*.json"):
             f.unlink(missing_ok=True)
         return count
 
 
-class BatchStore:
-    """Persists batch task summaries to disk.
+# ── Batch summary keys (extracted at scan time for list endpoints) ───────────
+_BATCH_SUMMARY_KEYS = (
+    "batch_id", "strategy", "status", "total", "completed",
+    "created_at", "started_at", "finished_at", "slugs", "config",
+)
 
-    Only the serialised API response is stored (results_summary + workflows),
-    NOT the full BacktestSession objects (those live in ResultStore).
+
+class BatchStore:
+    """Lazy-loading on-disk store for batch task summaries.
+
+    ``load()`` scans and extracts only listing-level fields.
+    ``get(id)`` reads the full JSON from disk (cached via LRU).
+    ``values()`` returns pre-extracted summaries.
     """
 
-    def __init__(self, batches_dir: Path) -> None:
+    def __init__(self, batches_dir: Path, cache_size: int = _DEFAULT_CACHE_SIZE) -> None:
         self._dir = batches_dir
         self._dir.mkdir(parents=True, exist_ok=True)
-        self._data: dict[str, dict] = {}
+        self._index: dict[str, dict] = {}
+        self._cache: OrderedDict[str, dict] = OrderedDict()
+        self._cache_size = cache_size
 
     def load(self) -> int:
+        t0 = time.monotonic()
+        files = list(self._dir.glob("*.json"))
+        total_bytes = 0
         count = 0
-        for f in self._dir.glob("*.json"):
+        errors = 0
+        for f in files:
             try:
+                fsize = f.stat().st_size
+                total_bytes += fsize
                 raw = f.read_text("utf-8")
                 data = json.loads(raw)
                 bid = data.get("batch_id")
                 if bid:
-                    self._data[bid] = data
+                    summary = {k: data[k] for k in _BATCH_SUMMARY_KEYS if k in data}
+                    # Keep lightweight counts instead of full results/workflows
+                    summary["results_count"] = len(data.get("results", {}))
+                    summary["errors_count"] = len(data.get("errors", {}))
+                    self._index[bid] = summary
                     count += 1
             except Exception as e:
-                logger.warning("Failed to load batch %s: %s", f.name, e)
-        if count:
-            logger.info("Loaded %d persisted batches from %s", count, self._dir)
+                errors += 1
+                logger.warning("Failed to index batch %s: %s", f.name, e)
+        dt_ms = (time.monotonic() - t0) * 1000
+        logger.info(
+            "BatchStore: scanned %d files (%.1f MB) in %.0f ms — "
+            "indexed %d batches, %d errors",
+            len(files), total_bytes / (1024 * 1024), dt_ms, count, errors,
+        )
         return count
 
+    def _cache_put(self, key: str, value: dict) -> None:
+        if key in self._cache:
+            self._cache.move_to_end(key)
+        else:
+            self._cache[key] = value
+            while len(self._cache) > self._cache_size:
+                self._cache.popitem(last=False)
+
     def put(self, batch_id: str, batch_data: dict) -> None:
-        self._data[batch_id] = batch_data
+        summary = {k: batch_data[k] for k in _BATCH_SUMMARY_KEYS if k in batch_data}
+        summary["results_count"] = len(batch_data.get("results", {}))
+        summary["errors_count"] = len(batch_data.get("errors", {}))
+        self._index[batch_id] = summary
+        self._cache_put(batch_id, batch_data)
         try:
             path = self._dir / f"{batch_id}.json"
             path.write_text(
@@ -139,31 +255,44 @@ class BatchStore:
             logger.error("Failed to persist batch %s: %s", batch_id, e)
 
     def get(self, batch_id: str) -> dict | None:
-        return self._data.get(batch_id)
+        """Get full batch data — from cache or disk."""
+        if batch_id not in self._index:
+            return None
+        if batch_id in self._cache:
+            self._cache.move_to_end(batch_id)
+            return self._cache[batch_id]
+        path = self._dir / f"{batch_id}.json"
+        data = _read_json(path)
+        if data is not None:
+            self._cache_put(batch_id, data)
+        return data
 
     def values(self) -> list[dict]:
-        return list(self._data.values())
+        """Return lightweight summaries (NOT full payloads)."""
+        return list(self._index.values())
 
     def delete(self, batch_id: str) -> bool:
-        if batch_id not in self._data:
+        if batch_id not in self._index:
             return False
-        del self._data[batch_id]
+        del self._index[batch_id]
+        self._cache.pop(batch_id, None)
         path = self._dir / f"{batch_id}.json"
         path.unlink(missing_ok=True)
         return True
 
     def clear(self) -> int:
-        count = len(self._data)
-        self._data.clear()
+        count = len(self._index)
+        self._index.clear()
+        self._cache.clear()
         for f in self._dir.glob("*.json"):
             f.unlink(missing_ok=True)
         return count
 
     def __contains__(self, batch_id: str) -> bool:
-        return batch_id in self._data
+        return batch_id in self._index
 
     def __len__(self) -> int:
-        return len(self._data)
+        return len(self._index)
 
 
 class PortfolioStore:
@@ -178,9 +307,13 @@ class PortfolioStore:
         self._data: dict[str, dict] = {}
 
     def load(self) -> int:
+        t0 = time.monotonic()
+        files = list(self._dir.glob("*.json"))
+        total_bytes = 0
         count = 0
-        for f in self._dir.glob("*.json"):
+        for f in files:
             try:
+                total_bytes += f.stat().st_size
                 raw = f.read_text("utf-8")
                 data = json.loads(raw)
                 pid = data.get("portfolio_id")
@@ -190,7 +323,11 @@ class PortfolioStore:
             except Exception as e:
                 logger.warning("Failed to load portfolio %s: %s", f.name, e)
         if count:
-            logger.info("Loaded %d persisted portfolios from %s", count, self._dir)
+            dt_ms = (time.monotonic() - t0) * 1000
+            logger.info(
+                "PortfolioStore: loaded %d portfolios (%.1f KB) in %.0f ms",
+                count, total_bytes / 1024, dt_ms,
+            )
         return count
 
     # ── CRUD ─────────────────────────────────────────────────────────────────

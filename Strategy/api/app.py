@@ -41,12 +41,16 @@ async def lifespan(app: FastAPI):
 
     # Reconcile tasks that were "running" when the server last shut down.
     # They can never complete now (asyncio tasks are gone), so mark them interrupted.
+    # values() returns lightweight summaries; only load full data for running tasks.
     interrupted_count = 0
-    for b in state.batch_store.values():
-        if b.get("status") == "running":
-            b["status"] = "interrupted"
-            state.batch_store.put(b["batch_id"], b)
-            interrupted_count += 1
+    for summary in state.batch_store.values():
+        if summary.get("status") == "running":
+            bid = summary.get("batch_id")
+            full = state.batch_store.get(bid) if bid else None
+            if full:
+                full["status"] = "interrupted"
+                state.batch_store.put(bid, full)
+                interrupted_count += 1
     if interrupted_count:
         logger.warning("Marked %d orphaned batch tasks as 'interrupted' after restart", interrupted_count)
 

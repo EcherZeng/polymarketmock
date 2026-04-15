@@ -147,11 +147,18 @@ async def results_stats():
     all_results = store.values()
 
     # Build a reverse map: session_id -> batch_id
+    # batch_store.values() returns lightweight summaries; need full data
+    # for the results sub-dict, so load each batch individually.
     session_to_batch: dict[str, str] = {}
     if state.batch_store is not None:
-        for b in state.batch_store.values():
-            bid = b.get("batch_id", "")
-            for _slug, summary in b.get("results", {}).items():
+        for b_summary in state.batch_store.values():
+            bid = b_summary.get("batch_id", "")
+            if not bid:
+                continue
+            full = state.batch_store.get(bid)
+            if full is None:
+                continue
+            for _slug, summary in full.get("results", {}).items():
                 sid = summary.get("session_id", "")
                 if sid:
                     session_to_batch[sid] = bid
@@ -199,7 +206,7 @@ async def results_stats():
                 "completed": b.get("completed", 0),
                 "created_at": b.get("created_at", ""),
                 "slugs_count": len(b.get("slugs", [])),
-                "results_count": len(b.get("results", {})),
+                "results_count": b.get("results_count", len(b.get("results", {}))),
                 "size_kb": round(size_bytes / 1024, 1),
             })
 
