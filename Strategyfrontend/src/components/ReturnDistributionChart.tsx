@@ -54,14 +54,13 @@ function buildDistribution(pctReturns: number[]) {
   const data = counts.map((c, i) => {
     const lo = binStart + i * binWidth
     const mid = lo + binWidth / 2
-    const density = c / (n * binWidth)
-    const normal = normalPdf(mid, mean, std)
+    // normal curve scaled to count: n * binWidth * pdf
+    const normalCount = n * binWidth * normalPdf(mid, mean, std)
     return {
       range: `${lo.toFixed(1)}`,
       mid,
       count: c,
-      density: Math.round(density * 1e6) / 1e6,
-      normal: Math.round(normal * 1e6) / 1e6,
+      normal: Math.round(normalCount * 1000) / 1000,
     }
   })
 
@@ -140,25 +139,26 @@ export default function ReturnDistributionChart({
             />
             <YAxis
               tick={{ fontSize: 10 }}
-              label={{ value: "密度", angle: -90, position: "insideLeft", fontSize: 11 }}
+              allowDecimals={false}
+              label={{ value: "场次", angle: -90, position: "insideLeft", fontSize: 11 }}
             />
             <Tooltip
               formatter={(value, name) => {
                 const v = Number(value)
-                if (name === "density") return [v.toFixed(4), "实际密度"]
-                if (name === "normal") return [v.toFixed(4), "正态拟合"]
+                if (name === "count") return [v, "场次数量"]
+                if (name === "normal") return [v.toFixed(2), "正态拟合"]
                 return [v, String(name)]
               }}
               labelFormatter={(l) => `收益率: ${l}%`}
             />
             <Legend
               formatter={(value: string) => {
-                if (value === "density") return "实际分布"
+                if (value === "count") return "实际分布"
                 if (value === "normal") return "正态拟合"
                 return value
               }}
             />
-            <Bar dataKey="density" name="density" fill={barColor} barSize={999} opacity={0.7} />
+            <Bar dataKey="count" name="count" fill={barColor} barSize={999} opacity={0.7} />
             <Line
               type="monotone"
               dataKey="normal"

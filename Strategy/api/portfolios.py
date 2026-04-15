@@ -11,6 +11,8 @@ Strategy-group status is derived at query time:
 
 from __future__ import annotations
 
+import re
+import unicodedata
 import uuid
 from datetime import datetime, timezone
 
@@ -74,6 +76,14 @@ class RenameBody(BaseModel):
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
+_MULTI_WS = re.compile(r"\s+")
+
+
+def _norm_strategy(name: str) -> str:
+    """Normalize strategy name for comparison: NFC + strip + collapse whitespace."""
+    return _MULTI_WS.sub(" ", unicodedata.normalize("NFC", name).strip())
+
+
 def _store():
     if state.portfolio_store is None:
         raise HTTPException(503, "Portfolio store not initialised")
@@ -99,9 +109,11 @@ def _enrich_portfolio(p: dict) -> dict:
 
     first_strategy = items[0].get("strategy", "")
     first_config = items[0].get("config", {})
+    norm_first = _norm_strategy(first_strategy)
 
     is_group = all(
-        it.get("strategy") == first_strategy and it.get("config", {}) == first_config
+        _norm_strategy(it.get("strategy", "")) == norm_first
+        and it.get("config", {}) == first_config
         for it in items
     )
     p["is_strategy_group"] = is_group
