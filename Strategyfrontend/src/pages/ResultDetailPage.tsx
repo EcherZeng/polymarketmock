@@ -129,7 +129,11 @@ export default function ResultDetailPage() {
 
       {/* Anchor price bulletin */}
       {result.price_curve && result.price_curve.length > 0 && (
-        <AnchorBulletin priceCurve={result.price_curve} />
+        <AnchorBulletin
+          priceCurve={result.price_curve}
+          settlementResult={result.settlement_result}
+          btcUpAtEnd={btcUpAtEnd}
+        />
       )}
 
       {/* BTC trend filter summary */}

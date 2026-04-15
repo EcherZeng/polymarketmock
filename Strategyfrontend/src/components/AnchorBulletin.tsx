@@ -25,6 +25,10 @@ import { fmtTimeCst, fmtDateTimeCst } from "@/lib/utils"
 
 interface AnchorBulletinProps {
   priceCurve: PricePoint[]
+  /** settlement_result from BacktestResult: { token_id_str: 0.0 | 1.0 } */
+  settlementResult?: Record<string, number>
+  /** true = BTC closed higher than session-start open; false = BTC went down; undefined = unknown */
+  btcUpAtEnd?: boolean
 }
 
 const SOURCE_LABELS: Record<string, { label: string; color: string; desc: string }> = {
@@ -40,7 +44,7 @@ function priceLabel(mid: number): { side: "UP" | "DOWN"; emoji: string; color: s
   return { side: "DOWN", emoji: "▼", color: "hsl(0, 84%, 60%)" }
 }
 
-export default function AnchorBulletin({ priceCurve }: AnchorBulletinProps) {
+export default function AnchorBulletin({ priceCurve, settlementResult, btcUpAtEnd }: AnchorBulletinProps) {
   const [selectedToken, setSelectedToken] = useState<string | null>(null)
   const [showFormula, setShowFormula] = useState(false)
 
@@ -49,18 +53,32 @@ export default function AnchorBulletin({ priceCurve }: AnchorBulletinProps) {
     return ids.sort()
   }, [priceCurve])
 
-  // Determine UP/DOWN from first available prices
+  // Determine UP/DOWN label using settlement_result + BTC direction (same as PriceChart)
+  // Falls back to price-level heuristic only when settlement info is unavailable.
   const tokenSides = useMemo(() => {
     const sides: Record<string, { side: "UP" | "DOWN"; emoji: string; color: string }> = {}
+
+    if (tokenIds.length === 2 && settlementResult && btcUpAtEnd !== undefined) {
+      const winnerId = tokenIds.find((id) => (settlementResult[id] ?? 0) >= 0.95)
+      const loserId = tokenIds.find((id) => (settlementResult[id] ?? 1) <= 0.05)
+      if (winnerId && loserId) {
+        const winnerSide: "UP" | "DOWN" = btcUpAtEnd ? "UP" : "DOWN"
+        const loserSide: "UP" | "DOWN" = btcUpAtEnd ? "DOWN" : "UP"
+        sides[winnerId] = priceLabel(winnerSide === "UP" ? 0.9 : 0.1)
+        sides[loserId] = priceLabel(loserSide === "UP" ? 0.9 : 0.1)
+        return sides
+      }
+    }
+
+    // Fallback: use average of first 10 points
     for (const tid of tokenIds) {
       const pts = priceCurve.filter((p) => p.token_id === tid)
-      // Use average of first 10 points to be robust
       const slice = pts.slice(0, 10)
       const avgMid = slice.length > 0 ? slice.reduce((s, p) => s + p.mid_price, 0) / slice.length : 0.5
       sides[tid] = priceLabel(avgMid)
     }
     return sides
-  }, [priceCurve, tokenIds])
+  }, [priceCurve, tokenIds, settlementResult, btcUpAtEnd])
 
   // Per-token summary stats
   const tokenStats = useMemo(() => {
