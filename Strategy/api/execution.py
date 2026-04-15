@@ -212,6 +212,12 @@ async def get_task(batch_id: str):
     if state.batch_runner is not None:
         task = state.batch_runner.get_task(batch_id)
 
+    # If the task exists but its data has been cleared after completion,
+    # skip the live path and fall through to the persisted BatchStore snapshot.
+    if task is not None and task.status in ("completed", "cancelled", "failed") \
+            and not task.results_summary and not task.results:
+        task = None
+
     if task is not None:
         # Ensure individual results are persisted
         results_summary: dict[str, dict] = {}

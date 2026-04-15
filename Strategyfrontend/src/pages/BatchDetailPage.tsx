@@ -52,6 +52,8 @@ export default function BatchDetailPage() {
   const [returnFilter, setReturnFilter] = useState<"all" | "positive" | "negative">("all")
   const [portfolioOpen, setPortfolioOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const pageSize = 50
 
   const { data: task, isLoading, isError } = useQuery<BatchTaskDetail>({
     queryKey: ["batchTask", batchId],
@@ -119,6 +121,13 @@ export default function BatchDetailPage() {
     )
   }, [results, returnFilter])
 
+  const totalPages = Math.max(1, Math.ceil(filteredResults.length / pageSize))
+  const safePage = Math.min(currentPage, totalPages)
+  const pagedResults = useMemo(() => {
+    const start = (safePage - 1) * pageSize
+    return filteredResults.slice(start, start + pageSize)
+  }, [filteredResults, safePage, pageSize])
+
   const toggleSelect = (sessionId: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev)
@@ -129,8 +138,26 @@ export default function BatchDetailPage() {
   }
 
   const toggleSelectAll = () => {
-    const visibleIds = filteredResults.map(([, r]) => r.session_id)
-    const allSelected = visibleIds.every((id) => selectedIds.has(id))
+    const allFilteredIds = filteredResults.map(([, r]) => r.session_id)
+    const allSelected = allFilteredIds.length > 0 && allFilteredIds.every((id) => selectedIds.has(id))
+    if (allSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        for (const id of allFilteredIds) next.delete(id)
+        return next
+      })
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        for (const id of allFilteredIds) next.add(id)
+        return next
+      })
+    }
+  }
+
+  const toggleSelectPage = () => {
+    const visibleIds = pagedResults.map(([, r]) => r.session_id)
+    const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id))
     if (allSelected) {
       setSelectedIds((prev) => {
         const next = new Set(prev)
@@ -451,7 +478,7 @@ export default function BatchDetailPage() {
               {(["all", "positive", "negative"] as const).map((f) => (
                 <button
                   key={f}
-                  onClick={() => { setReturnFilter(f); setSelectedIds(new Set()) }}
+                  onClick={() => { setReturnFilter(f); setSelectedIds(new Set()); setCurrentPage(1) }}
                   className={cn(
                     "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
                     returnFilter === f
@@ -462,6 +489,17 @@ export default function BatchDetailPage() {
                   {f === "all" ? "全部" : f === "positive" ? "收益增加" : "收益减少"}
                 </button>
               ))}
+              {/* Select all filtered */}
+              {filteredResults.length > pageSize && (
+                <button
+                  onClick={toggleSelectAll}
+                  className="rounded-md border px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+                >
+                  {filteredResults.every(([, r]) => selectedIds.has(r.session_id))
+                    ? `取消全选 (${filteredResults.length})`
+                    : `全选 ${filteredResults.length} 条`}
+                </button>
+              )}
               {/* Selection info + Add to portfolio */}
               {selectedIds.size > 0 && (
                 <>
@@ -485,10 +523,10 @@ export default function BatchDetailPage() {
                   <th className="px-3 py-2">
                     <Checkbox
                       checked={
-                        filteredResults.length > 0 &&
-                        filteredResults.every(([, r]) => selectedIds.has(r.session_id))
+                        pagedResults.length > 0 &&
+                        pagedResults.every(([, r]) => selectedIds.has(r.session_id))
                       }
-                      onCheckedChange={toggleSelectAll}
+                      onCheckedChange={toggleSelectPage}
                     />
                   </th>
                   <th className="px-3 py-2">数据源</th>
@@ -503,7 +541,7 @@ export default function BatchDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredResults.map(([slug, r]) => (
+                {pagedResults.map(([slug, r]) => (
                   <tr
                     key={slug}
                     className={cn(
@@ -560,6 +598,44 @@ export default function BatchDetailPage() {
               </tbody>
             </table>
           </div>
+          {/* Pagination controls */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between border-t px-4 py-2">
+              <span className="text-xs text-muted-foreground">
+                第 {safePage} / {totalPages} 页 · 共 {filteredResults.length} 条
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setCurrentPage(1)}
+                  disabled={safePage <= 1}
+                  className="rounded-md border px-2 py-1 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  首页
+                </button>
+                <button
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={safePage <= 1}
+                  className="rounded-md border px-2 py-1 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  上一页
+                </button>
+                <button
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={safePage >= totalPages}
+                  className="rounded-md border px-2 py-1 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  下一页
+                </button>
+                <button
+                  onClick={() => setCurrentPage(totalPages)}
+                  disabled={safePage >= totalPages}
+                  className="rounded-md border px-2 py-1 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  末页
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
