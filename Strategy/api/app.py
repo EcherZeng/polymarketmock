@@ -88,12 +88,18 @@ async def lifespan(app: FastAPI):
             "batch_id": task.batch_id,
             "strategy": task.strategy,
             "slugs": task.slugs,
+            "config": task.config,
             "status": task.status,
             "total": task.total,
             "completed": task.completed_count,
             "created_at": task.created_at,
+            "started_at": task.started_at,
+            "finished_at": task.finished_at,
+            "cumulative_capital": task.cumulative_capital,
+            "capital_chain": task.capital_chain,
             "results": results_summary,
             "errors": task.errors,
+            "persist_errors": task.persist_errors,
             "workflows": workflows,
         })
 
