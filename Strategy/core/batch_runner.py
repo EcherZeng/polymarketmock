@@ -325,7 +325,7 @@ class BatchRunner:
             if task.cumulative_capital:
                 session.capital_mode = "cumulative"
 
-            # ── Keep lightweight summary; store session for on_batch_complete
+            # ── Keep lightweight summary; release full session immediately
             summary = _extract_summary(session)
             task.results_summary[slug] = summary
             task.results[slug] = session
@@ -341,6 +341,11 @@ class BatchRunner:
                 batch_id, slug,
                 metrics.total_return_pct, session.duration_seconds,
             )
+
+            # Release full session immediately — summary is already saved.
+            # This keeps memory at O(max_concurrency) instead of O(batch_size).
+            final_equity = session.final_equity
+            task.results.pop(slug, None)
 
             task.completed_count += 1
             return session
@@ -399,11 +404,10 @@ class BatchRunner:
             # ── Fixed capital mode: fully parallel ────────────────────────
             # archive_sem in the executor throttles concurrent ArchiveData
             # objects; no manual chunk loop needed.
+            # Sessions are released inside run_one right after summary
+            # extraction, so memory stays at O(max_concurrency) regardless
+            # of batch size.
             await asyncio.gather(*(run_one(slug) for slug in slugs))
-            # Release sessions from memory (summaries retained)
-            for slug in slugs:
-                task.results.pop(slug, None)
-            gc.collect()
 
         if task.status != "cancelled":
             task.status = "completed"
