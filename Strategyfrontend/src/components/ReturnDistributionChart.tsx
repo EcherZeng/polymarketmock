@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -9,15 +9,11 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
-  ReferenceLine,
-  Cell,
 } from "recharts"
 
 interface ReturnDistributionChartProps {
   /** raw decimal returns (e.g. 0.03 = 3%) */
   returns: number[]
-  /** number of histogram bins */
-  bins?: number
 }
 
 /** Probability density of normal distribution */
@@ -27,92 +23,115 @@ function normalPdf(x: number, mean: number, std: number): number {
   return (1 / (std * Math.sqrt(2 * Math.PI))) * Math.exp(exp)
 }
 
+/** Build histogram + normal fit with fixed 0.1% bin width */
+function buildDistribution(pctReturns: number[]) {
+  if (pctReturns.length < 1) return { data: [], stats: null }
+
+  const mean = pctReturns.reduce((a, b) => a + b, 0) / pctReturns.length
+  const variance = pctReturns.length > 1
+    ? pctReturns.reduce((a, x) => a + (x - mean) ** 2, 0) / pctReturns.length
+    : 0
+  const std = Math.sqrt(variance)
+
+  const min = Math.min(...pctReturns)
+  const max = Math.max(...pctReturns)
+
+  const binWidth = 0.1
+  // Single-value edge case: create one bin centered on the value
+  const binStart = min === max ? min - binWidth / 2 : Math.floor(min / binWidth) * binWidth
+  const binEnd = min === max ? min + binWidth / 2 : Math.ceil(max / binWidth) * binWidth
+  const binCount = Math.max(1, Math.round((binEnd - binStart) / binWidth))
+
+  const counts = new Array(binCount).fill(0)
+  for (const v of pctReturns) {
+    let idx = Math.floor((v - binStart) / binWidth)
+    if (idx >= binCount) idx = binCount - 1
+    if (idx < 0) idx = 0
+    counts[idx]++
+  }
+
+  const n = pctReturns.length
+  const data = counts.map((c, i) => {
+    const lo = binStart + i * binWidth
+    const mid = lo + binWidth / 2
+    const density = c / (n * binWidth)
+    const normal = normalPdf(mid, mean, std)
+    return {
+      range: `${lo.toFixed(1)}`,
+      mid,
+      count: c,
+      density: Math.round(density * 1e6) / 1e6,
+      normal: Math.round(normal * 1e6) / 1e6,
+    }
+  })
+
+  return {
+    data,
+    stats: { mean, std, count: pctReturns.length },
+  }
+}
+
 export default function ReturnDistributionChart({
   returns,
-  bins: binsProp,
 }: ReturnDistributionChartProps) {
-  const data = useMemo(() => {
-    if (returns.length < 2) return []
+  const [mode, setMode] = useState<"positive" | "negative">("positive")
 
-    const pctReturns = returns.map((r) => r * 100)
-    const min = Math.min(...pctReturns)
-    const max = Math.max(...pctReturns)
-    if (min === max) return []
+  const positiveReturns = useMemo(
+    () => returns.filter((r) => r > 0).map((r) => r * 100),
+    [returns],
+  )
+  const negativeReturns = useMemo(
+    () => returns.filter((r) => r < 0).map((r) => r * 100),
+    [returns],
+  )
 
-    // Sturges' rule for bin count, clamped to [6, 30]
-    const binCount = binsProp ?? Math.max(6, Math.min(30, Math.ceil(1 + Math.log2(pctReturns.length))))
-    const binWidth = (max - min) / binCount
+  const positiveDist = useMemo(() => buildDistribution(positiveReturns), [positiveReturns])
+  const negativeDist = useMemo(() => buildDistribution(negativeReturns), [negativeReturns])
 
-    // mean & std
-    const mean = pctReturns.reduce((a, b) => a + b, 0) / pctReturns.length
-    const variance =
-      pctReturns.reduce((a, x) => a + (x - mean) ** 2, 0) / pctReturns.length
-    const std = Math.sqrt(variance)
-
-    // build histogram
-    const counts = new Array(binCount).fill(0)
-    for (const v of pctReturns) {
-      let idx = Math.floor((v - min) / binWidth)
-      if (idx >= binCount) idx = binCount - 1
-      counts[idx]++
-    }
-
-    // convert counts to density so histogram area ≈ 1
-    const n = pctReturns.length
-    return counts.map((c, i) => {
-      const lo = min + i * binWidth
-      const mid = lo + binWidth / 2
-      const density = c / (n * binWidth)
-      const normal = normalPdf(mid, mean, std)
-      return {
-        range: `${lo.toFixed(1)}`,
-        mid,
-        count: c,
-        density: Math.round(density * 1e6) / 1e6,
-        normal: Math.round(normal * 1e6) / 1e6,
-        isPositive: mid >= 0,
-      }
-    })
-  }, [returns, binsProp])
-
-  const stats = useMemo(() => {
-    if (returns.length === 0) return null
-    const pct = returns.map((r) => r * 100)
-    const mean = pct.reduce((a, b) => a + b, 0) / pct.length
-    const variance = pct.reduce((a, x) => a + (x - mean) ** 2, 0) / pct.length
-    const std = Math.sqrt(variance)
-    const positive = pct.filter((r) => r > 0).length
-    const negative = pct.filter((r) => r < 0).length
-    return { mean, std, positive, negative }
-  }, [returns])
-
-  if (data.length === 0 || !stats) {
-    return (
-      <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
-        数据不足，无法绘制分布图
-      </div>
-    )
-  }
+  const current = mode === "positive" ? positiveDist : negativeDist
+  const barColor = mode === "positive" ? "#10b981" : "#ef4444"
+  const label = mode === "positive" ? "收益增加" : "收益减少"
+  const hasData = current.data.length > 0 && current.stats
 
   return (
     <div>
-      <div className="mb-2 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-        <span>
-          均值: <b className={stats.mean >= 0 ? "text-emerald-600" : "text-red-500"}>
-            {stats.mean >= 0 ? "+" : ""}{stats.mean.toFixed(2)}%
-          </b>
-        </span>
-        <span>标准差: <b>{stats.std.toFixed(2)}%</b></span>
-        <span>
-          收益增加: <b className="text-emerald-600">{stats.positive}</b> 场
-        </span>
-        <span>
-          收益减少: <b className="text-red-500">{stats.negative}</b> 场
-        </span>
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+          {hasData && (
+            <>
+              <span>
+                均值:{" "}
+                <b className={current.stats!.mean >= 0 ? "text-emerald-600" : "text-red-500"}>
+                  {current.stats!.mean >= 0 ? "+" : ""}{current.stats!.mean.toFixed(2)}%
+                </b>
+              </span>
+              <span>标准差: <b>{current.stats!.std.toFixed(2)}%</b></span>
+              <span>场次: <b>{current.stats!.count}</b></span>
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          {(["positive", "negative"] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className={`rounded-md px-2 py-1 text-xs font-medium transition-colors ${
+                mode === m
+                  ? m === "positive"
+                    ? "bg-emerald-600 text-white"
+                    : "bg-red-500 text-white"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+              }`}
+            >
+              {m === "positive" ? "收益增加" : "收益减少"}
+            </button>
+          ))}
+        </div>
       </div>
+      {hasData ? (
       <div className="h-64">
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={data} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+          <ComposedChart data={current.data} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
             <XAxis
               dataKey="range"
@@ -126,12 +145,11 @@ export default function ReturnDistributionChart({
             <Tooltip
               formatter={(value, name) => {
                 const v = Number(value)
-                if (name === "count") return [v, "场次"]
                 if (name === "density") return [v.toFixed(4), "实际密度"]
                 if (name === "normal") return [v.toFixed(4), "正态拟合"]
                 return [v, String(name)]
               }}
-              labelFormatter={(label) => `收益率: ${label}%`}
+              labelFormatter={(l) => `收益率: ${l}%`}
             />
             <Legend
               formatter={(value: string) => {
@@ -140,15 +158,7 @@ export default function ReturnDistributionChart({
                 return value
               }}
             />
-            <ReferenceLine x={data.find((d) => d.mid >= 0)?.range} stroke="#888" strokeDasharray="3 3" />
-            <Bar dataKey="density" name="density" barSize={999} opacity={0.7}>
-              {data.map((entry, idx) => (
-                <Cell
-                  key={idx}
-                  fill={entry.isPositive ? "#10b981" : "#ef4444"}
-                />
-              ))}
-            </Bar>
+            <Bar dataKey="density" name="density" fill={barColor} barSize={999} opacity={0.7} />
             <Line
               type="monotone"
               dataKey="normal"
@@ -160,6 +170,11 @@ export default function ReturnDistributionChart({
           </ComposedChart>
         </ResponsiveContainer>
       </div>
+      ) : (
+        <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+          {label}场次不足，无法绘制分布图
+        </div>
+      )}
     </div>
   )
 }
