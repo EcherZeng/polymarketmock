@@ -56,10 +56,8 @@ def _query_parquet_glob(directory: Path, order_by: str = "timestamp") -> list[di
 
 
 def _decode_rows(rows: list[dict], has_side: bool = False) -> list[dict]:
-    """Decode int32 token_id and int8 side to strings."""
-    decoded: list[dict] = []
-    for row in rows:
-        r = dict(row)
+    """Decode int32 token_id and int8 side to strings — in-place to avoid doubling memory."""
+    for r in rows:
         # Decode token_id
         if "token_id" in r and isinstance(r["token_id"], (int,)):
             r["token_id"] = decode_token(r["token_id"])
@@ -75,8 +73,7 @@ def _decode_rows(rows: list[dict], has_side: bool = False) -> list[dict]:
         # Decode side
         if has_side and "side" in r and isinstance(r["side"], (int,)):
             r["side"] = decode_side(r["side"])
-        decoded.append(r)
-    return decoded
+    return rows
 
 
 def load_archive(data_dir: Path, slug: str) -> ArchiveData:

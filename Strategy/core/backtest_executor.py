@@ -271,10 +271,14 @@ class BacktestExecutor:
         # Workers that die are automatically replaced (no BrokenProcessPool).
         # Workers load archive data internally so only lightweight scalars
         # cross the process boundary (no large-object pickle IPC).
+        # max_tasks_per_worker: recycle workers after N tasks to prevent
+        # CPython pymalloc arena fragmentation from accumulating across
+        # hundreds of load→run→free cycles (root cause of OOM at ~700 slugs).
         self._process_pool = ProcessPoolExecutor(
             max_workers=config.max_concurrency,
             initializer=_init_worker,
             initargs=(str(config.strategies_dir), str(config.data_dir)),
+            max_tasks_per_worker=50,
         )
 
     def close(self) -> None:

@@ -207,7 +207,9 @@ class BatchRunner:
                 override_balance if override_balance is not None else task.initial_balance
             )
 
-            # ── BTC klines prefetch (throttled by _http_sem) ─────────────
+            # ── BTC klines prefetch (throttled by _http_sem) ────────────
+            # Fetch is deferred to just before executor dispatch so klines
+            # data does not pile up in hundreds of queued coroutines.
             btc_klines: list[dict] | None = None
             if btc_trend_enabled(task.config):
                 try:
@@ -410,13 +412,21 @@ class BatchRunner:
                 task.results.pop(slug, None)
                 gc.collect()
         else:
-            # ── Fixed capital mode: fully parallel ────────────────────────
-            # archive_sem in the executor throttles concurrent ArchiveData
-            # objects; no manual chunk loop needed.
-            # Sessions are released inside run_one right after summary
-            # extraction, so memory stays at O(max_concurrency) regardless
-            # of batch size.
-            await asyncio.gather(*(run_one(slug) for slug in slugs))
+            # ── Fixed capital mode: chunked parallel ──────────────────────
+            # Process slugs in chunks to bound coroutine object count and
+            # give the garbage collector an opportunity to reclaim memory
+            # between waves.  archive_sem still throttles concurrent
+            # ArchiveData objects inside each chunk.
+            chunk_size = max(config.batch_chunk_size, config.max_concurrency)
+            for chunk_start in range(0, len(slugs), chunk_size):
+                if task.status == "cancelled":
+                    break
+                chunk = slugs[chunk_start : chunk_start + chunk_size]
+                await asyncio.gather(*(run_one(slug) for slug in chunk))
+                # Reclaim memory between chunks — worker-process arenas
+                # won't shrink but the main-process evaluation / pickle
+                # buffers will be freed.
+                gc.collect()
 
         if task.status != "cancelled":
             task.status = "completed"
