@@ -412,27 +412,26 @@ class BatchRunner:
                 task.results.pop(slug, None)
                 gc.collect()
         else:
-            # ── Fixed capital mode: chunked parallel ──────────────────────
-            # Process slugs in chunks to bound coroutine object count and
-            # give the garbage collector an opportunity to reclaim memory
-            # between waves.  archive_sem still throttles concurrent
-            # ArchiveData objects inside each chunk.
-            chunk_size = max(config.batch_chunk_size, config.max_concurrency)
-            # Recycle worker pool every RECYCLE_EVERY chunks to release
-            # pymalloc arena fragmentation in long-lived worker processes.
-            _RECYCLE_EVERY = 5  # chunks (= 5 × chunk_size slugs ≈ 100)
-            for chunk_idx, chunk_start in enumerate(range(0, len(slugs), chunk_size)):
-                if task.status == "cancelled":
-                    break
-                chunk = slugs[chunk_start : chunk_start + chunk_size]
-                await asyncio.gather(*(run_one(slug) for slug in chunk))
-                # Reclaim memory between chunks — main-process evaluation /
-                # pickle buffers are freed here.
-                gc.collect()
-                # Periodically recycle worker processes to release OS-level
-                # memory that CPython's pymalloc arenas won't return.
-                if (chunk_idx + 1) % _RECYCLE_EVERY == 0:
-                    self._executor.recycle_pool()
+            # ── Fixed capital mode ────────────────────────────────────────
+            # Small batches (≤100 slugs): single gather — no chunking
+            # overhead, no GC pauses, maximum throughput.
+            # Large batches (>100 slugs): chunked gather with periodic GC
+            # and worker-pool recycle to prevent OOM from pymalloc arena
+            # fragmentation across hundreds of load→run→free cycles.
+            _CHUNK_THRESHOLD = 100
+            if len(slugs) <= _CHUNK_THRESHOLD:
+                await asyncio.gather(*(run_one(slug) for slug in slugs))
+            else:
+                chunk_size = max(config.batch_chunk_size, config.max_concurrency)
+                _RECYCLE_EVERY = 5  # chunks (≈ 5 × chunk_size slugs)
+                for chunk_idx, chunk_start in enumerate(range(0, len(slugs), chunk_size)):
+                    if task.status == "cancelled":
+                        break
+                    chunk = slugs[chunk_start : chunk_start + chunk_size]
+                    await asyncio.gather(*(run_one(slug) for slug in chunk))
+                    gc.collect()
+                    if (chunk_idx + 1) % _RECYCLE_EVERY == 0:
+                        self._executor.recycle_pool()
 
         if task.status != "cancelled":
             task.status = "completed"
