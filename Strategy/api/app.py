@@ -155,6 +155,9 @@ async def lifespan(app: FastAPI):
 
     logger.info("Strategy engine shutting down")
     executor.close()
+    # Close shared httpx client to release TCP connections
+    from core.btc_data import close_client as _close_btc_client
+    await _close_btc_client()
 
 
 app = FastAPI(

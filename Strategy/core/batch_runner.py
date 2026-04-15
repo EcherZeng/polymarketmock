@@ -426,7 +426,7 @@ class BatchRunner:
             # Always chunk — even small batches benefit from periodic GC
             # to free pickle buffers and evaluation temporaries.
             chunk_size = max(config.batch_chunk_size, config.max_concurrency)
-            _RECYCLE_EVERY = 5  # chunks (≈ 5 × chunk_size slugs)
+            _RECYCLE_EVERY = 2  # chunks (≈ 2 × chunk_size slugs)
             for chunk_idx, chunk_start in enumerate(range(0, len(slugs), chunk_size)):
                 if task.status == "cancelled":
                     break
@@ -471,6 +471,16 @@ class BatchRunner:
         task.errors.clear()
         task.capital_chain.clear()
         gc.collect()
+
+        # ── Auto-purge task shell after a delay ───────────────────────
+        # Keep the lightweight BatchTask in memory for 5 minutes so the
+        # frontend can still query status, then remove to prevent
+        # unbounded _tasks dict growth across many batch submissions.
+        async def _deferred_purge(bid: str = batch_id) -> None:
+            await asyncio.sleep(300)
+            self._tasks.pop(bid, None)
+
+        asyncio.create_task(_deferred_purge())
 
     def cancel(self, batch_id: str) -> bool:
         """Cancel a running batch."""

@@ -34,6 +34,14 @@ def clear_kline_cache() -> None:
     _kline_cache.clear()
 
 
+async def close_client() -> None:
+    """Close the shared httpx client (call during application shutdown)."""
+    global _shared_client
+    if _shared_client is not None and not _shared_client.is_closed:
+        await _shared_client.aclose()
+        _shared_client = None
+
+
 def _iso_to_ms(ts: str) -> int:
     """Convert ISO 8601 timestamp string to milliseconds since epoch.
 
