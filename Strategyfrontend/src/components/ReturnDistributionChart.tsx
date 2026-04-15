@@ -124,11 +124,12 @@ export default function ReturnDistributionChart({
               label={{ value: "密度", angle: -90, position: "insideLeft", fontSize: 11 }}
             />
             <Tooltip
-              formatter={(value: number, name: string) => {
-                if (name === "count") return [value, "场次"]
-                if (name === "density") return [value.toFixed(4), "实际密度"]
-                if (name === "normal") return [value.toFixed(4), "正态拟合"]
-                return [value, name]
+              formatter={(value, name) => {
+                const v = Number(value)
+                if (name === "count") return [v, "场次"]
+                if (name === "density") return [v.toFixed(4), "实际密度"]
+                if (name === "normal") return [v.toFixed(4), "正态拟合"]
+                return [v, String(name)]
               }}
               labelFormatter={(label) => `收益率: ${label}%`}
             />
