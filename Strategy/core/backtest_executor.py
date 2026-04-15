@@ -1,13 +1,16 @@
 """BacktestExecutor — unified IO + CPU scheduling layer.
 
-Single responsibility: load archive → run_backtest → evaluate → on_result callback.
+Single responsibility: schedule backtest → evaluate → on_result callback.
+Workers load archive data internally — no large-object IPC over OS pipes.
+Uses loky ProcessPoolExecutor for resilient worker management: crashed
+workers are automatically replaced instead of poisoning the pool.
 
-archive_sem  bounds how many ArchiveData objects exist in memory at once.
-cpu_sem      bounds how many run_backtest threads run concurrently.
+archive_sem  bounds concurrent in-flight operations (worker memory).
+cpu_sem      bounds concurrent worker submissions.
 
 Two entry-points:
   run_one(...)                 — one (slug, config) pair; used by BatchRunner.
-  run_slug_multi_config(...)   — one slug, N configs (share one load_archive call);
+  run_slug_multi_config(...)   — one slug, N configs (worker loads once, runs all);
                                  used by AIOptimizer for O(N_slug) data loads
                                  instead of O(N_cfg × N_slug).
 """
@@ -19,24 +22,24 @@ import logging
 import time
 import traceback
 from collections.abc import Callable
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 
+from loky import ProcessPoolExecutor
+
 from config import config
-from core.data_loader import load_archive
 from core.evaluator import compute_drawdown_curve, compute_drawdown_events, evaluate
 from core.registry import StrategyRegistry
-from core.runner import run_backtest
-from core.types import ArchiveData, BacktestSession
+from core.types import BacktestSession
 
 
 # ── Worker process helpers (module-level so they are picklable) ───────────────
 
 _worker_registry: StrategyRegistry | None = None
+_worker_data_dir: str | None = None
 
 
-def _init_worker(strategies_dir: str) -> None:
-    """Called once per worker process. Sets up the strategy registry."""
+def _init_worker(strategies_dir: str, data_dir: str) -> None:
+    """Called once per worker process. Sets up strategy registry and token map."""
     import logging as _log
     import sys
     from pathlib import Path
@@ -48,11 +51,16 @@ def _init_worker(strategies_dir: str) -> None:
 
     _log.basicConfig(level=logging.WARNING)
 
-    global _worker_registry
-    from core.registry import StrategyRegistry as _Reg  # may already be cached
+    # Token map is required by data_loader decode functions.
+    from core.data_scanner import load_token_map
+    load_token_map(Path(data_dir))
+
+    global _worker_registry, _worker_data_dir
+    from core.registry import StrategyRegistry as _Reg
 
     _worker_registry = _Reg()
     _worker_registry.scan(Path(strategies_dir))
+    _worker_data_dir = data_dir
 
 
 def _run_backtest_in_worker(
@@ -60,19 +68,134 @@ def _run_backtest_in_worker(
     slug: str,
     cfg: dict,
     initial_balance: float,
-    data: ArchiveData,
     settlement_result: dict[str, float] | None,
     btc_klines: list[dict] | None,
-) -> BacktestSession:
-    """Top-level worker entry point — executed in a separate OS process."""
-    global _worker_registry
-    if _worker_registry is None:
-        raise RuntimeError("Worker process not initialised (_worker_registry is None)")
-    from core.runner import run_backtest as _rb  # import cached after first call
+) -> dict:
+    """Worker entry point for single (slug, config). Loads data internally."""
+    import time as _time
+    import traceback as _tb
+    from pathlib import Path
 
-    return _rb(
-        _worker_registry, strategy, slug, cfg, initial_balance, data, settlement_result, btc_klines
-    )
+    global _worker_registry, _worker_data_dir
+    if _worker_registry is None or _worker_data_dir is None:
+        raise RuntimeError("Worker process not initialised (_worker_registry is None)")
+
+    from core.data_loader import load_archive
+    from core.runner import run_backtest as _rb
+
+    # ── Load data inside worker — no large-object IPC ────────────────
+    t0 = _time.monotonic()
+    try:
+        data = load_archive(Path(_worker_data_dir), slug)
+    except Exception as e:
+        return {
+            "error_phase": "data_load", "error": str(e), "error_tb": _tb.format_exc(),
+            "stats": {}, "dt_load_ms": (_time.monotonic() - t0) * 1000,
+            "dt_run_ms": 0.0, "session": None,
+        }
+    dt_load_ms = (_time.monotonic() - t0) * 1000
+
+    stats = {
+        "prices_count": len(data.prices),
+        "orderbooks_count": len(data.orderbooks),
+        "ob_deltas_count": len(data.ob_deltas),
+        "live_trades_count": len(data.live_trades),
+    }
+
+    if not data.prices and not data.orderbooks:
+        return {
+            "error_phase": "data_load", "error": "Archive is empty (no prices/orderbooks)",
+            "stats": stats, "dt_load_ms": dt_load_ms, "dt_run_ms": 0.0, "session": None,
+        }
+
+    # ── Run backtest ─────────────────────────────────────────────────
+    t1 = _time.monotonic()
+    try:
+        session = _rb(
+            _worker_registry, strategy, slug, cfg, initial_balance,
+            data, settlement_result, btc_klines,
+        )
+    except Exception as e:
+        return {
+            "error_phase": "backtest", "error": str(e), "error_tb": _tb.format_exc(),
+            "stats": stats, "dt_load_ms": dt_load_ms,
+            "dt_run_ms": (_time.monotonic() - t1) * 1000, "session": None,
+        }
+    dt_run_ms = (_time.monotonic() - t1) * 1000
+
+    del data  # free memory before pickling result back
+    return {
+        "error_phase": None, "error": None, "stats": stats,
+        "dt_load_ms": dt_load_ms, "dt_run_ms": dt_run_ms, "session": session,
+    }
+
+
+def _run_backtest_multi_in_worker(
+    strategy: str,
+    slug: str,
+    configs: list[tuple[int, dict]],
+    initial_balance: float,
+    settlement_result: dict[str, float] | None,
+    btc_klines: list[dict] | None,
+) -> dict:
+    """Worker entry point for one slug × N configs. Loads data once."""
+    import time as _time
+    import traceback as _tb
+    from pathlib import Path
+
+    global _worker_registry, _worker_data_dir
+    if _worker_registry is None or _worker_data_dir is None:
+        raise RuntimeError("Worker process not initialised (_worker_registry is None)")
+
+    from core.data_loader import load_archive
+    from core.runner import run_backtest as _rb
+
+    t0 = _time.monotonic()
+    try:
+        data = load_archive(Path(_worker_data_dir), slug)
+    except Exception as e:
+        return {
+            "error_phase": "data_load", "error": str(e), "error_tb": _tb.format_exc(),
+            "stats": {}, "dt_load_ms": (_time.monotonic() - t0) * 1000, "results": [],
+        }
+    dt_load_ms = (_time.monotonic() - t0) * 1000
+
+    stats = {
+        "prices_count": len(data.prices),
+        "orderbooks_count": len(data.orderbooks),
+        "ob_deltas_count": len(data.ob_deltas),
+        "live_trades_count": len(data.live_trades),
+    }
+
+    if not data.prices and not data.orderbooks:
+        return {
+            "error_phase": "data_load", "error": "Archive is empty (no prices/orderbooks)",
+            "stats": stats, "dt_load_ms": dt_load_ms, "results": [],
+        }
+
+    results: list[tuple[int, dict]] = []
+    for cfg_idx, merged in configs:
+        t1 = _time.monotonic()
+        try:
+            session = _rb(
+                _worker_registry, strategy, slug, merged, initial_balance,
+                data, settlement_result, btc_klines,
+            )
+            results.append((cfg_idx, {
+                "session": session, "error": None,
+                "dt_run_ms": (_time.monotonic() - t1) * 1000,
+            }))
+        except Exception as e:
+            results.append((cfg_idx, {
+                "session": None, "error": str(e), "tb": _tb.format_exc(),
+                "dt_run_ms": (_time.monotonic() - t1) * 1000,
+            }))
+
+    del data
+    return {
+        "error_phase": None, "stats": stats,
+        "dt_load_ms": dt_load_ms, "results": results,
+    }
 
 logger = logging.getLogger(__name__)
 
@@ -144,18 +267,19 @@ class BacktestExecutor:
         self._cpu_sem = cpu_sem
         self._archive_sem = archive_sem
         self._on_result = on_result
-        # One worker process per concurrency slot — bypasses CPython GIL for
-        # CPU-bound tick simulations.  Workers are initialised with a fresh
-        # StrategyRegistry so they can run_backtest without IPC of the registry.
+        # loky ProcessPoolExecutor — resilient against worker crashes.
+        # Workers that die are automatically replaced (no BrokenProcessPool).
+        # Workers load archive data internally so only lightweight scalars
+        # cross the process boundary (no large-object pickle IPC).
         self._process_pool = ProcessPoolExecutor(
             max_workers=config.max_concurrency,
             initializer=_init_worker,
-            initargs=(str(config.strategies_dir),),
+            initargs=(str(config.strategies_dir), str(config.data_dir)),
         )
 
     def close(self) -> None:
         """Shutdown the worker process pool (call from lifespan cleanup)."""
-        self._process_pool.shutdown(wait=False, cancel_futures=True)
+        self._process_pool.shutdown(wait=False, kill_workers=True)
 
     # ── Single run ───────────────────────────────────────────────────────────
 
@@ -171,107 +295,87 @@ class BacktestExecutor:
     ) -> BacktestRunResult:
         """Run a single (slug, config) pair.
 
-        archive_sem is acquired for the full duration of load → evaluate so
-        that at most ``archive_sem._value`` ArchiveData objects live in memory
-        simultaneously.
+        Data loading happens inside the worker process — only lightweight
+        scalar arguments cross the process boundary.
         """
         async with self._archive_sem:
-            # ── IO phase ─────────────────────────────────────────────────
-            t0 = time.monotonic()
+            t_wall = time.monotonic()
             try:
-                data = await asyncio.to_thread(load_archive, config.data_dir, slug)
+                async with self._cpu_sem:
+                    loop = asyncio.get_running_loop()
+                    wr = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            self._process_pool,
+                            _run_backtest_in_worker,
+                            strategy, slug, cfg, initial_balance,
+                            settlement_result, btc_klines,
+                        ),
+                        timeout=timeout,
+                    )
+            except asyncio.TimeoutError:
+                return BacktestRunResult(
+                    error_phase="backtest",
+                    error_msg=f"Timed out after {timeout}s",
+                    timed_out=True,
+                    dt_run_ms=(time.monotonic() - t_wall) * 1000,
+                )
             except Exception as e:
                 return BacktestRunResult(
-                    error_phase="data_load",
+                    error_phase="backtest",
                     error_msg=str(e),
                     error_tb=traceback.format_exc(),
-                    dt_load_ms=(time.monotonic() - t0) * 1000,
-                )
-            dt_load_ms = (time.monotonic() - t0) * 1000
-
-            try:
-                if not data.prices and not data.orderbooks:
-                    return BacktestRunResult(
-                        error_phase="data_load",
-                        error_msg="Archive is empty (no prices/orderbooks)",
-                        dt_load_ms=dt_load_ms,
-                    )
-
-                result = BacktestRunResult(
-                    dt_load_ms=dt_load_ms,
-                    data_prices_count=len(data.prices),
-                    data_orderbooks_count=len(data.orderbooks),
-                    data_ob_deltas_count=len(data.ob_deltas),
-                    data_live_trades_count=len(data.live_trades),
+                    dt_run_ms=(time.monotonic() - t_wall) * 1000,
                 )
 
-                # ── CPU phase ─────────────────────────────────────────────
-                t1 = time.monotonic()
-                try:
-                    async with self._cpu_sem:
-                        loop = asyncio.get_running_loop()
-                        session = await asyncio.wait_for(
-                            loop.run_in_executor(
-                                self._process_pool,
-                                _run_backtest_in_worker,
-                                strategy,
-                                slug,
-                                cfg,
-                                initial_balance,
-                                data,
-                                settlement_result,
-                                btc_klines,
-                            ),
-                            timeout=timeout,
-                        )
-                except asyncio.TimeoutError:
-                    result.error_phase = "backtest"
-                    result.error_msg = f"Timed out after {timeout}s"
-                    result.timed_out = True
-                    result.dt_run_ms = (time.monotonic() - t1) * 1000
-                    return result
-                except Exception as e:
-                    result.error_phase = "backtest"
-                    result.error_msg = str(e)
-                    result.error_tb = traceback.format_exc()
-                    result.dt_run_ms = (time.monotonic() - t1) * 1000
-                    return result
-                result.dt_run_ms = (time.monotonic() - t1) * 1000
+            # Unpack worker result
+            stats = wr.get("stats", {})
+            result = BacktestRunResult(
+                dt_load_ms=wr.get("dt_load_ms", 0.0),
+                dt_run_ms=wr.get("dt_run_ms", 0.0),
+                data_prices_count=stats.get("prices_count", 0),
+                data_orderbooks_count=stats.get("orderbooks_count", 0),
+                data_ob_deltas_count=stats.get("ob_deltas_count", 0),
+                data_live_trades_count=stats.get("live_trades_count", 0),
+            )
 
-                if session.status == "failed":
-                    result.error_phase = "backtest"
-                    result.error_msg = "Runner returned failed status"
-                    result.dt_run_ms = (time.monotonic() - t1) * 1000
-                    return result
-
-                # ── Evaluate phase (outside cpu_sem) ──────────────────────
-                t2 = time.monotonic()
-                try:
-                    metrics = evaluate(session)
-                    session.metrics = metrics
-                    session.drawdown_curve = compute_drawdown_curve(session.equity_curve)
-                    session.drawdown_events = compute_drawdown_events(session.equity_curve)
-                except Exception as e:
-                    result.error_phase = "evaluate"
-                    result.error_msg = str(e)
-                    result.error_tb = traceback.format_exc()
-                    result.dt_eval_ms = (time.monotonic() - t2) * 1000
-                    return result
-                result.dt_eval_ms = (time.monotonic() - t2) * 1000
-
-                # ── Persist callback ──────────────────────────────────────
-                if self._on_result:
-                    try:
-                        self._on_result(session)
-                    except Exception as e:
-                        result.persist_error = str(e)
-                        logger.error("on_result callback failed for %s: %s", slug, e)
-
-                result.session = session
+            # Worker-side error (data_load or backtest)
+            if wr.get("error_phase"):
+                result.error_phase = wr["error_phase"]
+                result.error_msg = wr.get("error", "")
+                result.error_tb = wr.get("error_tb", "")
                 return result
 
-            finally:
-                del data  # release ArchiveData before archive_sem is freed
+            session = wr["session"]
+            if session.status == "failed":
+                result.error_phase = "backtest"
+                result.error_msg = "Runner returned failed status"
+                return result
+
+            # ── Evaluate phase (main process, outside cpu_sem) ────────
+            t2 = time.monotonic()
+            try:
+                metrics = evaluate(session)
+                session.metrics = metrics
+                session.drawdown_curve = compute_drawdown_curve(session.equity_curve)
+                session.drawdown_events = compute_drawdown_events(session.equity_curve)
+            except Exception as e:
+                result.error_phase = "evaluate"
+                result.error_msg = str(e)
+                result.error_tb = traceback.format_exc()
+                result.dt_eval_ms = (time.monotonic() - t2) * 1000
+                return result
+            result.dt_eval_ms = (time.monotonic() - t2) * 1000
+
+            # ── Persist callback ──────────────────────────────────────
+            if self._on_result:
+                try:
+                    self._on_result(session)
+                except Exception as e:
+                    result.persist_error = str(e)
+                    logger.error("on_result callback failed for %s: %s", slug, e)
+
+            result.session = session
+            return result
 
     # ── Multi-config run (one slug, N configs) ───────────────────────────────
 
@@ -285,98 +389,107 @@ class BacktestExecutor:
         btc_klines: list[dict] | None,
         timeout: float,
     ) -> list[tuple[int, BacktestRunResult]]:
-        """Load slug archive once; run all ``merged_configs`` sequentially.
-
-        archive_sem is held for the entire slug (covering all N configs) so
-        that the ArchiveData object is never duplicated.  This reduces
-        load_archive calls from ``N_cfg × N_slug`` to ``N_slug`` per round.
+        """One worker loads slug archive once; runs all configs sequentially.
 
         Returns a flat list of ``(cfg_idx, BacktestRunResult)`` — one per config.
         """
         async with self._archive_sem:
-            # ── IO phase (one load for all configs) ───────────────────────
-            t0 = time.monotonic()
+            t_wall = time.monotonic()
+            batch_timeout = timeout * len(merged_configs)
             try:
-                data = await asyncio.to_thread(load_archive, config.data_dir, slug)
-            except Exception as e:
-                tb = traceback.format_exc()
-                dt_load_ms = (time.monotonic() - t0) * 1000
+                async with self._cpu_sem:
+                    loop = asyncio.get_running_loop()
+                    wr = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            self._process_pool,
+                            _run_backtest_multi_in_worker,
+                            strategy, slug, merged_configs,
+                            initial_balance, settlement_result, btc_klines,
+                        ),
+                        timeout=batch_timeout,
+                    )
+            except asyncio.TimeoutError:
                 err = BacktestRunResult(
-                    error_phase="data_load",
-                    error_msg=str(e),
-                    error_tb=tb,
-                    dt_load_ms=dt_load_ms,
+                    error_phase="backtest",
+                    error_msg=f"Timed out after {batch_timeout}s (batch)",
+                    timed_out=True,
+                    dt_run_ms=(time.monotonic() - t_wall) * 1000,
                 )
-                return [(cfg_idx, err) for cfg_idx, _ in merged_configs]
+                return [(idx, err) for idx, _ in merged_configs]
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                err = BacktestRunResult(
+                    error_phase="backtest",
+                    error_msg=str(e),
+                    error_tb=traceback.format_exc(),
+                    dt_run_ms=(time.monotonic() - t_wall) * 1000,
+                )
+                return [(idx, err) for idx, _ in merged_configs]
 
-            try:
-                results: list[tuple[int, BacktestRunResult]] = []
+            stats = wr.get("stats", {})
+            dt_load_ms = wr.get("dt_load_ms", 0.0)
+            stat_kw = {
+                "data_prices_count": stats.get("prices_count", 0),
+                "data_orderbooks_count": stats.get("orderbooks_count", 0),
+                "data_ob_deltas_count": stats.get("ob_deltas_count", 0),
+                "data_live_trades_count": stats.get("live_trades_count", 0),
+            }
 
-                for cfg_idx, merged in merged_configs:
-                    run_result = BacktestRunResult()
+            # Data-load error → all configs fail
+            if wr.get("error_phase"):
+                err = BacktestRunResult(
+                    error_phase=wr["error_phase"],
+                    error_msg=wr.get("error", ""),
+                    error_tb=wr.get("error_tb", ""),
+                    dt_load_ms=dt_load_ms,
+                    **stat_kw,
+                )
+                return [(idx, err) for idx, _ in merged_configs]
 
-                    # ── CPU phase ─────────────────────────────────────────
-                    t1 = time.monotonic()
+            # Per-config results
+            output: list[tuple[int, BacktestRunResult]] = []
+            for cfg_idx, cr in wr.get("results", []):
+                rr = BacktestRunResult(
+                    dt_load_ms=dt_load_ms,
+                    dt_run_ms=cr.get("dt_run_ms", 0.0),
+                    **stat_kw,
+                )
+
+                if cr.get("error"):
+                    rr.error_phase = "backtest"
+                    rr.error_msg = cr["error"]
+                    rr.error_tb = cr.get("tb", "")
+                    output.append((cfg_idx, rr))
+                    continue
+
+                session = cr["session"]
+
+                # ── Evaluate (main process) ───────────────────────────
+                t2 = time.monotonic()
+                try:
+                    metrics = evaluate(session)
+                    session.metrics = metrics
+                    session.drawdown_curve = compute_drawdown_curve(session.equity_curve)
+                    session.drawdown_events = compute_drawdown_events(session.equity_curve)
+                except Exception as e:
+                    rr.error_phase = "evaluate"
+                    rr.error_msg = str(e)
+                    rr.error_tb = traceback.format_exc()
+                    rr.dt_eval_ms = (time.monotonic() - t2) * 1000
+                    output.append((cfg_idx, rr))
+                    continue
+                rr.dt_eval_ms = (time.monotonic() - t2) * 1000
+
+                # ── Persist callback ──────────────────────────────────
+                if self._on_result:
                     try:
-                        async with self._cpu_sem:
-                            loop = asyncio.get_running_loop()
-                            session = await asyncio.wait_for(
-                                loop.run_in_executor(
-                                    self._process_pool,
-                                    _run_backtest_in_worker,
-                                    strategy,
-                                    slug,
-                                    merged,
-                                    initial_balance,
-                                    data,
-                                    settlement_result,
-                                    btc_klines,
-                                ),
-                                timeout=timeout,
-                            )
-                    except asyncio.TimeoutError:
-                        run_result.error_phase = "backtest"
-                        run_result.error_msg = f"Timed out after {timeout}s"
-                        run_result.timed_out = True
-                        run_result.dt_run_ms = (time.monotonic() - t1) * 1000
-                        results.append((cfg_idx, run_result))
-                        continue
-                    except asyncio.CancelledError:
-                        raise
+                        self._on_result(session)
                     except Exception as e:
-                        run_result.error_phase = "backtest"
-                        run_result.error_msg = str(e)
-                        run_result.error_tb = traceback.format_exc()
-                        run_result.dt_run_ms = (time.monotonic() - t1) * 1000
-                        results.append((cfg_idx, run_result))
-                        continue
-                    run_result.dt_run_ms = (time.monotonic() - t1) * 1000
+                        rr.persist_error = str(e)
+                        logger.error("on_result callback failed: %s", e)
 
-                    # ── Evaluate (outside cpu_sem) ────────────────────────
-                    try:
-                        metrics = evaluate(session)
-                        session.metrics = metrics
-                        session.drawdown_curve = compute_drawdown_curve(session.equity_curve)
-                        session.drawdown_events = compute_drawdown_events(session.equity_curve)
-                    except Exception as e:
-                        run_result.error_phase = "evaluate"
-                        run_result.error_msg = str(e)
-                        run_result.error_tb = traceback.format_exc()
-                        results.append((cfg_idx, run_result))
-                        continue
+                rr.session = session
+                output.append((cfg_idx, rr))
 
-                    # ── Persist callback ──────────────────────────────────
-                    if self._on_result:
-                        try:
-                            self._on_result(session)
-                        except Exception as e:
-                            run_result.persist_error = str(e)
-                            logger.error("on_result callback failed: %s", e)
-
-                    run_result.session = session
-                    results.append((cfg_idx, run_result))
-
-                return results
-
-            finally:
-                del data  # release ArchiveData before archive_sem is freed
+            return output
