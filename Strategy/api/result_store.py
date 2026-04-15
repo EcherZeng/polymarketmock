@@ -119,13 +119,18 @@ class ResultStore:
 
     # ── CRUD ─────────────────────────────────────────────────────────────────
 
-    def put(self, session_id: str, result: dict) -> None:
-        """Store summary in index, full payload in cache, and persist to disk."""
+    def put(self, session_id: str, result: dict, *, cache: bool = True) -> None:
+        """Store summary in index, persist to disk, optionally cache full payload.
+
+        During batch runs, set ``cache=False`` to avoid accumulating hundreds
+        of full results in the LRU cache (they'll be loaded from disk on demand).
+        """
         result = sanitize_floats(result)
         self._index[session_id] = {
             k: result[k] for k in _RESULT_SUMMARY_KEYS if k in result
         }
-        self._cache_put(session_id, result)
+        if cache:
+            self._cache_put(session_id, result)
         try:
             path = self._dir / f"{session_id}.json"
             path.write_text(

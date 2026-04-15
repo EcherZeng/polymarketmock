@@ -45,14 +45,16 @@ class BatchRequest(BaseModel):
 # ── Result helpers ───────────────────────────────────────────────────────────
 
 
-def store_session(session: BacktestSession) -> dict:
+def store_session(session: BacktestSession, *, cache: bool = True) -> dict:
     """Serialize a BacktestSession and persist to the result store.
 
     Called by single-run endpoint AND by batch runner on_result callback.
+    When called from batch runner, use ``cache=False`` to avoid accumulating
+    full payloads in the LRU cache.
     """
     result = _serialize_session(session)
     if state.result_store is not None:
-        state.result_store.put(session.session_id, result)
+        state.result_store.put(session.session_id, result, cache=cache)
     return result
 
 

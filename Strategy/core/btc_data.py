@@ -15,6 +15,7 @@ BINANCE_KLINE_URL = "https://api.binance.com/api/v3/klines"
 
 _shared_client: httpx.AsyncClient | None = None
 _kline_cache: dict[tuple[int, int], list[dict]] = {}
+_KLINE_CACHE_MAX = 200  # cap to prevent unbounded growth during large batches
 
 
 def _get_client() -> httpx.AsyncClient:
@@ -100,6 +101,12 @@ async def fetch_btc_klines(
         raise
 
     result = _transform_klines(raw)
+    # Evict oldest entries if cache is full to prevent OOM during large batches
+    if len(_kline_cache) >= _KLINE_CACHE_MAX:
+        # Remove ~25% of entries (oldest inserted)
+        to_remove = list(_kline_cache.keys())[: _KLINE_CACHE_MAX // 4]
+        for k in to_remove:
+            del _kline_cache[k]
     _kline_cache[cache_key] = result
     return result
 

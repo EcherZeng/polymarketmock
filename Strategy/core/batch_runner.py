@@ -357,6 +357,11 @@ class BatchRunner:
             task.results.pop(slug, None)
             del session
 
+            # Trim completed workflow step logs to cap BatchTask growth.
+            # Keep only final 2 steps (evaluate + done) per finished slug.
+            if len(wf.steps) > 2:
+                wf.steps = wf.steps[-2:]
+
             task.completed_count += 1
             return None
 
@@ -418,20 +423,18 @@ class BatchRunner:
             # Large batches (>100 slugs): chunked gather with periodic GC
             # and worker-pool recycle to prevent OOM from pymalloc arena
             # fragmentation across hundreds of load→run→free cycles.
-            _CHUNK_THRESHOLD = 100
-            if len(slugs) <= _CHUNK_THRESHOLD:
-                await asyncio.gather(*(run_one(slug) for slug in slugs))
-            else:
-                chunk_size = max(config.batch_chunk_size, config.max_concurrency)
-                _RECYCLE_EVERY = 5  # chunks (≈ 5 × chunk_size slugs)
-                for chunk_idx, chunk_start in enumerate(range(0, len(slugs), chunk_size)):
-                    if task.status == "cancelled":
-                        break
-                    chunk = slugs[chunk_start : chunk_start + chunk_size]
-                    await asyncio.gather(*(run_one(slug) for slug in chunk))
-                    gc.collect()
-                    if (chunk_idx + 1) % _RECYCLE_EVERY == 0:
-                        self._executor.recycle_pool()
+            # Always chunk — even small batches benefit from periodic GC
+            # to free pickle buffers and evaluation temporaries.
+            chunk_size = max(config.batch_chunk_size, config.max_concurrency)
+            _RECYCLE_EVERY = 5  # chunks (≈ 5 × chunk_size slugs)
+            for chunk_idx, chunk_start in enumerate(range(0, len(slugs), chunk_size)):
+                if task.status == "cancelled":
+                    break
+                chunk = slugs[chunk_start : chunk_start + chunk_size]
+                await asyncio.gather(*(run_one(slug) for slug in chunk))
+                gc.collect()
+                if (chunk_idx + 1) % _RECYCLE_EVERY == 0:
+                    self._executor.recycle_pool()
 
         if task.status != "cancelled":
             task.status = "completed"
@@ -457,6 +460,17 @@ class BatchRunner:
             "Batch %s finished: %d/%d completed, %d failed, %d errors",
             batch_id, ok_count, task.total, fail_count, len(task.errors),
         )
+
+        # ── Release heavy data from completed task to free memory ─────
+        # Summaries and workflows have been persisted by _on_batch_complete;
+        # clear them from the in-memory BatchTask to avoid O(batch_size)
+        # accumulation across multiple batch runs.
+        task.workflows.clear()
+        task.results_summary.clear()
+        task.results.clear()
+        task.errors.clear()
+        task.capital_chain.clear()
+        gc.collect()
 
     def cancel(self, batch_id: str) -> bool:
         """Cancel a running batch."""

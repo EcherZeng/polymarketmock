@@ -61,8 +61,12 @@ async def lifespan(app: FastAPI):
     from api.execution import store_session, _serialize_workflow, _build_result_summary
 
     def _on_result(session: BacktestSession) -> None:
-        """Persist individual results immediately when a slug completes."""
-        store_session(session)
+        """Persist individual results immediately when a slug completes.
+
+        cache=False: during batch runs we persist hundreds of sessions;
+        keeping them all in the LRU cache would defeat lazy-loading.
+        """
+        store_session(session, cache=False)
 
     def _on_batch_complete(task: BatchTask) -> None:
         """Persist batch summary when the entire batch finishes."""
