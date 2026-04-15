@@ -418,15 +418,21 @@ class BatchRunner:
             # between waves.  archive_sem still throttles concurrent
             # ArchiveData objects inside each chunk.
             chunk_size = max(config.batch_chunk_size, config.max_concurrency)
-            for chunk_start in range(0, len(slugs), chunk_size):
+            # Recycle worker pool every RECYCLE_EVERY chunks to release
+            # pymalloc arena fragmentation in long-lived worker processes.
+            _RECYCLE_EVERY = 5  # chunks (= 5 × chunk_size slugs ≈ 100)
+            for chunk_idx, chunk_start in enumerate(range(0, len(slugs), chunk_size)):
                 if task.status == "cancelled":
                     break
                 chunk = slugs[chunk_start : chunk_start + chunk_size]
                 await asyncio.gather(*(run_one(slug) for slug in chunk))
-                # Reclaim memory between chunks — worker-process arenas
-                # won't shrink but the main-process evaluation / pickle
-                # buffers will be freed.
+                # Reclaim memory between chunks — main-process evaluation /
+                # pickle buffers are freed here.
                 gc.collect()
+                # Periodically recycle worker processes to release OS-level
+                # memory that CPython's pymalloc arenas won't return.
+                if (chunk_idx + 1) % _RECYCLE_EVERY == 0:
+                    self._executor.recycle_pool()
 
         if task.status != "cancelled":
             task.status = "completed"

@@ -271,19 +271,33 @@ class BacktestExecutor:
         # Workers that die are automatically replaced (no BrokenProcessPool).
         # Workers load archive data internally so only lightweight scalars
         # cross the process boundary (no large-object pickle IPC).
-        # max_tasks_per_worker: recycle workers after N tasks to prevent
-        # CPython pymalloc arena fragmentation from accumulating across
-        # hundreds of load→run→free cycles (root cause of OOM at ~700 slugs).
         self._process_pool = ProcessPoolExecutor(
             max_workers=config.max_concurrency,
             initializer=_init_worker,
             initargs=(str(config.strategies_dir), str(config.data_dir)),
-            max_tasks_per_worker=50,
         )
+        self._task_count = 0  # track submissions for periodic pool recycle
 
     def close(self) -> None:
         """Shutdown the worker process pool (call from lifespan cleanup)."""
         self._process_pool.shutdown(wait=False, kill_workers=True)
+
+    def recycle_pool(self) -> None:
+        """Kill current workers and create a fresh pool.
+
+        Call between batch chunks to reclaim CPython pymalloc arena
+        fragmentation that accumulates across hundreds of load→run→free
+        cycles.  loky doesn't support max_tasks_per_child, so this is
+        the equivalent mechanism.
+        """
+        logger.info("Recycling worker pool (task_count=%d)", self._task_count)
+        self._process_pool.shutdown(wait=True, kill_workers=True)
+        self._process_pool = ProcessPoolExecutor(
+            max_workers=config.max_concurrency,
+            initializer=_init_worker,
+            initargs=(str(config.strategies_dir), str(config.data_dir)),
+        )
+        self._task_count = 0
 
     # ── Single run ───────────────────────────────────────────────────────────
 
@@ -303,6 +317,7 @@ class BacktestExecutor:
         scalar arguments cross the process boundary.
         """
         async with self._archive_sem:
+            self._task_count += 1
             t_wall = time.monotonic()
             try:
                 async with self._cpu_sem:
