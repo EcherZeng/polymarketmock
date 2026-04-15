@@ -72,6 +72,7 @@ def _run_backtest_in_worker(
     btc_klines: list[dict] | None,
 ) -> dict:
     """Worker entry point for single (slug, config). Loads data internally."""
+    import gc as _gc
     import time as _time
     import traceback as _tb
     from pathlib import Path
@@ -124,6 +125,7 @@ def _run_backtest_in_worker(
     dt_run_ms = (_time.monotonic() - t1) * 1000
 
     del data  # free memory before pickling result back
+    _gc.collect()  # reclaim pymalloc arenas to reduce RSS fragmentation
     return {
         "error_phase": None, "error": None, "stats": stats,
         "dt_load_ms": dt_load_ms, "dt_run_ms": dt_run_ms, "session": session,
@@ -139,6 +141,7 @@ def _run_backtest_multi_in_worker(
     btc_klines: list[dict] | None,
 ) -> dict:
     """Worker entry point for one slug × N configs. Loads data once."""
+    import gc as _gc
     import time as _time
     import traceback as _tb
     from pathlib import Path
@@ -192,6 +195,7 @@ def _run_backtest_multi_in_worker(
             }))
 
     del data
+    _gc.collect()  # reclaim pymalloc arenas to reduce RSS fragmentation
     return {
         "error_phase": None, "stats": stats,
         "dt_load_ms": dt_load_ms, "results": results,
@@ -365,6 +369,7 @@ class BacktestExecutor:
                 return result
 
             session = wr["session"]
+            del wr  # release pickle buffer immediately
             if session.status == "failed":
                 result.error_phase = "backtest"
                 result.error_msg = "Runner returned failed status"

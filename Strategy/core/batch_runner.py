@@ -356,6 +356,10 @@ class BatchRunner:
             # returning the full session would accumulate O(batch_size) objects.
             task.results.pop(slug, None)
             del session
+            # Also release the BacktestRunResult which holds result.session ref
+            # and the pickle-unpacked worker dict.
+            result.session = None
+            del result
 
             # Trim completed workflow step logs to cap BatchTask growth.
             # Keep only final 2 steps (evaluate + done) per finished slug.
@@ -426,15 +430,12 @@ class BatchRunner:
             # Always chunk — even small batches benefit from periodic GC
             # to free pickle buffers and evaluation temporaries.
             chunk_size = max(config.batch_chunk_size, config.max_concurrency)
-            _RECYCLE_EVERY = 2  # chunks (≈ 2 × chunk_size slugs)
             for chunk_idx, chunk_start in enumerate(range(0, len(slugs), chunk_size)):
                 if task.status == "cancelled":
                     break
                 chunk = slugs[chunk_start : chunk_start + chunk_size]
                 await asyncio.gather(*(run_one(slug) for slug in chunk))
                 gc.collect()
-                if (chunk_idx + 1) % _RECYCLE_EVERY == 0:
-                    self._executor.recycle_pool()
 
         if task.status != "cancelled":
             task.status = "completed"

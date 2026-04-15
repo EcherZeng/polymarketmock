@@ -9,6 +9,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    init: true
     ports:
       - "8072:8072"
     volumes:
