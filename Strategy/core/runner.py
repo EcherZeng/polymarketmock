@@ -128,19 +128,46 @@ def run_backtest(
     data: ArchiveData | None = None,
     settlement_result: dict[str, float] | None = None,
     btc_klines: list[dict] | None = None,
+    *,
+    pre_merged_config: dict | None = None,
 ) -> BacktestSession:
     """Execute a single backtest synchronously.
 
     This runs in a thread pool when called from async context.
+
+    Parameters
+    ----------
+    pre_merged_config:
+        When provided, skip registry lookup and config merge — use this
+        already-merged+normalised config directly.  The caller (main process)
+        is responsible for resolving via the authoritative registry.
+        ``registry`` and ``user_config`` are ignored in this mode.
     """
     t_start = time.monotonic()
     session_id = uuid.uuid4().hex[:12]
 
-    # Resolve strategy
-    strategy_cls = registry.get(strategy_name)
-    if strategy_cls is None:
-        logger.error("Strategy '%s' not found in registry", strategy_name)
-        raise ValueError(f"Strategy '{strategy_name}' not found in registry")
+    if pre_merged_config is not None:
+        # ── Pre-resolved path (worker process) ───────────────────────
+        # Strategy class comes from the worker-local registry which always
+        # has the concrete class loaded; only preset *configs* can be stale.
+        if registry is not None and registry._strategy_cls is not None:
+            strategy_cls = registry._strategy_cls
+        else:
+            raise RuntimeError("Worker registry has no strategy class loaded")
+        merged_config = pre_merged_config
+    else:
+        # ── Normal path (main process / single-run endpoint) ─────────
+        strategy_cls = registry.get(strategy_name)
+        if strategy_cls is None:
+            logger.error("Strategy '%s' not found in registry", strategy_name)
+            raise ValueError(f"Strategy '{strategy_name}' not found in registry")
+        # Merge config
+        default_config = registry.get_default_config(strategy_name)
+        if user_config:
+            merged_config = {k: user_config.get(k, default_config.get(k)) for k in user_config}
+        else:
+            merged_config = dict(default_config)
+        merged_config = registry.normalize_config(merged_config)
 
     strategy: BaseStrategy = strategy_cls()
 
@@ -176,14 +203,6 @@ def run_backtest(
     slug_window = parse_slug_window(slug)
     slug_start = slug_window[0] if slug_window else time_grid[0]
     slug_end = slug_window[1] if slug_window else time_grid[-1]
-
-    # ── Merge config (must happen before any param_active checks) ────────
-    default_config = registry.get_default_config(strategy_name)
-    if user_config:
-        merged_config = {k: user_config.get(k, default_config.get(k)) for k in user_config}
-    else:
-        merged_config = dict(default_config)
-    merged_config = registry.normalize_config(merged_config)
 
     # ── BTC trend filter ─────────────────────────────────────────────────
     btc_trend_info: dict | None = None

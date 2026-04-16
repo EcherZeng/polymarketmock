@@ -66,12 +66,16 @@ def _init_worker(strategies_dir: str, data_dir: str) -> None:
 def _run_backtest_in_worker(
     strategy: str,
     slug: str,
-    cfg: dict,
+    merged_cfg: dict,
     initial_balance: float,
     settlement_result: dict[str, float] | None,
     btc_klines: list[dict] | None,
 ) -> dict:
-    """Worker entry point for single (slug, config). Loads data internally."""
+    """Worker entry point for single (slug, config). Loads data internally.
+
+    ``merged_cfg`` is already merged+normalised by the main process;
+    the worker skips registry name lookup and config merge.
+    """
     import gc as _gc
     import time as _time
     import traceback as _tb
@@ -113,8 +117,9 @@ def _run_backtest_in_worker(
     t1 = _time.monotonic()
     try:
         session = _rb(
-            _worker_registry, strategy, slug, cfg, initial_balance,
+            _worker_registry, strategy, slug, {},  initial_balance,
             data, settlement_result, btc_klines,
+            pre_merged_config=merged_cfg,
         )
     except Exception as e:
         return {
@@ -140,7 +145,10 @@ def _run_backtest_multi_in_worker(
     settlement_result: dict[str, float] | None,
     btc_klines: list[dict] | None,
 ) -> dict:
-    """Worker entry point for one slug × N configs. Loads data once."""
+    """Worker entry point for one slug × N configs. Loads data once.
+
+    Each config in ``configs`` is already merged+normalised by the main process.
+    """
     import gc as _gc
     import time as _time
     import traceback as _tb
@@ -181,8 +189,9 @@ def _run_backtest_multi_in_worker(
         t1 = _time.monotonic()
         try:
             session = _rb(
-                _worker_registry, strategy, slug, merged, initial_balance,
+                _worker_registry, strategy, slug, {}, initial_balance,
                 data, settlement_result, btc_klines,
+                pre_merged_config=merged,
             )
             results.append((cfg_idx, {
                 "session": session, "error": None,
@@ -303,6 +312,20 @@ class BacktestExecutor:
         )
         self._task_count = 0
 
+    def _merge_config(self, strategy_name: str, user_config: dict) -> dict:
+        """Merge + normalise config using the main-process registry.
+
+        This is the single authoritative merge point before handing off to
+        a worker process.  Workers receive the result and skip registry
+        lookup entirely.
+        """
+        default_config = self._registry.get_default_config(strategy_name)
+        if user_config:
+            merged = {k: user_config.get(k, default_config.get(k)) for k in user_config}
+        else:
+            merged = dict(default_config)
+        return self._registry.normalize_config(merged)
+
     # ── Single run ───────────────────────────────────────────────────────────
 
     async def run_one(
@@ -317,9 +340,13 @@ class BacktestExecutor:
     ) -> BacktestRunResult:
         """Run a single (slug, config) pair.
 
-        Data loading happens inside the worker process — only lightweight
-        scalar arguments cross the process boundary.
+        Config is merged+normalised in the main process using the
+        authoritative registry, then sent to the worker as pre_merged_config
+        so the worker never needs to look up preset names.
         """
+        # ── Pre-merge config in main process (authoritative registry) ─
+        merged_cfg = self._merge_config(strategy, cfg)
+
         async with self._archive_sem:
             self._task_count += 1
             t_wall = time.monotonic()
@@ -330,7 +357,7 @@ class BacktestExecutor:
                         loop.run_in_executor(
                             self._process_pool,
                             _run_backtest_in_worker,
-                            strategy, slug, cfg, initial_balance,
+                            strategy, slug, merged_cfg, initial_balance,
                             settlement_result, btc_klines,
                         ),
                         timeout=timeout,
