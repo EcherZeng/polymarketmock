@@ -10,6 +10,8 @@ import {
   addChildren,
   removeChildren,
   createPortfolio,
+  fetchFirstTradeSummary,
+  type FirstTradeSummaryItem,
 } from "@/api/client"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -42,6 +44,7 @@ export default function PortfolioDetailPage() {
   const [selectedChildIds, setSelectedChildIds] = useState<Set<string>>(new Set())
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set())
   const [strategyConfigOpen, setStrategyConfigOpen] = useState(false)
+  const [firstTradeMode, setFirstTradeMode] = useState(false)
 
   const { data: portfolio, isLoading } = useQuery<Portfolio>({
     queryKey: ["portfolio", portfolioId],
@@ -52,6 +55,18 @@ export default function PortfolioDetailPage() {
   const { data: allPortfolios = [] } = useQuery<Portfolio[]>({
     queryKey: ["portfolios"],
     queryFn: fetchPortfolios,
+  })
+
+  // First-trade summary (lazy, only when toggle is on)
+  const sessionIdsForFirstTrade = useMemo(
+    () => portfolio?.items.map((it) => it.session_id) ?? [],
+    [portfolio],
+  )
+  const { data: firstTradeMap } = useQuery<Record<string, FirstTradeSummaryItem | null>>({
+    queryKey: ["first-trade-summary", portfolioId],
+    queryFn: () => fetchFirstTradeSummary(sessionIdsForFirstTrade),
+    enabled: firstTradeMode && sessionIdsForFirstTrade.length > 0,
+    staleTime: 5 * 60_000,
   })
 
   const renameMutation = useMutation({
@@ -133,10 +148,17 @@ export default function PortfolioDetailPage() {
     [childPortfolios],
   )
 
+  // Helper: get return value for an item (respects first-trade mode)
+  const getReturnPct = (sessionId: string, fallback: number) => {
+    if (!firstTradeMode || !firstTradeMap) return fallback
+    const ft = firstTradeMap[sessionId]
+    return ft != null ? ft.return_pct : fallback
+  }
+
   const stats = useMemo(() => {
     if (!portfolio || portfolio.items.length === 0) return null
     const items = portfolio.items
-    const returns = items.map((it) => it.total_return_pct)
+    const returns = items.map((it) => getReturnPct(it.session_id, it.total_return_pct))
     const winCount = returns.filter((r) => r > 0).length
     return {
       count: items.length,
@@ -150,15 +172,15 @@ export default function PortfolioDetailPage() {
         items.reduce((a, it) => a + it.max_drawdown, 0) / items.length * 100,
       totalTrades: items.reduce((a, it) => a + it.total_trades, 0),
     }
-  }, [portfolio])
+  }, [portfolio, firstTradeMode, firstTradeMap])
 
   const filteredItems = useMemo(() => {
     if (!portfolio) return []
     let items = portfolio.items
     if (returnFilter === "positive") {
-      items = items.filter((it) => it.total_return_pct > 0)
+      items = items.filter((it) => getReturnPct(it.session_id, it.total_return_pct) > 0)
     } else if (returnFilter === "negative") {
-      items = items.filter((it) => it.total_return_pct < 0)
+      items = items.filter((it) => getReturnPct(it.session_id, it.total_return_pct) < 0)
     }
     if (memberSearch.trim()) {
       const term = memberSearch.trim().toLowerCase()
@@ -169,11 +191,11 @@ export default function PortfolioDetailPage() {
       )
     }
     return items
-  }, [portfolio, returnFilter, memberSearch])
+  }, [portfolio, returnFilter, memberSearch, firstTradeMode, firstTradeMap])
 
   const filteredStats = useMemo(() => {
     if (returnFilter === "all" || filteredItems.length === 0) return null
-    const returns = filteredItems.map((it) => it.total_return_pct)
+    const returns = filteredItems.map((it) => getReturnPct(it.session_id, it.total_return_pct))
     const sorted = [...returns].sort((a, b) => a - b)
     const mid = Math.floor(sorted.length / 2)
     const median = sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
@@ -185,7 +207,7 @@ export default function PortfolioDetailPage() {
       avgSharpe: filteredItems.reduce((a, it) => a + it.sharpe_ratio, 0) / filteredItems.length,
       totalTrades: filteredItems.reduce((a, it) => a + it.total_trades, 0),
     }
-  }, [filteredItems, returnFilter])
+  }, [filteredItems, returnFilter, firstTradeMode, firstTradeMap])
 
   const existingSessionIds = useMemo(
     () => new Set(portfolio?.items.map((it) => it.session_id) ?? []),
@@ -347,12 +369,26 @@ export default function PortfolioDetailPage() {
             ))}
           </div>
 
+          {/* First-trade toggle */}
+          <div className="mt-3 flex items-center gap-2">
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <Checkbox
+                checked={firstTradeMode}
+                onCheckedChange={(v) => setFirstTradeMode(!!v)}
+              />
+              <span className="text-xs font-medium">仅看首笔交易收益</span>
+            </label>
+            {firstTradeMode && !firstTradeMap && (
+              <span className="text-[10px] text-muted-foreground">加载中...</span>
+            )}
+          </div>
+
           {/* Return distribution chart */}
           {portfolio.items.length >= 2 && (
             <div className="mt-4">
               <h3 className="mb-1 text-xs font-medium text-muted-foreground">收益率分布</h3>
               <ReturnDistributionChart
-                returns={portfolio.items.map((it) => it.total_return_pct)}
+                returns={portfolio.items.map((it) => getReturnPct(it.session_id, it.total_return_pct))}
               />
             </div>
           )}
@@ -810,15 +846,20 @@ export default function PortfolioDetailPage() {
                     </td>
                     <td className="px-3 py-2 font-mono text-xs">{it.slug}</td>
                     <td className="px-3 py-2 text-xs">{it.strategy}</td>
-                    <td
-                      className={cn(
-                        "px-3 py-2 text-right font-mono",
-                        it.total_return_pct >= 0 ? "text-emerald-600" : "text-red-500",
-                      )}
-                    >
-                      {it.total_return_pct >= 0 ? "+" : ""}
-                      {(it.total_return_pct * 100).toFixed(2)}%
-                    </td>
+                    {(() => {
+                      const ret = getReturnPct(it.session_id, it.total_return_pct)
+                      return (
+                        <td
+                          className={cn(
+                            "px-3 py-2 text-right font-mono",
+                            ret >= 0 ? "text-emerald-600" : "text-red-500",
+                          )}
+                        >
+                          {ret >= 0 ? "+" : ""}
+                          {(ret * 100).toFixed(2)}%
+                        </td>
+                      )
+                    })()}
                     <td className="px-3 py-2 text-right font-mono">
                       {it.sharpe_ratio.toFixed(4)}
                     </td>

@@ -129,6 +129,23 @@ export async function deleteResult(sessionId: string): Promise<void> {
   await api.delete(`/results/${sessionId}`)
 }
 
+export interface FirstTradeSummaryItem {
+  pnl: number
+  return_pct: number
+  cost: number
+  token_id: string
+}
+
+export async function fetchFirstTradeSummary(
+  sessionIds: string[],
+): Promise<Record<string, FirstTradeSummaryItem | null>> {
+  const { data } = await api.post<Record<string, FirstTradeSummaryItem | null>>(
+    "/results/first-trade-summary",
+    { session_ids: sessionIds },
+  )
+  return data
+}
+
 export async function fetchBtcKlines(sessionId: string): Promise<BtcKlineResponse> {
   const { data } = await api.get<BtcKlineResponse>(`/results/${sessionId}/btc-klines`)
   return data

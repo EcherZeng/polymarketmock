@@ -118,6 +118,87 @@ async def get_positions(session_id: str):
     return result.get("position_curve", [])
 
 
+class _FirstTradeSummaryReq(BaseModel):
+    session_ids: list[str] = Field(..., min_length=1, max_length=500)
+
+
+def _compute_first_trade(result: dict) -> dict | None:
+    """Extract PnL from the first BUY trade in *result*.
+
+    Returns ``{pnl, return_pct, cost, side, token_id}`` or *None* when
+    no BUY exists.
+    """
+    trades = result.get("trades", [])
+    settlement = result.get("settlement_result") or {}
+    final_positions = result.get("final_positions") or {}
+
+    # Find the chronologically first BUY
+    first_buy = None
+    for t in trades:
+        if t.get("side") == "BUY":
+            first_buy = t
+            break
+    if first_buy is None:
+        return None
+
+    token_id = first_buy["token_id"]
+    cost = first_buy.get("total_cost", 0.0)
+    buy_price = first_buy.get("avg_price", 0.0)
+    buy_qty = first_buy.get("filled_amount", 0.0)
+
+    # Check if first-buy quantity was (partially) sold later
+    sold_qty = 0.0
+    sell_revenue = 0.0
+    remaining = buy_qty
+    for t in trades:
+        if t is first_buy:
+            continue
+        if t.get("token_id") != token_id or t.get("side") != "SELL":
+            continue
+        can_sell = min(t.get("filled_amount", 0.0), remaining)
+        if can_sell <= 0:
+            continue
+        sell_revenue += can_sell * t.get("avg_price", 0.0)
+        sold_qty += can_sell
+        remaining -= can_sell
+        if remaining <= 0:
+            break
+
+    # Settlement PnL for the portion still held at end
+    settle_pnl = 0.0
+    if remaining > 0 and settlement:
+        settle_price = settlement.get(token_id, 0.0)
+        settle_pnl = (settle_price - buy_price) * remaining
+
+    trade_pnl = sell_revenue - buy_price * sold_qty
+    total_pnl = round(trade_pnl + settle_pnl, 6)
+    return_pct = round(total_pnl / cost, 6) if cost > 0 else 0.0
+
+    return {
+        "pnl": total_pnl,
+        "return_pct": return_pct,
+        "cost": round(cost, 6),
+        "token_id": token_id,
+    }
+
+
+@router.post("/results/first-trade-summary")
+async def first_trade_summary(req: _FirstTradeSummaryReq):
+    """Batch-compute first-trade PnL for given session_ids.
+
+    Returns ``{session_id: {pnl, return_pct, cost, token_id} | null}``.
+    """
+    store = _get_store()
+    out: dict[str, dict | None] = {}
+    for sid in req.session_ids:
+        result = store.get(sid)
+        if result is None:
+            out[sid] = None
+            continue
+        out[sid] = _compute_first_trade(result)
+    return sanitize_floats(out)
+
+
 @router.delete("/results/{session_id}")
 async def delete_result(session_id: str):
     """Delete a single result."""
