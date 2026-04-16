@@ -284,6 +284,7 @@ export default function AiOptimizePage() {
               <Link
                 key={t.task_id}
                 to={`/ai-optimize/${t.task_id}`}
+                target="_blank"
                 className="rounded-lg border p-4 transition-colors hover:border-primary/50"
               >
                 <div className="flex items-center justify-between">

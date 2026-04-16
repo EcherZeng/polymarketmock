@@ -233,6 +233,7 @@ export default function AiOptimizeDetailPage() {
               {task.best_session_id && (
                 <Link
                   to={`/results/${task.best_session_id}`}
+                  target="_blank"
                   className="text-xs text-emerald-700 underline"
                 >
                   查看详细结果 →
@@ -421,7 +422,7 @@ export default function AiOptimizeDetailPage() {
                                 <td className="px-4 py-1.5 text-xs">
                                   <span className="font-mono text-muted-foreground">└</span>{" "}
                                   {sm.session_id ? (
-                                    <Link to={`/results/${sm.session_id}`} className="text-primary underline">
+                                    <Link to={`/results/${sm.session_id}`} target="_blank" className="text-primary underline">
                                       {sm.slug}
                                     </Link>
                                   ) : (

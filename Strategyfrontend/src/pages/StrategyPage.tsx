@@ -1,6 +1,5 @@
 import { useState, useMemo, useCallback } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { useNavigate } from "react-router-dom"
 import { cn, fmtDateTimeCst } from "@/lib/utils"
 import {
   fetchStrategies,
@@ -47,7 +46,6 @@ function t(label: I18nLabel | string | undefined): string {
 }
 
 export default function StrategyPage() {
-  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [selectedStrategy, setSelectedStrategy] = useState<string>("")
   const [selectedSlug, setSelectedSlug] = useState<string>("")
@@ -209,7 +207,7 @@ export default function StrategyPage() {
     mutationFn: (req: RunRequest) => runBacktest(req),
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["results"] })
-      navigate(`/results/${result.session_id}`)
+      window.open(`/results/${result.session_id}`, '_blank')
     },
   })
 
@@ -219,7 +217,7 @@ export default function StrategyPage() {
     mutationFn: (req: BatchRequest) => submitBatch(req),
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["batchTasks"] })
-      navigate(`/batch/${result.batch_id}`)
+      window.open(`/batch/${result.batch_id}`, '_blank')
     },
   })
 

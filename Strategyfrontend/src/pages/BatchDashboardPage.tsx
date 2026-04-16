@@ -69,6 +69,7 @@ export default function BatchDashboardPage() {
               <Link
                 key={t.batch_id}
                 to={`/batch/${t.batch_id}`}
+                target="_blank"
                 className="rounded-lg border p-4 transition-colors hover:border-primary/50"
               >
                 <div className="flex items-center justify-between">

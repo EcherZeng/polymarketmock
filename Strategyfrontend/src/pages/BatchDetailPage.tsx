@@ -417,6 +417,7 @@ export default function BatchDetailPage() {
                   {result && (
                     <Link
                       to={`/results/${result.session_id}`}
+                      target="_blank"
                       onClick={(e) => e.stopPropagation()}
                       className="text-xs text-primary hover:underline"
                     >
@@ -635,6 +636,7 @@ export default function BatchDetailPage() {
                     <td className="px-3 py-2 text-right">
                       <Link
                         to={`/results/${r.session_id}`}
+                        target="_blank"
                         className="text-xs text-primary hover:underline"
                       >
                         详情

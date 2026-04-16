@@ -149,6 +149,7 @@ export default function ResultsListPage() {
                     <div className="flex items-center gap-2">
                       <Link
                         to={`/results/${r.session_id}`}
+                        target="_blank"
                         className="text-xs text-primary underline hover:text-primary/80"
                       >
                         详情

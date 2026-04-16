@@ -206,7 +206,7 @@ export default function PortfoliosPage() {
           </div>
 
           {/* Middle: name + badges + meta */}
-          <Link to={`/portfolios/${p.portfolio_id}`} className="flex-1 min-w-0">
+          <Link to={`/portfolios/${p.portfolio_id}`} target="_blank" className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <h3 className="font-semibold truncate">{p.name}</h3>
               {isContainer && (
@@ -329,7 +329,7 @@ export default function PortfoliosPage() {
                   onCheckedChange={() => toggleGroupSelect(p.portfolio_id)}
                   className="mt-1"
                 />
-                <Link to={`/portfolios/${p.portfolio_id}`} className="flex-1">
+                <Link to={`/portfolios/${p.portfolio_id}`} target="_blank" className="flex-1">
                   <div className="flex items-center gap-2">
                     <h3 className="font-semibold">{p.name}</h3>
                     <Badge variant="secondary" className="text-[10px]">

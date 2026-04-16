@@ -880,6 +880,7 @@ export default function PortfolioDetailPage() {
                     <td className="px-3 py-2 text-right">
                       <Link
                         to={`/results/${it.session_id}`}
+                        target="_blank"
                         className="text-xs text-primary hover:underline"
                       >
                         详情

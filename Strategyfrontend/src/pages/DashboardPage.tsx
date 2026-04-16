@@ -148,6 +148,7 @@ export default function DashboardPage() {
                       <td className="px-3 py-2 text-right">
                         <Link
                           to={`/results/${r.session_id}`}
+                          target="_blank"
                           className="text-xs text-primary hover:underline"
                         >
                           详情
