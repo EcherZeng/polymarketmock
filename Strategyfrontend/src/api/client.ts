@@ -17,6 +17,7 @@ import type {
   BtcHdAnalysis,
   Portfolio,
   PortfolioItem,
+  RerunRequest,
 } from "@/types"
 
 const api = axios.create({ baseURL: "/strategy", timeout: 300_000 })
@@ -71,6 +72,11 @@ export async function fetchArchiveDetail(slug: string): Promise<ArchiveInfo> {
 
 export async function runBacktest(req: RunRequest): Promise<BacktestResult> {
   const { data } = await api.post<BacktestResult>("/run", req)
+  return data
+}
+
+export async function rerunBacktest(req: RerunRequest): Promise<BacktestResult> {
+  const { data } = await api.post<BacktestResult>("/rerun", req)
   return data
 }
 

@@ -175,6 +175,7 @@ export interface BacktestResult extends BacktestResultSummary {
   strategy_summary: Record<string, unknown>
   settlement_result: Record<string, number>
   btc_trend_info?: BtcTrendInfo | null
+  matching_mode?: "simple" | "vwap"
 }
 
 export interface RunRequest {
@@ -192,6 +193,12 @@ export interface BatchRequest {
   config: Record<string, unknown>
   settlement_result?: Record<string, number>
   cumulative_capital?: boolean
+  matching_mode?: "simple" | "vwap"
+}
+
+export interface RerunRequest {
+  session_id: string
+  matching_mode?: "simple" | "vwap"
 }
 
 // ── BTC Trend Filter ───────────────────────────────────────────────────────

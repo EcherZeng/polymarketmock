@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useParams, Link, useNavigate } from "react-router-dom"
 import { useMemo, useState } from "react"
 import { cn, fmtTimeCst, fmtFullCst } from "@/lib/utils"
-import { fetchBatchTask, cancelBatch, cleanupByBatch } from "@/api/client"
+import { fetchBatchTask, cancelBatch, cleanupByBatch, rerunBacktest } from "@/api/client"
 import { Checkbox } from "@/components/ui/checkbox"
 import AddToPortfolioDialog from "@/components/AddToPortfolioDialog"
 import type { BatchTaskDetail, BatchResultSummary, SlugWorkflow, PortfolioItem } from "@/types"
@@ -53,6 +53,7 @@ export default function BatchDetailPage() {
   const [portfolioOpen, setPortfolioOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
+  const [rerunningIds, setRerunningIds] = useState<Set<string>>(new Set())
   const pageSize = 50
 
   const { data: task, isLoading, isError } = useQuery<BatchTaskDetail>({
@@ -80,6 +81,23 @@ export default function BatchDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["results-stats"] })
       queryClient.invalidateQueries({ queryKey: ["results"] })
       navigate("/batch")
+    },
+  })
+
+  const rerunMutation = useMutation({
+    mutationFn: (sessionId: string) => {
+      setRerunningIds((s) => new Set(s).add(sessionId))
+      return rerunBacktest({ session_id: sessionId, matching_mode: "vwap" })
+    },
+    onSuccess: (result) => {
+      window.open(`/results/${result.session_id}`, "_blank")
+    },
+    onSettled: (_data, _error, sessionId) => {
+      setRerunningIds((s) => {
+        const next = new Set(s)
+        next.delete(sessionId)
+        return next
+      })
     },
   })
 
@@ -634,13 +652,23 @@ export default function BatchDetailPage() {
                       {(r.avg_slippage * 100).toFixed(4)}%
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <Link
-                        to={`/results/${r.session_id}`}
-                        target="_blank"
-                        className="text-xs text-primary hover:underline"
-                      >
-                        详情
-                      </Link>
+                      <div className="flex items-center justify-end gap-2">
+                        <Link
+                          to={`/results/${r.session_id}`}
+                          target="_blank"
+                          className="text-xs text-primary hover:underline"
+                        >
+                          详情
+                        </Link>
+                        <button
+                          onClick={() => rerunMutation.mutate(r.session_id)}
+                          disabled={rerunningIds.has(r.session_id)}
+                          className="rounded border px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:cursor-wait"
+                          title="使用完整 VWAP 深度撮合重新计算"
+                        >
+                          {rerunningIds.has(r.session_id) ? "计算中…" : "精细计算"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

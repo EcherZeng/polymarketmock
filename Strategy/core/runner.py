@@ -18,7 +18,7 @@ from core.anchor_pricing import SPREAD_WIDE, compute_anchor_price
 from core.base_strategy import BaseStrategy
 from core.btc_data import compute_btc_trend
 from core.data_loader import load_archive
-from core.matching import execute_signal
+from core.matching import execute_signal, execute_signal_simple
 from core.orderbook_state import apply_delta, derive_snapshot_from_ob, init_working_ob
 from core.registry import StrategyRegistry
 from core.types import (
@@ -130,6 +130,7 @@ def run_backtest(
     btc_klines: list[dict] | None = None,
     *,
     pre_merged_config: dict | None = None,
+    matching_mode: str = "vwap",
 ) -> BacktestSession:
     """Execute a single backtest synchronously.
 
@@ -225,7 +226,7 @@ def run_backtest(
 
     # Build indexed data per token for efficient lookup
     ob_by_token = _build_index(data.orderbooks)
-    delta_by_token = _build_index(data.ob_deltas)
+    delta_by_token = _build_index(data.ob_deltas) if matching_mode == "vwap" else {}
     price_by_token = _build_index(data.prices)
     trade_by_token = _build_index(data.live_trades)
 
@@ -233,9 +234,11 @@ def run_backtest(
     ob_ptrs: dict[str, _Pointer] = {
         tid: _Pointer(ob_by_token.get(tid, [])) for tid in token_ids
     }
-    delta_ptrs: dict[str, _Pointer] = {
-        tid: _Pointer(delta_by_token.get(tid, [])) for tid in token_ids
-    }
+    delta_ptrs: dict[str, _Pointer] = (
+        {tid: _Pointer(delta_by_token.get(tid, [])) for tid in token_ids}
+        if matching_mode == "vwap"
+        else {}
+    )
     price_ptrs: dict[str, _Pointer] = {
         tid: _Pointer(price_by_token.get(tid, [])) for tid in token_ids
     }
@@ -297,9 +300,10 @@ def run_backtest(
             for ob in new_obs:
                 working_obs[tid] = init_working_ob(ob)
 
-            new_deltas = delta_ptrs[tid].advance_to(grid_ts)
-            for delta in new_deltas:
-                apply_delta(working_obs[tid], delta)
+            if matching_mode == "vwap":
+                new_deltas = delta_ptrs[tid].advance_to(grid_ts)
+                for delta in new_deltas:
+                    apply_delta(working_obs[tid], delta)
 
         # 2) Advance prices to update last_mid
         for tid in token_ids:
@@ -409,15 +413,24 @@ def run_backtest(
             if snap is None:
                 continue
 
-            fill = execute_signal(
-                signal=signal,
-                token_snapshot_bid_levels=snap.bid_levels,
-                token_snapshot_ask_levels=snap.ask_levels,
-                mid_price=snap.mid_price,
-                balance=balance,
-                positions=positions,
-                timestamp=grid_ts,
-            )
+            if matching_mode == "simple":
+                fill = execute_signal_simple(
+                    signal=signal,
+                    mid_price=snap.mid_price,
+                    balance=balance,
+                    positions=positions,
+                    timestamp=grid_ts,
+                )
+            else:
+                fill = execute_signal(
+                    signal=signal,
+                    token_snapshot_bid_levels=snap.bid_levels,
+                    token_snapshot_ask_levels=snap.ask_levels,
+                    mid_price=snap.mid_price,
+                    balance=balance,
+                    positions=positions,
+                    timestamp=grid_ts,
+                )
             if fill is not None:
                 balance = fill.balance_after
                 trades.append(fill)
@@ -510,5 +523,6 @@ def run_backtest(
         btc_trend_info=btc_trend_info,
         slug_start=slug_start,
         slug_end=slug_end,
+        matching_mode=matching_mode,
     )
     return session

@@ -244,3 +244,6 @@ class BacktestSession:
     # Slug-derived session window (ISO UTC)
     slug_start: str = ""
     slug_end: str = ""
+
+    # Matching mode: "vwap" (full orderbook depth) | "simple" (mid-price only)
+    matching_mode: str = "vwap"

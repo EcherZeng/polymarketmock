@@ -103,6 +103,7 @@ class BatchTask:
     initial_balance: float
     settlement_result: dict[str, float] | None = None
     cumulative_capital: bool = False
+    matching_mode: str = "simple"
     status: str = "running"  # "running" | "completed" | "cancelled"
     created_at: str = ""
     started_at: str = ""
@@ -161,6 +162,7 @@ class BatchRunner:
         initial_balance: float,
         settlement_result: dict[str, float] | None = None,
         cumulative_capital: bool = False,
+        matching_mode: str = "simple",
     ) -> str:
         """Submit a batch of backtests. Returns batch_id."""
         batch_id = uuid.uuid4().hex[:12]
@@ -172,6 +174,7 @@ class BatchRunner:
             initial_balance=initial_balance,
             settlement_result=settlement_result,
             cumulative_capital=cumulative_capital,
+            matching_mode=matching_mode,
             created_at=datetime.now(timezone.utc).isoformat(),
             total=len(slugs),
             workflows={s: SlugWorkflow(slug=s) for s in slugs},
@@ -231,6 +234,7 @@ class BatchRunner:
                 settlement_result=task.settlement_result,
                 btc_klines=btc_klines,
                 timeout=config.slug_timeout,
+                matching_mode=task.matching_mode,
             )
 
             # ── Step 1: Data load ────────────────────────────────────────

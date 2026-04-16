@@ -70,6 +70,7 @@ def _run_backtest_in_worker(
     initial_balance: float,
     settlement_result: dict[str, float] | None,
     btc_klines: list[dict] | None,
+    matching_mode: str = "vwap",
 ) -> dict:
     """Worker entry point for single (slug, config). Loads data internally.
 
@@ -88,10 +89,12 @@ def _run_backtest_in_worker(
     from core.data_loader import load_archive
     from core.runner import run_backtest as _rb
 
+    skip_ob = matching_mode == "simple"
+
     # ── Load data inside worker — no large-object IPC ────────────────
     t0 = _time.monotonic()
     try:
-        data = load_archive(Path(_worker_data_dir), slug)
+        data = load_archive(Path(_worker_data_dir), slug, skip_ob_deltas=skip_ob)
     except Exception as e:
         return {
             "error_phase": "data_load", "error": str(e), "error_tb": _tb.format_exc(),
@@ -120,6 +123,7 @@ def _run_backtest_in_worker(
             _worker_registry, strategy, slug, {},  initial_balance,
             data, settlement_result, btc_klines,
             pre_merged_config=merged_cfg,
+            matching_mode=matching_mode,
         )
     except Exception as e:
         return {
@@ -337,6 +341,7 @@ class BacktestExecutor:
         settlement_result: dict[str, float] | None,
         btc_klines: list[dict] | None,
         timeout: float,
+        matching_mode: str = "vwap",
     ) -> BacktestRunResult:
         """Run a single (slug, config) pair.
 
@@ -358,7 +363,7 @@ class BacktestExecutor:
                             self._process_pool,
                             _run_backtest_in_worker,
                             strategy, slug, merged_cfg, initial_balance,
-                            settlement_result, btc_klines,
+                            settlement_result, btc_klines, matching_mode,
                         ),
                         timeout=timeout,
                     )

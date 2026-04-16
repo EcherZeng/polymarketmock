@@ -177,3 +177,56 @@ def execute_signal(
         balance_after=round(balance, 6),
         position_after=round(positions.get(signal.token_id, 0.0), 6),
     )
+
+
+def execute_signal_simple(
+    signal: Signal,
+    mid_price: float,
+    balance: float,
+    positions: dict[str, float],
+    timestamp: str,
+) -> FillInfo | None:
+    """Execute a signal using mid-price only (no orderbook depth).
+
+    Fills at mid_price with zero slippage. Used in batch mode to skip
+    the expensive ob_deltas loading (~80-90 % of I/O time per slug).
+    """
+    if signal.amount <= 0 or mid_price <= 0:
+        return None
+
+    current_pos = positions.get(signal.token_id, 0.0)
+
+    if signal.side == "BUY":
+        max_affordable = balance / mid_price if mid_price > 0 else 0
+        filled = min(signal.amount, max_affordable)
+        if signal.max_cost is not None:
+            filled = min(filled, signal.max_cost / mid_price)
+        if filled <= 0:
+            return None
+        total_cost = filled * mid_price
+        balance -= total_cost
+        positions[signal.token_id] = current_pos + filled
+    elif signal.side == "SELL":
+        if current_pos <= 0:
+            return None
+        filled = min(signal.amount, current_pos)
+        if filled <= 0:
+            return None
+        total_cost = filled * mid_price
+        balance += total_cost
+        positions[signal.token_id] = current_pos - filled
+    else:
+        return None
+
+    return FillInfo(
+        timestamp=timestamp,
+        token_id=signal.token_id,
+        side=signal.side,
+        requested_amount=signal.amount,
+        filled_amount=round(filled, 6),
+        avg_price=round(mid_price, 6),
+        total_cost=round(total_cost, 6),
+        slippage_pct=0.0,
+        balance_after=round(balance, 6),
+        position_after=round(positions.get(signal.token_id, 0.0), 6),
+    )

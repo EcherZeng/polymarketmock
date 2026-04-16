@@ -40,6 +40,7 @@ class BatchRequest(BaseModel):
     config: dict = Field(default_factory=dict)
     settlement_result: dict[str, float] | None = None
     cumulative_capital: bool = False
+    matching_mode: str = Field(default="simple", pattern="^(simple|vwap)$")
 
 
 # ── Result helpers ───────────────────────────────────────────────────────────
@@ -118,6 +119,74 @@ async def run_single(req: RunRequest):
     return result
 
 
+# ── Rerun (precision re-calculation with full VWAP) ──────────────────────────
+
+
+class RerunRequest(BaseModel):
+    session_id: str
+    matching_mode: str = Field(default="vwap", pattern="^(simple|vwap)$")
+
+
+@router.post("/rerun")
+async def rerun_single(req: RerunRequest):
+    """Re-run a single slug with a different matching mode (e.g. full VWAP).
+
+    Reads strategy/slug/config from the original result, executes a fresh
+    backtest with the requested matching_mode, and stores the new result.
+    """
+    if state.result_store is None:
+        raise HTTPException(status_code=503, detail="Result store not initialized")
+
+    original = state.result_store.get(req.session_id)
+    if original is None:
+        raise HTTPException(status_code=404, detail=f"Result '{req.session_id}' not found")
+
+    strategy_name = original.get("strategy", "")
+    slug = original.get("slug", "")
+    initial_balance = original.get("initial_balance", 10000)
+    cfg = original.get("config", {})
+    settlement = original.get("settlement_result")
+
+    if not registry.has(strategy_name):
+        raise HTTPException(status_code=404, detail=f"Strategy '{strategy_name}' not found")
+
+    # BTC klines prefetch
+    btc_klines: list[dict] | None = None
+    if btc_trend_enabled(cfg):
+        try:
+            slug_window = parse_slug_window(slug)
+            if slug_window:
+                btc_klines = await fetch_btc_klines(slug_window[0], slug_window[1])
+        except Exception as e:
+            logger.warning("BTC klines prefetch failed for rerun %s: %s", slug, e)
+
+    try:
+        session = await asyncio.to_thread(
+            run_backtest,
+            registry,
+            strategy_name,
+            slug,
+            cfg,
+            initial_balance,
+            None,  # data
+            settlement,
+            btc_klines,
+            matching_mode=req.matching_mode,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Rerun execution error: {e}")
+
+    metrics = evaluate(session)
+    session.metrics = metrics
+    session.drawdown_curve = compute_drawdown_curve(session.equity_curve)
+    session.drawdown_events = compute_drawdown_events(session.equity_curve)
+
+    result = store_session(session)
+    return result
+
+
 # ── Batch ────────────────────────────────────────────────────────────────────
 
 
@@ -132,6 +201,7 @@ async def run_batch(req: BatchRequest):
     batch_id = await state.batch_runner.submit(
         req.strategy, req.slugs, req.config, req.initial_balance, req.settlement_result,
         cumulative_capital=req.cumulative_capital,
+        matching_mode=req.matching_mode,
     )
 
     # Persist initial snapshot immediately so the task is always findable after a
@@ -380,4 +450,5 @@ def _serialize_session(session) -> dict:
         "btc_trend_info": session.btc_trend_info,
         "slug_start": session.slug_start,
         "slug_end": session.slug_end,
+        "matching_mode": session.matching_mode,
     }

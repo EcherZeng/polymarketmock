@@ -213,19 +213,24 @@ def _decode_rows(rows: list[dict], has_side: bool = False) -> list[dict]:
     return rows
 
 
-def load_archive(data_dir: Path, slug: str) -> ArchiveData:
+def load_archive(data_dir: Path, slug: str, *, skip_ob_deltas: bool = False) -> ArchiveData:
     """Load all Parquet files for one archived event.
 
     Tries the consolidated archive/ directory first. If it has no data,
     falls back to merging the live/ chunk files.
+
+    When *skip_ob_deltas* is True the heavy ob_deltas file is not loaded,
+    cutting ~80-90 % of I/O time per slug (simple matching mode).
     """
     # ── 1. Try consolidated archive/ ─────────────────────────────────────
     base = data_dir / "sessions" / slug / "archive"
     if base.exists() and list(base.glob("*.parquet")):
         prices = _decode_rows(_query_parquet(base / "prices.parquet"))
         orderbooks = _decode_rows(_query_parquet(base / "orderbooks.parquet"))
-        ob_deltas = _load_compact_parquet(
-            base / "ob_deltas.parquet", has_side=True,
+        ob_deltas = (
+            []
+            if skip_ob_deltas
+            else _load_compact_parquet(base / "ob_deltas.parquet", has_side=True)
         )
         live_trades = _decode_rows(
             _query_parquet(base / "live_trades.parquet"), has_side=True,
@@ -251,8 +256,10 @@ def load_archive(data_dir: Path, slug: str) -> ArchiveData:
 
     prices = _decode_rows(_query_parquet_glob(live_base / "prices"))
     orderbooks = _decode_rows(_query_parquet_glob(live_base / "orderbooks"))
-    ob_deltas = _load_compact_parquet_glob(
-        live_base / "ob_deltas", has_side=True,
+    ob_deltas = (
+        []
+        if skip_ob_deltas
+        else _load_compact_parquet_glob(live_base / "ob_deltas", has_side=True)
     )
     live_trades = _decode_rows(
         _query_parquet_glob(live_base / "live_trades"), has_side=True,
