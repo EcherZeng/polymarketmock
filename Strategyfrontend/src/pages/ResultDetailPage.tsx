@@ -8,9 +8,9 @@ import MetricsPanel from "@/components/MetricsPanel"
 import EquityCurveChart from "@/components/EquityCurveChart"
 import PriceChart from "@/components/PriceChart"
 import AnchorBulletin from "@/components/AnchorBulletin"
-import DrawdownTable from "@/components/DrawdownTable"
 import TradesTable from "@/components/TradesTable"
 import BtcKlineChart from "@/components/BtcKlineChart"
+import BtcFactorsChart from "@/components/BtcFactorsChart"
 
 export default function ResultDetailPage() {
   const { sessionId } = useParams<{ sessionId: string }>()
@@ -197,6 +197,19 @@ export default function ResultDetailPage() {
         )}
       </div>
 
+      {/* BTC P0 Factor Analysis */}
+      {result.btc_trend_info?.factors && (
+        <div className="rounded-lg border p-4">
+          <h2 className="mb-3 text-sm font-medium text-muted-foreground">
+            BTC P0 因子分析
+            <span className="ml-2 text-[10px] text-muted-foreground/60">
+              基于1分钟K线的5大右侧入场信号因子 — 动量·加速度·波动归一化·量能冲击·K线结构
+            </span>
+          </h2>
+          <BtcFactorsChart factors={result.btc_trend_info.factors} />
+        </div>
+      )}
+
       {/* Equity curve */}
       {result.equity_curve.length > 0 && (
         <div className="rounded-lg border p-4">
@@ -205,16 +218,6 @@ export default function ResultDetailPage() {
             equityCurve={result.equity_curve}
             drawdownCurve={result.drawdown_curve}
           />
-        </div>
-      )}
-
-      {/* Drawdown events table */}
-      {result.drawdown_events && result.drawdown_events.length > 0 && (
-        <div className="rounded-lg border p-4">
-          <h2 className="mb-3 text-sm font-medium text-muted-foreground">
-            回撤事件 ({result.drawdown_events.length} 次)
-          </h2>
-          <DrawdownTable events={result.drawdown_events} />
         </div>
       )}
 

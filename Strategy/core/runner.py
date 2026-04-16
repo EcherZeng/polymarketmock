@@ -220,7 +220,7 @@ def run_backtest(
                 abs(btc_trend_info["a1"] + btc_trend_info["a2"]), btc_trend_pass,
             )
         else:
-            btc_trend_info = {"a1": 0.0, "a2": 0.0, "passed": True, "p0": 0.0, "p_w1": 0.0, "p_w2": 0.0, "error": "no_klines_provided"}
+            btc_trend_info = {"a1": 0.0, "a2": 0.0, "passed": True, "p0": 0.0, "p_w1": 0.0, "p_w2": 0.0, "error": "no_klines_provided", "factors": None}
             logger.warning("Backtest %s: btc_min_momentum active but no klines provided, allowing entry", session_id)
 
     # Build indexed data per token for efficient lookup

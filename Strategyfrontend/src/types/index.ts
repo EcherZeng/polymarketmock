@@ -196,6 +196,39 @@ export interface BatchRequest {
 
 // ── BTC Trend Filter ───────────────────────────────────────────────────────
 
+export interface BtcFactorSeriesPoint {
+  time_ms: number
+  atr_ratio: number
+  vol_z: number
+  body_ratio: number
+  wick_imb: number
+  momentum: number
+}
+
+export interface BtcPrediction {
+  prob_up: number
+  prob_down: number
+  raw_score: number
+  confidence: "high" | "medium" | "low"
+  signal: "bullish" | "bearish" | "neutral"
+  components: Record<string, number>
+  formula: string
+}
+
+export interface BtcFactors {
+  f1_momentum: number
+  f2_acceleration: number
+  f2_consistent: number
+  f3_vol_norm: number
+  f3_atr_ratio: number
+  f4_volume_z: number
+  f4_volume_dir: number
+  f5_body_ratio: number
+  f5_wick_imbalance: number
+  factor_series: BtcFactorSeriesPoint[]
+  prediction?: BtcPrediction | null
+}
+
 export interface BtcTrendInfo {
   a1: number
   a2: number
@@ -204,6 +237,7 @@ export interface BtcTrendInfo {
   p_w1: number
   p_w2: number
   error: string | null
+  factors?: BtcFactors | null
 }
 
 // ── BTC Kline (Binance) ────────────────────────────────────────────────────
