@@ -46,6 +46,14 @@ export async function deletePreset(name: string): Promise<void> {
   await api.delete(`/presets/${name}`)
 }
 
+export async function renamePreset(
+  name: string,
+  newName: string,
+): Promise<{ old_name: string; new_name: string }> {
+  const { data } = await api.patch(`/presets/${name}/rename`, { new_name: newName })
+  return data
+}
+
 // ── Data Archives ───────────────────────────────────────────────────────────
 
 export async function fetchArchives(): Promise<ArchiveInfo[]> {
