@@ -128,10 +128,13 @@ def compute_btc_trend(
 ) -> dict:
     """Compute BTC trend filter from kline data.
 
-    Uses close prices at three time points:
-      P0  = close at session start
-      Pw1 = close at start + window_1_min
-      Pw2 = close at start + window_1_min + window_2_min
+    Uses **open** prices at three time points so that each price represents
+    the market price *at* that exact timestamp (a kline's ``close`` is
+    actually the price one interval later):
+
+      P0  = open at session start
+      Pw1 = open at start + window_1_min
+      Pw2 = open at start + window_1_min + window_2_min
 
     Computes:
       a1 = (Pw1 - P0) / P0
@@ -149,8 +152,8 @@ def compute_btc_trend(
     target_w1_ms = start_ms + window_1_min * 60 * 1000
     target_w2_ms = start_ms + (window_1_min + window_2_min) * 60 * 1000
 
-    def _closest_close(target_ms: int) -> float | None:
-        """Find kline whose open_time is closest to target_ms and return its close price."""
+    def _closest_open(target_ms: int) -> float | None:
+        """Find kline whose open_time is closest to target_ms and return its open price."""
         best: dict | None = None
         best_dist = float("inf")
         for k in klines:
@@ -158,11 +161,11 @@ def compute_btc_trend(
             if dist < best_dist:
                 best_dist = dist
                 best = k
-        return best["close"] if best else None
+        return best["open"] if best else None
 
-    p0 = _closest_close(start_ms)
-    p_w1 = _closest_close(target_w1_ms)
-    p_w2 = _closest_close(target_w2_ms)
+    p0 = _closest_open(start_ms)
+    p_w1 = _closest_open(target_w1_ms)
+    p_w2 = _closest_open(target_w2_ms)
 
     if p0 is None or p_w1 is None or p_w2 is None:
         return {"a1": 0.0, "a2": 0.0, "passed": True, "p0": 0.0, "p_w1": 0.0, "p_w2": 0.0, "error": "missing_prices"}
