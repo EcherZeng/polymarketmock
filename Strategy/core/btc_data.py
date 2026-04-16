@@ -126,6 +126,8 @@ def compute_btc_trend(
     window_1_min: int,
     window_2_min: int,
     min_momentum: float,
+    atr_lookback: int = 20,
+    vol_lookback: int = 20,
 ) -> dict:
     """Compute BTC trend filter from kline data.
 
@@ -184,7 +186,7 @@ def compute_btc_trend(
     passed = abs(a1 + a2) > min_momentum and a1 * a2 > 0
 
     # ── P0 factors computation ──────────────────────────────────────────
-    factors = compute_btc_factors(klines, start_ms, target_w1_ms, target_w2_ms, a1, a2)
+    factors = compute_btc_factors(klines, start_ms, target_w1_ms, target_w2_ms, a1, a2, atr_lookback, vol_lookback)
 
     return {
         "a1": round(a1, 8),
@@ -210,28 +212,25 @@ def compute_btc_factors(
     atr_lookback: int = 20,
     vol_lookback: int = 20,
 ) -> dict:
-    """Compute 5 P0-level factors from 1-min BTC kline data.
+    """Compute 5 P0-level factors from BTC kline data.
 
     IMPORTANT — look-ahead bias guard:
-    A 1-min kline with open_time=T contains data for the interval [T, T+60s).
-    Its open price is known at T, but high/low/close/volume are only known at
-    T+60s.  To avoid look-ahead bias when predicting price direction AFTER the
-    second window ends (target_w2_ms), we must **exclude** any kline whose
-    open_time >= target_w2_ms.  The last usable kline has
-    open_time = target_w2_ms - 60_000 (its close is known at target_w2_ms,
-    which is exactly the boundary — still valid).
+    A kline with open_time=T contains data for the interval [T, T+interval).
+    Its open price is known at T, but high/low/close/volume are only known
+    after the interval closes.  To avoid look-ahead bias we **exclude** any
+    kline whose open_time >= target_w2_ms.
 
     Factors (all raw decimals, not percentages):
       f1_momentum       – directional momentum: a1 + a2
       f2_acceleration   – momentum acceleration: |a2| - |a1|  (>0 means accelerating)
-      f2_consistent     – direction consistency: 1 if a1*a2 > 0, else 0
+      f2_consistent     – direction streak: consecutive same-direction closes at window end
       f3_vol_norm       – volatility-normalized momentum: (a1+a2) / rolling ATR ratio
-      f4_volume_z       – volume z-score over lookback window
-      f4_volume_dir     – volume z-score * sign(close - open) of latest candle
-      f5_body_ratio     – candle body / range ratio of latest candle (0~1)
-      f5_wick_imbalance – upper wick minus lower wick, normalized by range (-1~1)
+      f4_volume_z       – VWAP deviation: (last_close - VWAP) / VWAP
+      f4_volume_dir     – volume ratio: total volume in w2 / total volume in w1
+      f5_body_ratio     – window-averaged candle body / range ratio (0~1)
+      f5_wick_imbalance – window-averaged (upper_wick - lower_wick) / range (-1~1)
 
-    Also returns per-minute factor time series for charting:
+    Also returns per-candle factor time series for charting:
       factor_series: list of {time_ms, atr_ratio, vol_z, body_ratio, wick_imb, momentum}
     """
     if not klines or len(klines) < 2:
@@ -247,9 +246,9 @@ def compute_btc_factors(
     # ── f1: Directional momentum ─────────────────────────────────────────
     f1_momentum = round(a1 + a2, 8)
 
-    # ── f2: Acceleration & consistency ───────────────────────────────────
+    # ── f2: Acceleration & direction streak ──────────────────────────────
     f2_acceleration = round(abs(a2) - abs(a1), 8)
-    f2_consistent = 1 if a1 * a2 > 0 else 0
+    f2_consistent = _count_streak(window_klines)
 
     # ── f3: Volatility-normalized momentum ───────────────────────────────
     # True Range for each kline, then ATR
@@ -269,28 +268,34 @@ def compute_btc_factors(
     atr_ratio = atr / mid_price if mid_price > 0 else 0.0
     f3_vol_norm = round(f1_momentum / atr_ratio, 6) if atr_ratio > 1e-12 else 0.0
 
-    # ── f4: Volume z-score ───────────────────────────────────────────────
-    volumes = [k["volume"] for k in window_klines]
-    vol_n = min(vol_lookback, len(volumes))
-    vol_slice = volumes[-vol_n:]
-    vol_mean = sum(vol_slice) / len(vol_slice) if vol_slice else 0.0
-    vol_std = math.sqrt(sum((v - vol_mean) ** 2 for v in vol_slice) / len(vol_slice)) if len(vol_slice) > 1 else 1.0
-    latest_vol = volumes[-1] if volumes else 0.0
-    f4_volume_z = round((latest_vol - vol_mean) / vol_std, 4) if vol_std > 1e-12 else 0.0
+    # ── f4: VWAP deviation & volume ratio ────────────────────────────────
+    total_cv = sum(k["close"] * k["volume"] for k in window_klines)
+    total_vol = sum(k["volume"] for k in window_klines)
+    vwap = total_cv / total_vol if total_vol > 1e-12 else window_klines[-1]["close"]
+    last_close = window_klines[-1]["close"]
+    f4_volume_z = round((last_close - vwap) / vwap, 8) if vwap > 0 else 0.0
 
-    latest_k = window_klines[-1]
-    close_open_sign = 1 if latest_k["close"] >= latest_k["open"] else -1
-    f4_volume_dir = round(f4_volume_z * close_open_sign, 4)
+    # Volume ratio: w2 window total volume / w1 window total volume
+    w1_klines = [k for k in window_klines if k["open_time"] < target_w1_ms]
+    w2_klines = [k for k in window_klines if k["open_time"] >= target_w1_ms]
+    vol_w1 = sum(k["volume"] for k in w1_klines) if w1_klines else 1e-12
+    vol_w2 = sum(k["volume"] for k in w2_klines) if w2_klines else 1e-12
+    f4_volume_dir = round(vol_w2 / vol_w1, 4) if vol_w1 > 1e-12 else 1.0
 
-    # ── f5: Candle structure (body ratio & wick imbalance) ───────────────
-    candle_range = latest_k["high"] - latest_k["low"]
+    # ── f5: Candle structure — window-averaged ───────────────────────────
     eps = 1e-12
-    body = abs(latest_k["close"] - latest_k["open"])
-    f5_body_ratio = round(body / (candle_range + eps), 4)
-
-    upper_wick = latest_k["high"] - max(latest_k["open"], latest_k["close"])
-    lower_wick = min(latest_k["open"], latest_k["close"]) - latest_k["low"]
-    f5_wick_imbalance = round((upper_wick - lower_wick) / (candle_range + eps), 4)
+    n_avg = min(vol_lookback, len(window_klines))
+    avg_klines = window_klines[-n_avg:]
+    body_ratios: list[float] = []
+    wick_imbs: list[float] = []
+    for k in avg_klines:
+        cr = k["high"] - k["low"]
+        body_ratios.append(abs(k["close"] - k["open"]) / (cr + eps))
+        uw = k["high"] - max(k["open"], k["close"])
+        lw = min(k["open"], k["close"]) - k["low"]
+        wick_imbs.append((uw - lw) / (cr + eps))
+    f5_body_ratio = round(sum(body_ratios) / len(body_ratios), 4) if body_ratios else 0.0
+    f5_wick_imbalance = round(sum(wick_imbs) / len(wick_imbs), 4) if wick_imbs else 0.0
 
     # ── Per-minute factor time series for charting ───────────────────────
     factor_series = _build_factor_series(window_klines, atr_lookback, vol_lookback)
@@ -309,7 +314,12 @@ def compute_btc_factors(
     }
 
     # ── Composite prediction ─────────────────────────────────────────────
-    result["prediction"] = predict_btc_direction(result)
+    remaining_min = (target_w2_ms - start_ms) / 60_000  # total session observed
+    # Assume a typical 15-min session; remaining = session_len - observed
+    # The caller doesn't pass session length, so we estimate remaining as
+    # the same duration as window_2 offset from start (conservative).
+    # For w1=5, w2=10, remaining ~5 min.  Caller can override via kwarg later.
+    result["prediction"] = predict_btc_direction(result, window_klines, remaining_min)
 
     return result
 
@@ -319,10 +329,13 @@ def _build_factor_series(
     atr_lookback: int = 20,
     vol_lookback: int = 20,
 ) -> list[dict]:
-    """Build per-minute factor values for time-series charting."""
+    """Build per-candle factor values for time-series charting."""
     series: list[dict] = []
     trs: list[float] = []
-    volumes: list[float] = []
+    cum_cv = 0.0
+    cum_vol = 0.0
+    body_window: list[float] = []
+    wick_window: list[float] = []
 
     for i, k in enumerate(klines):
         high_low = k["high"] - k["low"]
@@ -332,7 +345,6 @@ def _build_factor_series(
         else:
             tr = high_low
         trs.append(tr)
-        volumes.append(k["volume"])
 
         # ATR ratio
         atr_n = min(atr_lookback, len(trs))
@@ -340,21 +352,26 @@ def _build_factor_series(
         mid_p = (k["open"] + k["close"]) / 2
         atr_ratio = round(atr_val / mid_p, 8) if mid_p > 0 else 0.0
 
-        # Volume z-score
-        vol_n = min(vol_lookback, len(volumes))
-        vol_slice = volumes[-vol_n:]
-        vol_mean = sum(vol_slice) / len(vol_slice)
-        vol_std = math.sqrt(sum((v - vol_mean) ** 2 for v in vol_slice) / len(vol_slice)) if len(vol_slice) > 1 else 1.0
-        vol_z = round((k["volume"] - vol_mean) / vol_std, 4) if vol_std > 1e-12 else 0.0
+        # Rolling VWAP deviation
+        cum_cv += k["close"] * k["volume"]
+        cum_vol += k["volume"]
+        vwap = cum_cv / cum_vol if cum_vol > 1e-12 else k["close"]
+        vol_z = round((k["close"] - vwap) / vwap, 8) if vwap > 0 else 0.0
 
-        # Body ratio & wick imbalance
+        # Rolling-average body ratio & wick imbalance
         eps = 1e-12
         candle_range = k["high"] - k["low"]
-        body = abs(k["close"] - k["open"])
-        body_ratio = round(body / (candle_range + eps), 4)
-        upper_wick = k["high"] - max(k["open"], k["close"])
-        lower_wick = min(k["open"], k["close"]) - k["low"]
-        wick_imb = round((upper_wick - lower_wick) / (candle_range + eps), 4)
+        body_window.append(abs(k["close"] - k["open"]) / (candle_range + eps))
+        if len(body_window) > vol_lookback:
+            body_window.pop(0)
+        body_ratio = round(sum(body_window) / len(body_window), 4)
+
+        uw = k["high"] - max(k["open"], k["close"])
+        lw = min(k["open"], k["close"]) - k["low"]
+        wick_window.append((uw - lw) / (candle_range + eps))
+        if len(wick_window) > vol_lookback:
+            wick_window.pop(0)
+        wick_imb = round(sum(wick_window) / len(wick_window), 4)
 
         # Cumulative momentum from first kline
         first_open = klines[0]["open"]
@@ -389,98 +406,204 @@ def _empty_factors() -> dict:
     }
 
 
-# ── Composite Prediction ─────────────────────────────────────────────────────
+# ── Composite Prediction (CDF model) ─────────────────────────────────────────
 #
-# Combines all P0 factors into a single probability of BTC price rising
-# after the second window ends (right-side entry signal).
+# Predicts: P(P_end > P_0) — probability that BTC price at session end is
+# higher than at session start (minute 0).
 #
-# Model: Logistic scoring via sigmoid
+# Core insight: at the second window boundary (W2), BTC has already displaced
+# by Δ_W2 = P_W2 − P_0 relative to P_0.  For the price to "flip" (end on
+# the opposite side of P_0), the remaining minutes must reverse the entire Δ.
 #
-#   raw_score = w1·f1_dir + w2·f2_acc + w3·f2_con + w4·f3_vnorm
-#              + w5·f4_vdir + w6·f5_body + w7·f5_wick
+# Uses **Student-t(df=4)** instead of normal distribution to account for BTC's
+# heavy-tailed 1-min return distribution (fat tails, volatility clustering).
 #
-# where:
-#   f1_dir   = sign(f1_momentum) · min(|f1_momentum| / ATR_ratio, 3)
-#              → direction-aware, ATR-clipped momentum (-3 ~ +3)
-#   f2_acc   = tanh(f2_acceleration / ATR_ratio)
-#              → acceleration normalised to (-1, +1)
-#   f2_con   = f2_consistent                     (0 or 1)
-#   f3_vnorm = tanh(f3_vol_norm)                 (-1 ~ +1)
-#   f4_vdir  = tanh(f4_volume_dir)               (-1 ~ +1)
-#   f5_body  = f5_body_ratio - 0.5               (-0.5 ~ +0.5)
-#   f5_wick  = -f5_wick_imbalance                (flip: upper wick pressure → bearish)
+#   σ_remain = σ₁ · √(remaining_minutes)
+#   z_base   = Δ_W2 / σ_remain         (displacement in σ-units)
 #
-#   P(up) = sigmoid(raw_score) = 1 / (1 + exp(-raw_score))
+# Factor-adjusted model — P0 factors modify σ_remain via α ∈ (0.5, 1.5):
 #
-# Default weights (prior, tunable via walk-forward):
-#   w1=0.35  w2=0.15  w3=0.20  w4=0.15  w5=0.15  w6=0.05  w7=0.05
-#   bias = -0.05 (slight bearish tilt to penalise low-conviction entries)
+#   α = 1 − β₁·accel − β₂·streak − β₃·vwap_coupling + β₄·wick_pressure
 #
-# Confidence bands:
-#   |P(up) - 0.5| < 0.10  → low confidence (coin-flip zone)
-#   |P(up) - 0.5| ≥ 0.25  → high confidence
+#   z_adj = Δ_W2 / (σ_remain · α)
+#   P(up) = F_t(z_adj; df=4)     where F_t = Student-t CDF
+#
+# Student-t(4) gives heavier tails than normal: ≈3.7% probability beyond ±3σ
+# (vs 0.3% for normal), better reflecting BTC's actual return distribution.
 
-# Tunable default weights
-_PRED_W = {
-    "w1": 0.35,    # momentum direction
-    "w2": 0.15,    # acceleration
-    "w3": 0.20,    # direction consistency bonus
-    "w4": 0.15,    # volatility-normalised momentum
-    "w5": 0.15,    # volume-direction coupling
-    "w6": 0.05,    # candle body decisiveness
-    "w7": 0.05,    # wick imbalance (inverted)
-    "bias": -0.05, # slight bearish prior
+# Default factor adjustment weights (prior):
+_ADJ_BETA = {
+    "accel":      0.10,   # |a2|>|a1| → trend sticky → shrink σ
+    "consistent": 0.15,   # streak > 0 → same dir     → shrink σ
+    "vol_couple": 0.10,   # VWAP confirms direction   → shrink σ
+    "wick_press": 0.10,   # wick pressure             → expand σ
+    "body_ratio": 0.05,   # strong body               → shrink σ
 }
 
+# Student-t degrees of freedom — 4 gives heavier tails than normal,
+# capturing BTC's kurtosis in 1-min returns without being too extreme.
+_STUDENT_T_DF = 4.0
 
-def predict_btc_direction(factors: dict) -> dict:
-    """Combine P0 factors into a probability prediction for BTC direction.
+
+def _normal_cdf(x: float) -> float:
+    """Standard normal CDF via the complementary error function."""
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def _reg_inc_beta(x: float, a: float, b: float, max_iter: int = 200) -> float:
+    """Regularized incomplete beta function I_x(a,b) via Lentz continued fraction.
+
+    Implementation follows Numerical Recipes §6.4 (betacf).
+    """
+    if x <= 0.0:
+        return 0.0
+    if x >= 1.0:
+        return 1.0
+    # Use symmetry: I_x(a,b) = 1 - I_{1-x}(b,a) when x > (a+1)/(a+b+2)
+    if x > (a + 1.0) / (a + b + 2.0):
+        return 1.0 - _reg_inc_beta(1.0 - x, b, a, max_iter)
+
+    ln_beta = math.lgamma(a) + math.lgamma(b) - math.lgamma(a + b)
+    front = math.exp(a * math.log(x) + b * math.log(1.0 - x) - ln_beta) / a
+
+    TINY = 1e-30
+    c = 1.0
+    d = 1.0 - (a + b) * x / (a + 1.0)
+    if abs(d) < TINY:
+        d = TINY
+    d = 1.0 / d
+    h = d
+
+    for m in range(1, max_iter + 1):
+        m2 = 2 * m
+        # Even step
+        aa = m * (b - m) * x / ((a + m2 - 1.0) * (a + m2))
+        d = 1.0 + aa * d
+        if abs(d) < TINY:
+            d = TINY
+        c = 1.0 + aa / c
+        if abs(c) < TINY:
+            c = TINY
+        d = 1.0 / d
+        h *= d * c
+
+        # Odd step
+        aa = -(a + m) * (a + b + m) * x / ((a + m2) * (a + m2 + 1.0))
+        d = 1.0 + aa * d
+        if abs(d) < TINY:
+            d = TINY
+        c = 1.0 + aa / c
+        if abs(c) < TINY:
+            c = TINY
+        d = 1.0 / d
+        delta = d * c
+        h *= delta
+
+        if abs(delta - 1.0) < 1e-12:
+            break
+
+    return front * h
+
+
+def _student_t_cdf(t: float, df: float = 4.0) -> float:
+    """CDF of Student-t distribution via regularized incomplete beta."""
+    if df <= 0:
+        return _normal_cdf(t)
+    x = df / (df + t * t)
+    ib = _reg_inc_beta(x, df / 2.0, 0.5)
+    if t >= 0:
+        return 1.0 - 0.5 * ib
+    else:
+        return 0.5 * ib
+
+
+def predict_btc_direction(
+    factors: dict,
+    window_klines: list[dict],
+    observed_min: float,
+    session_total_min: float = 15.0,
+) -> dict:
+    """Predict P(P_end > P_0) using displacement / volatility CDF model.
+
+    Args:
+        factors:          computed P0 factor dict
+        window_klines:    klines within [start, W2) — used to estimate σ₁
+        observed_min:     minutes already observed (W2 offset from start)
+        session_total_min: assumed total session length in minutes
 
     Returns dict with:
-      prob_up        – probability of price rising (0~1)
-      prob_down      – 1 - prob_up
-      raw_score      – pre-sigmoid composite score
-      confidence     – "high" | "medium" | "low"
-      signal         – "bullish" | "bearish" | "neutral"
-      components     – per-factor weighted contribution breakdown
-      formula        – human-readable formula string
+      prob_up, prob_down, raw_score (z_adj), confidence, signal,
+      components (breakdown), formula (human-readable)
     """
-    f1 = factors.get("f1_momentum", 0.0)
+    remaining_min = max(session_total_min - observed_min, 1.0)
+
+    # ── Estimate 1-min volatility σ₁ from observed klines ────────────────
+    if len(window_klines) >= 2:
+        log_returns: list[float] = []
+        for i in range(1, len(window_klines)):
+            prev_o = window_klines[i - 1]["open"]
+            cur_o = window_klines[i]["open"]
+            if prev_o > 0 and cur_o > 0:
+                log_returns.append(math.log(cur_o / prev_o))
+        if log_returns:
+            mean_r = sum(log_returns) / len(log_returns)
+            var_r = sum((r - mean_r) ** 2 for r in log_returns) / len(log_returns)
+            sigma_1 = math.sqrt(var_r) if var_r > 0 else 1e-8
+        else:
+            sigma_1 = 1e-8
+    else:
+        sigma_1 = 1e-8
+
+    sigma_remain = sigma_1 * math.sqrt(remaining_min)
+
+    # ── Displacement Δ_W2 = (P_W2 - P_0) / P_0 ─────────────────────────
+    delta_w2 = factors.get("f1_momentum", 0.0)  # = a1 + a2 ≈ (P_W2 - P_0)/P_0
+
+    # ── Factor-adjusted α ────────────────────────────────────────────────
     f2_acc = factors.get("f2_acceleration", 0.0)
     f2_con = factors.get("f2_consistent", 0)
-    f3_vn = factors.get("f3_vol_norm", 0.0)
-    f3_atr = factors.get("f3_atr_ratio", 0.0)
-    f4_vd = factors.get("f4_volume_dir", 0.0)
-    f5_br = factors.get("f5_body_ratio", 0.0)
+    f4_vz = factors.get("f4_volume_z", 0.0)     # VWAP deviation
+    f4_vr = factors.get("f4_volume_dir", 1.0)    # volume ratio w2/w1
     f5_wi = factors.get("f5_wick_imbalance", 0.0)
+    f5_br = factors.get("f5_body_ratio", 0.0)
+    f3_atr = factors.get("f3_atr_ratio", 0.0)
 
-    w = _PRED_W
-
-    # Normalise inputs to bounded ranges
+    b = _ADJ_BETA
     atr_safe = max(f3_atr, 1e-8)
-    x1 = _sign(f1) * min(abs(f1) / atr_safe, 3.0)  # (-3, +3)
-    x2 = math.tanh(f2_acc / atr_safe)                # (-1, +1)
-    x3 = float(f2_con)                               # 0 or 1
-    x4 = math.tanh(f3_vn)                            # (-1, +1)
-    x5 = math.tanh(f4_vd)                            # (-1, +1)
-    x6 = f5_br - 0.5                                 # (-0.5, +0.5)
-    x7 = -f5_wi                                      # flip sign
 
-    # Weighted sum
-    c1 = w["w1"] * x1
-    c2 = w["w2"] * x2
-    c3 = w["w3"] * x3
-    c4 = w["w4"] * x4
-    c5 = w["w5"] * x5
-    c6 = w["w6"] * x6
-    c7 = w["w7"] * x7
-    raw_score = c1 + c2 + c3 + c4 + c5 + c6 + c7 + w["bias"]
+    # Normalise adjustments: positive = supports trend continuation
+    accel_norm = math.tanh(f2_acc / atr_safe) * _sign(delta_w2)
+    # Streak: tanh(streak/3) maps 0→0, 3→0.76, 5→0.93
+    consist_val = math.tanh(float(f2_con) / 3.0)
+    # VWAP deviation: price above VWAP in trend direction
+    vwap_norm = math.tanh(f4_vz / atr_safe) * _sign(delta_w2)
+    # Volume ratio: log(w2/w1) > 0 means increasing volume in trend window
+    vol_ratio_norm = math.tanh(math.log(max(f4_vr, 0.01))) * _sign(delta_w2)
+    vol_couple_norm = (vwap_norm + vol_ratio_norm) / 2.0
+    wick_press_norm = f5_wi * _sign(delta_w2)
+    body_norm = (f5_br - 0.5) * _sign(delta_w2)
 
-    # Sigmoid
-    prob_up = 1.0 / (1.0 + math.exp(-_clamp(raw_score, -10, 10)))
+    # α < 1 → trend sticky (lower effective σ → higher |z|)
+    # α > 1 → reversal risk higher
+    alpha_raw = (
+        1.0
+        - b["accel"] * accel_norm
+        - b["consistent"] * consist_val
+        - b["vol_couple"] * vol_couple_norm
+        + b["wick_press"] * wick_press_norm
+        - b["body_ratio"] * body_norm
+    )
+    alpha = max(0.5, min(1.5, alpha_raw))
+
+    # ── z-score and CDF ──────────────────────────────────────────────────
+    sigma_adj = sigma_remain * alpha
+    z_adj = delta_w2 / sigma_adj if sigma_adj > 1e-12 else 0.0
+    z_adj = max(-6.0, min(6.0, z_adj))
+
+    prob_up = _student_t_cdf(z_adj, _STUDENT_T_DF)
     prob_down = 1.0 - prob_up
 
-    # Confidence & signal
+    # ── Confidence & signal ──────────────────────────────────────────────
     deviation = abs(prob_up - 0.5)
     if deviation >= 0.25:
         confidence = "high"
@@ -496,29 +619,35 @@ def predict_btc_direction(factors: dict) -> dict:
     else:
         signal = "neutral"
 
+    # ── Component breakdown ──────────────────────────────────────────────
+    z_base = delta_w2 / sigma_remain if sigma_remain > 1e-12 else 0.0
     components = {
-        "momentum_dir":      round(c1, 6),
-        "acceleration":      round(c2, 6),
-        "consistency_bonus": round(c3, 6),
-        "vol_norm":          round(c4, 6),
-        "volume_dir":        round(c5, 6),
-        "body_decisive":     round(c6, 6),
-        "wick_pressure":     round(c7, 6),
-        "bias":              w["bias"],
+        "delta_w2":       round(delta_w2, 8),
+        "sigma_1":        round(sigma_1, 8),
+        "sigma_remain":   round(sigma_remain, 8),
+        "alpha":          round(alpha, 4),
+        "z_base":         round(z_base, 4),
+        "z_adjusted":     round(z_adj, 4),
+        "adj_accel":      round(-b["accel"] * accel_norm, 4),
+        "adj_consistent": round(-b["consistent"] * consist_val, 4),
+        "adj_vol":        round(-b["vol_couple"] * vol_couple_norm, 4),
+        "adj_wick":       round(b["wick_press"] * wick_press_norm, 4),
+        "adj_body":       round(-b["body_ratio"] * body_norm, 4),
     }
 
     formula = (
-        f"S = {w['w1']}·f1_dir({x1:+.3f}) + {w['w2']}·f2_acc({x2:+.3f}) "
-        f"+ {w['w3']}·f2_con({x3:.0f}) + {w['w4']}·f3_vnorm({x4:+.3f}) "
-        f"+ {w['w5']}·f4_vdir({x5:+.3f}) + {w['w6']}·f5_body({x6:+.3f}) "
-        f"+ {w['w7']}·f5_wick({x7:+.3f}) + bias({w['bias']:+.2f}) "
-        f"= {raw_score:+.4f} → P(up) = σ({raw_score:+.4f}) = {prob_up:.4f}"
+        f"Δ_W2 = {delta_w2:+.6f}  |  σ₁ = {sigma_1:.6f}  |  "
+        f"σ_remain = σ₁·√{remaining_min:.0f} = {sigma_remain:.6f}\n"
+        f"z_base = Δ_W2/σ_remain = {z_base:+.4f}  |  "
+        f"α = {alpha:.4f} (因子调节)\n"
+        f"z_adj = z_base/α = {z_adj:+.4f}  →  "
+        f"P(P_end > P_0) = F_t({z_adj:+.4f}; df={_STUDENT_T_DF:.0f}) = {prob_up:.4f}"
     )
 
     return {
         "prob_up": round(prob_up, 6),
         "prob_down": round(prob_down, 6),
-        "raw_score": round(raw_score, 6),
+        "raw_score": round(z_adj, 6),
         "confidence": confidence,
         "signal": signal,
         "components": components,
@@ -543,5 +672,49 @@ def _sign(x: float) -> float:
     return 1.0 if x > 0 else (-1.0 if x < 0 else 0.0)
 
 
-def _clamp(x: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, x))
+def _count_streak(klines: list[dict]) -> int:
+    """Count consecutive same-direction (close vs open) candles from the end."""
+    if not klines:
+        return 0
+    streak = 0
+    last_dir = 1 if klines[-1]["close"] >= klines[-1]["open"] else -1
+    for k in reversed(klines):
+        d = 1 if k["close"] >= k["open"] else -1
+        if d == last_dir:
+            streak += 1
+        else:
+            break
+    return streak
+
+
+# ── High-density analysis (1s klines, on-demand) ─────────────────────────────
+
+async def analyze_btc_hd(
+    start_ts: str,
+    end_ts: str,
+    window_1_min: int = 5,
+    window_2_min: int = 10,
+    min_momentum: float = 0.001,
+) -> dict:
+    """High-density BTC factor analysis using 1s klines from Binance.
+
+    Called on-demand from the detail page — provides 60x more data points
+    than the default 1m klines used during backtest, giving statistically
+    robust factor estimates.
+    """
+    klines = await fetch_btc_klines(start_ts, end_ts, interval="1s")
+    if not klines:
+        return {"error": "no_klines", "kline_count": 0, "trend": None}
+
+    # Scale lookbacks for 1s data: 300 bars = 5 min of history
+    hd_lookback = 300
+    trend = compute_btc_trend(
+        klines, start_ts, window_1_min, window_2_min, min_momentum,
+        atr_lookback=hd_lookback, vol_lookback=hd_lookback,
+    )
+
+    return {
+        "interval": "1s",
+        "kline_count": len(klines),
+        "trend": trend,
+    }

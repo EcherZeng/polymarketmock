@@ -43,10 +43,10 @@ const FACTOR_META: {
   },
   {
     key: "f2_consistent",
-    label: "方向一致性",
-    desc: "a₁·a₂>0 时为1（同向），否则为0（反转）",
-    fmt: (v) => (v === 1 ? "✓ 同向" : "✗ 反向"),
-    color: (v) => (v === 1 ? "text-emerald-600" : "text-red-500"),
+    label: "方向连续 f₂ˢ",
+    desc: "窗口末尾连续同方向K线数 — 越大趋势越一致",
+    fmt: (v) => `${v} 根`,
+    color: (v) => (v >= 3 ? "text-emerald-600" : v >= 1 ? "text-amber-500" : "text-muted-foreground"),
   },
   {
     key: "f3_vol_norm",
@@ -64,29 +64,29 @@ const FACTOR_META: {
   },
   {
     key: "f4_volume_z",
-    label: "量能冲击 f₄",
-    desc: "成交量Z分数 — 相对滚动均值的偏离程度",
-    fmt: (v) => `${v >= 0 ? "+" : ""}${v.toFixed(3)}σ`,
-    color: (v) => (v > 1 ? "text-emerald-600" : v < -1 ? "text-red-500" : "text-muted-foreground"),
+    label: "VWAP偏离 f₄",
+    desc: "(收盘−VWAP)÷VWAP — >0 价格高于量价中枢(看涨), <0 低于(看跌)",
+    fmt: (v) => `${v >= 0 ? "+" : ""}${(v * 10000).toFixed(2)}bp`,
+    color: (v) => (v > 0.0002 ? "text-emerald-600" : v < -0.0002 ? "text-red-500" : "text-muted-foreground"),
   },
   {
     key: "f4_volume_dir",
-    label: "方向量能 f₄ᵈ",
-    desc: "量能×K线方向(收>开为+) — 量价配合度",
-    fmt: (v) => `${v >= 0 ? "+" : ""}${v.toFixed(3)}`,
-    color: (v) => (v > 0.5 ? "text-emerald-600" : v < -0.5 ? "text-red-500" : "text-muted-foreground"),
+    label: "量比 f₄ᵛ",
+    desc: "w2总量÷w1总量 — >1 放量，<1 缩量",
+    fmt: (v) => `${v.toFixed(3)}x`,
+    color: (v) => (v > 1.2 ? "text-emerald-600" : v < 0.8 ? "text-red-500" : "text-muted-foreground"),
   },
   {
     key: "f5_body_ratio",
     label: "实体比 f₅",
-    desc: "|收−开|÷(高−低) — 越接近1越坚决",
+    desc: "窗口内K线|收−开|÷(高−低)均值 — 越接近1越坚决",
     fmt: (v) => `${(v * 100).toFixed(1)}%`,
     color: (v) => (v > 0.6 ? "text-emerald-600" : v < 0.3 ? "text-amber-500" : "text-muted-foreground"),
   },
   {
     key: "f5_wick_imbalance",
     label: "影线失衡 f₅ʷ",
-    desc: "(上影−下影)÷振幅 — >0 上方压力大，<0 下方支撑强",
+    desc: "窗口内(上影−下影)÷振幅均值 — >0 上方压力大，<0 下方支撑强",
     fmt: (v) => `${v >= 0 ? "+" : ""}${v.toFixed(3)}`,
     color: (v) => (v > 0.3 ? "text-red-500" : v < -0.3 ? "text-emerald-600" : "text-muted-foreground"),
   },
@@ -94,14 +94,17 @@ const FACTOR_META: {
 
 /** Chinese labels for prediction component breakdown */
 const COMPONENT_LABELS: Record<string, string> = {
-  momentum_dir: "动量方向",
-  acceleration: "加速度",
-  consistency_bonus: "一致性",
-  vol_norm: "波动归一",
-  volume_dir: "量价耦合",
-  body_decisive: "实体坚决度",
-  wick_pressure: "影线压力",
-  bias: "偏置项",
+  delta_w2: "位移 Δ_W2",
+  sigma_1: "1分钟波动率 σ₁",
+  sigma_remain: "剩余σ",
+  alpha: "因子调节系数 α",
+  z_base: "基础z分数",
+  z_adjusted: "调节后z分数",
+  adj_accel: "加速度调节",
+  adj_consistent: "连续streak调节",
+  adj_vol: "VWAP量价调节",
+  adj_wick: "影线压力调节",
+  adj_body: "实体比调节",
 }
 
 export default function BtcFactorsChart({ factors }: BtcFactorsChartProps) {
@@ -128,14 +131,14 @@ export default function BtcFactorsChart({ factors }: BtcFactorsChartProps) {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-6">
             {/* Left: Probability gauge */}
             <div className="flex flex-col items-center gap-1 sm:min-w-[160px]">
-              <div className="text-xs font-medium text-muted-foreground">综合预测</div>
+              <div className="text-xs font-medium text-muted-foreground">场次结束看涨概率</div>
               <div className={`text-3xl font-black ${
                 pred.signal === "bullish" ? "text-emerald-600" : pred.signal === "bearish" ? "text-red-500" : "text-muted-foreground"
               }`}>
                 {(pred.prob_up * 100).toFixed(1)}%
               </div>
               <div className="text-xs text-muted-foreground">
-                看涨概率
+                P(P_end &gt; P_0)
               </div>
               {/* Mini probability bar */}
               <div className="mt-1 flex h-3 w-36 overflow-hidden rounded-full bg-muted">
@@ -182,21 +185,24 @@ export default function BtcFactorsChart({ factors }: BtcFactorsChartProps) {
                   置信度: {pred.confidence === "high" ? "高" : pred.confidence === "medium" ? "中" : "低"}
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  原始分 = {pred.raw_score >= 0 ? "+" : ""}{pred.raw_score.toFixed(4)}
+                  z = {pred.raw_score >= 0 ? "+" : ""}{pred.raw_score.toFixed(4)}σ
                 </span>
               </div>
 
               {/* Component breakdown */}
               {pred.components && Object.keys(pred.components).length > 0 && (
                 <div className="flex flex-wrap gap-x-3 gap-y-1">
-                  {Object.entries(pred.components).map(([name, val]) => (
-                    <span key={name} className="text-[10px]">
-                      <span className="text-muted-foreground">{COMPONENT_LABELS[name] ?? name}: </span>
-                      <span className={val > 0 ? "text-emerald-600" : val < 0 ? "text-red-500" : "text-muted-foreground"}>
-                        {val >= 0 ? "+" : ""}{val.toFixed(4)}
+                  {Object.entries(pred.components).map(([name, val]) => {
+                    const isAdjustment = name.startsWith("adj_")
+                    return (
+                      <span key={name} className="text-[10px]">
+                        <span className="text-muted-foreground">{COMPONENT_LABELS[name] ?? name}: </span>
+                        <span className={isAdjustment ? (val < 0 ? "text-emerald-600" : val > 0 ? "text-red-500" : "text-muted-foreground") : "text-foreground"}>
+                          {typeof val === "number" ? (val >= 0 && isAdjustment ? "+" : "") : ""}{typeof val === "number" ? val.toFixed(6) : val}
+                        </span>
                       </span>
-                    </span>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
             </div>
@@ -211,9 +217,12 @@ export default function BtcFactorsChart({ factors }: BtcFactorsChartProps) {
           </div>
 
           <div className="mt-2 text-[10px] leading-tight text-muted-foreground/60">
-            P(up) = σ(S) = 1/(1+e⁻ˢ) — 基于第二窗口结束前所有K线因子的加权Sigmoid综合评分。
-            权重先验: 动量0.35 · 加速度0.15 · 一致性0.20 · 波动归一0.15 · 量价0.15 · 实体比0.05 · 影线0.05 · 偏置-0.05。
-            |P-0.5|≥0.25 为高置信, ≥0.10 中置信, &lt;0.10 低置信（硬币区间）。
+            P(P_end &gt; P_0) = F_t(z_adj; df=4) — 基于位移÷波动率的Student-t(df=4)厚尾 CDF模型。
+            到第二窗口结束时，BTC已相对P₀位移了Δ_W2，要翻转需在剩余时间内回撤整个位移。
+            z_base = Δ_W2 / (σ₁·√剩余分钟) 衡量位移相对剩余波动空间的大小。
+            Student-t(4)比正态分布有更厚的尾部，更好地反映BTC实际回报分布。
+            因子调节α：连续 streak(β=0.15)·加速度(0.10)·VWAP量价(0.10)缩小σ（趋势更粘），影线压力(0.10)放大σ（反转风险）。
+            |P-0.5|≥0.25 为高置信, ≥0.10 中置信, &lt;0.10 低置信。
           </div>
         </div>
       )}
@@ -303,12 +312,12 @@ export default function BtcFactorsChart({ factors }: BtcFactorsChartProps) {
             </div>
           </div>
 
-          {/* ── Chart 2: Volume z-score bar chart ────────────────── */}
+          {/* ── Chart 2: VWAP deviation chart ─────────────────── */}
           <div>
             <h3 className="mb-1 text-xs font-medium text-muted-foreground">
-              量能冲击 Z 分数
+              VWAP 偏离
               <span className="ml-2 text-[10px] text-muted-foreground/60">
-                绿色=放量(Z&gt;0), 红色=缩量(Z&lt;0) — |Z|&gt;1σ 标记为异常量能
+                绿色=价格高于VWAP(看涨), 红色=低于VWAP(看跌) — 偷离量价中枢越远趋势越强
               </span>
             </h3>
             <div className="h-40">
@@ -317,23 +326,21 @@ export default function BtcFactorsChart({ factors }: BtcFactorsChartProps) {
                   <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
                   <XAxis dataKey="time" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
                   <YAxis
-                    tickFormatter={(v: number) => `${v.toFixed(1)}σ`}
+                    tickFormatter={(v: number) => `${(v * 10000).toFixed(1)}bp`}
                     tick={{ fontSize: 10 }}
-                    width={45}
+                    width={55}
                   />
                   <Tooltip
                     labelFormatter={(_v, payload) => {
                       const item = payload?.[0]?.payload
                       return item?.fullTime ?? _v
                     }}
-                    formatter={(value) => [`${Number(value).toFixed(3)}σ`, "量能Z分数"]}
+                    formatter={(value) => [`${(Number(value) * 10000).toFixed(2)}bp`, "VWAP偏离"]}
                   />
                   <ReferenceLine y={0} stroke="#888" strokeDasharray="3 3" />
-                  <ReferenceLine y={1} stroke="hsl(142, 71%, 45%)" strokeDasharray="4 4" opacity={0.5} label={{ value: "+1σ", position: "right", fontSize: 9 }} />
-                  <ReferenceLine y={-1} stroke="hsl(0, 84%, 60%)" strokeDasharray="4 4" opacity={0.5} label={{ value: "-1σ", position: "right", fontSize: 9 }} />
                   <Bar
                     dataKey="vol_z"
-                    name="量能Z分数"
+                    name="VWAP偏离"
                     fill="hsl(217, 91%, 60%)"
                     opacity={0.8}
                     // Color per bar handled via cell render
@@ -349,7 +356,7 @@ export default function BtcFactorsChart({ factors }: BtcFactorsChartProps) {
             <h3 className="mb-1 text-xs font-medium text-muted-foreground">
               K线结构质量
               <span className="ml-2 text-[10px] text-muted-foreground/60">
-                紫线=实体比(越高越坚决), 橙线=影线失衡(&gt;0上方压力,&lt;0下方支撑)
+                紫线=实体比(越高越坚决,窗口均值), 橙线=影线失衡(&gt;0上方压力,&lt;0下方支撑,窗口均值)
               </span>
             </h3>
             <div className="h-40">

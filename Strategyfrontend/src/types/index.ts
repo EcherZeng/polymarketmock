@@ -262,6 +262,14 @@ export interface BtcKlineResponse {
   klines: BtcKline[]
 }
 
+export interface BtcHdAnalysis {
+  session_id: string
+  interval: string
+  kline_count: number
+  error?: string | null
+  trend?: BtcTrendInfo | null
+}
+
 export interface BatchTask {
   batch_id: string
   strategy: string

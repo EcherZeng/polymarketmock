@@ -14,6 +14,7 @@ import type {
   BatchTask,
   BatchTaskDetail,
   BtcKlineResponse,
+  BtcHdAnalysis,
   Portfolio,
   PortfolioItem,
 } from "@/types"
@@ -156,6 +157,11 @@ export async function fetchFirstTradeSummary(
 
 export async function fetchBtcKlines(sessionId: string): Promise<BtcKlineResponse> {
   const { data } = await api.get<BtcKlineResponse>(`/results/${sessionId}/btc-klines`)
+  return data
+}
+
+export async function analyzeBtcHd(sessionId: string): Promise<BtcHdAnalysis> {
+  const { data } = await api.post<BtcHdAnalysis>(`/results/${sessionId}/btc-analyze`)
   return data
 }
 

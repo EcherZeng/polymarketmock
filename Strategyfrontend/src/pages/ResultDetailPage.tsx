@@ -1,8 +1,8 @@
 import { useParams, Link } from "react-router-dom"
-import { useQuery } from "@tanstack/react-query"
-import { fetchResult, fetchBtcKlines } from "@/api/client"
-import type { BacktestResult, BtcKlineResponse } from "@/types"
-import { useMemo } from "react"
+import { useQuery, useMutation } from "@tanstack/react-query"
+import { fetchResult, fetchBtcKlines, analyzeBtcHd } from "@/api/client"
+import type { BacktestResult, BtcKlineResponse, BtcHdAnalysis } from "@/types"
+import { useMemo, useState } from "react"
 import { fmtFullCst } from "@/lib/utils"
 import MetricsPanel from "@/components/MetricsPanel"
 import EquityCurveChart from "@/components/EquityCurveChart"
@@ -35,6 +35,15 @@ export default function ResultDetailPage() {
     const lastClose = btcKlines.klines[btcKlines.klines.length - 1].close
     return lastClose >= firstOpen
   }, [btcKlines])
+
+  const [hdResult, setHdResult] = useState<BtcHdAnalysis | null>(null)
+  const hdMutation = useMutation({
+    mutationFn: () => analyzeBtcHd(sessionId!),
+    onSuccess: (data) => setHdResult(data),
+  })
+
+  const [p0Expanded, setP0Expanded] = useState(false)
+  const [hdExpanded, setHdExpanded] = useState(true)
 
   if (isLoading) {
     return <div className="py-12 text-center text-muted-foreground">加载中...</div>
@@ -200,13 +209,84 @@ export default function ResultDetailPage() {
       {/* BTC P0 Factor Analysis */}
       {result.btc_trend_info?.factors && (
         <div className="rounded-lg border p-4">
-          <h2 className="mb-3 text-sm font-medium text-muted-foreground">
-            BTC P0 因子分析
-            <span className="ml-2 text-[10px] text-muted-foreground/60">
-              基于1分钟K线的5大右侧入场信号因子 — 动量·加速度·波动归一化·量能冲击·K线结构
+          <div className="flex items-center justify-between">
+            <button
+              className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+              onClick={() => setP0Expanded((v) => !v)}
+            >
+              <span className={`inline-block transition-transform ${p0Expanded ? "rotate-90" : ""}`}>▶</span>
+              BTC P0 因子分析
+              <span className="ml-1 text-[10px] text-muted-foreground/60">
+                基于1分钟K线 — 动量·连续方向·波动归一化·VWAP偏离·K线结构
+              </span>
+            </button>
+            <button
+              className="rounded-md border px-3 py-1 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-50"
+              disabled={hdMutation.isPending}
+              onClick={() => hdMutation.mutate()}
+            >
+              {hdMutation.isPending ? "分析中..." : hdResult ? "重新分析" : "BTC 深度分析 (1s)"}
+            </button>
+          </div>
+          {p0Expanded && (
+            <div className="mt-3">
+              <BtcFactorsChart factors={result.btc_trend_info.factors} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* BTC HD Analysis Result */}
+      {hdResult && hdResult.trend?.factors && (
+        <div className="rounded-lg border-2 border-blue-200 dark:border-blue-800 p-4">
+          <button
+            className="flex items-center gap-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors"
+            onClick={() => setHdExpanded((v) => !v)}
+          >
+            <span className={`inline-block transition-transform ${hdExpanded ? "rotate-90" : ""}`}>▶</span>
+            BTC 深度因子分析（1秒K线）
+            <span className="ml-1 text-[10px] text-muted-foreground">
+              {hdResult.kline_count} 条数据点 · 统计显著性远高于1分钟数据
             </span>
-          </h2>
-          <BtcFactorsChart factors={result.btc_trend_info.factors} />
+          </button>
+          {hdExpanded && (
+            <div className="mt-3">
+              {hdResult.trend && (
+                <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">HD 窗口1涨跌幅 (a1)</div>
+                    <div className={`mt-1 text-sm font-bold ${hdResult.trend.a1 >= 0 ? "text-emerald-600" : "text-red-500"}`}>
+                      {hdResult.trend.a1 >= 0 ? "+" : ""}{(hdResult.trend.a1 * 100).toFixed(4)}%
+                    </div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">HD 窗口2涨跌幅 (a2)</div>
+                    <div className={`mt-1 text-sm font-bold ${hdResult.trend.a2 >= 0 ? "text-emerald-600" : "text-red-500"}`}>
+                      {hdResult.trend.a2 >= 0 ? "+" : ""}{(hdResult.trend.a2 * 100).toFixed(4)}%
+                    </div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">HD 合计动量</div>
+                    <div className="mt-1 text-sm font-bold">
+                      {(Math.abs(hdResult.trend.a1 + hdResult.trend.a2) * 100).toFixed(4)}%
+                    </div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">HD 趋势判定</div>
+                    <div className={`mt-1 text-sm font-bold ${hdResult.trend.passed ? "text-emerald-600" : "text-red-500"}`}>
+                      {hdResult.trend.passed ? "✓ 通过" : "✗ 未通过"}
+                    </div>
+                  </div>
+                </div>
+              )}
+              <BtcFactorsChart factors={hdResult.trend.factors} />
+            </div>
+          )}
+        </div>
+      )}
+      {hdMutation.isError && (
+        <div className="rounded-lg border border-red-200 p-3 text-sm text-red-500">
+          深度分析失败: {hdMutation.error instanceof Error ? hdMutation.error.message : "未知错误"}
         </div>
       )}
 

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 import api.state as state
 from api.result_store import sanitize_floats
-from core.btc_data import fetch_btc_klines
+from core.btc_data import analyze_btc_hd, fetch_btc_klines
 from core.types import parse_slug_window
 
 logger = logging.getLogger(__name__)
@@ -457,3 +457,38 @@ async def get_btc_klines(session_id: str):
         "end_time": end_ts,
         "klines": klines,
     }
+
+
+@router.post("/results/{session_id}/btc-analyze")
+async def btc_hd_analyze(session_id: str):
+    """On-demand high-density BTC factor analysis using 1s klines."""
+    store = _get_store()
+    result = store.get(session_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Result not found")
+
+    slug_start = result.get("slug_start", "")
+    slug_end = result.get("slug_end", "")
+    if not slug_start or not slug_end:
+        slug_window = parse_slug_window(result.get("slug", ""))
+        if slug_window:
+            slug_start, slug_end = slug_window
+
+    if not slug_start or not slug_end:
+        raise HTTPException(status_code=400, detail="Cannot determine session time range")
+
+    config = result.get("config", {})
+    w1 = config.get("btc_trend_window_1", 5)
+    w2 = config.get("btc_trend_window_2", 10)
+    min_mom = config.get("btc_min_momentum", 0.001)
+
+    try:
+        analysis = await analyze_btc_hd(slug_start, slug_end, w1, w2, min_mom)
+    except Exception as e:
+        logger.warning("HD BTC analysis failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"Binance API error: {e}")
+
+    return sanitize_floats({
+        "session_id": session_id,
+        **analysis,
+    })
