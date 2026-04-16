@@ -134,11 +134,15 @@ def compute_btc_trend(
 
       P0  = open at session start
       Pw1 = open at start + window_1_min
-      Pw2 = open at start + window_1_min + window_2_min
-
-    Computes:
-      a1 = (Pw1 - P0) / P0
-      a2 = (Pw2 - Pw1) / Pw1
+         Pw2 = open at start + window_2_min          (absolute offset)
+ 
+         Both window offsets are measured from session start, so with
+         window_1_min=5 and window_2_min=10 the two windows are [0→5 min]
+         and [5→10 min] respectively.
+ 
+         Computes:
+             a1 = (Pw1 - P0)  / P0   — momentum over first window
+             a2 = (Pw2 - Pw1) / Pw1  — momentum over second window
 
     Trend passes when: abs(a1 + a2) > min_momentum AND a1 * a2 > 0
     (same direction in both windows with sufficient magnitude)
@@ -150,7 +154,7 @@ def compute_btc_trend(
 
     start_ms = _iso_to_ms(start_ts)
     target_w1_ms = start_ms + window_1_min * 60 * 1000
-    target_w2_ms = start_ms + (window_1_min + window_2_min) * 60 * 1000
+    target_w2_ms = start_ms + window_2_min * 60 * 1000
 
     def _closest_open(target_ms: int) -> float | None:
         """Find kline whose open_time is closest to target_ms and return its open price."""
