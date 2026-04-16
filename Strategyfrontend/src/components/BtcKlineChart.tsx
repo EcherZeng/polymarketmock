@@ -169,14 +169,14 @@ export default function BtcKlineChart({ klines }: BtcKlineChartProps) {
                 activeDot={false}
                 legendType="none"
               />
-              {/* Close price line */}
+              {/* Open price line — X axis is open_time so Y must be the open price at that instant */}
               <Line
                 type="monotone"
-                dataKey="close"
+                dataKey="open"
                 stroke="hsl(217, 91%, 60%)"
                 strokeWidth={1.5}
                 dot={false}
-                name="BTC 收盘价"
+                name="BTC 价格"
               />
               <Legend />
             </ComposedChart>
