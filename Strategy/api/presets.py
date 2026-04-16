@@ -51,3 +51,23 @@ async def delete_preset(name: str):
         raise HTTPException(status_code=400, detail=f"Cannot delete builtin preset '{name}'")
     registry.delete_preset(name)
     return {"deleted": name}
+
+
+class RenameBody(BaseModel):
+    new_name: str = Field(..., min_length=1, max_length=100)
+
+
+@router.patch("/{name}/rename")
+async def rename_preset(name: str, body: RenameBody):
+    """Rename a custom preset. Builtin presets cannot be renamed."""
+    preset = registry.get_preset(name)
+    if preset is None:
+        raise HTTPException(status_code=404, detail=f"Preset '{name}' not found")
+    if preset.get("builtin", False):
+        raise HTTPException(status_code=400, detail=f"Cannot rename builtin preset '{name}'")
+    if registry.get_preset(body.new_name) is not None:
+        raise HTTPException(status_code=409, detail=f"Preset '{body.new_name}' already exists")
+    ok = registry.rename_preset(name, body.new_name)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Rename failed")
+    return {"old_name": name, "new_name": body.new_name}

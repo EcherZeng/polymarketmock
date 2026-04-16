@@ -228,6 +228,27 @@ class StrategyRegistry:
         logger.info("Deleted preset: %s", name)
         return True
 
+    def rename_preset(self, old_name: str, new_name: str) -> bool:
+        """Rename a preset. Returns False if old not found, is builtin, or new name conflicts."""
+        strategies = self._presets.get("strategies", {})
+        preset = strategies.get(old_name)
+        if preset is None:
+            return False
+        if preset.get("builtin", False):
+            return False
+        if new_name in strategies:
+            return False
+        # Move in merged presets
+        strategies[new_name] = strategies.pop(old_name)
+        self._configs[new_name] = self._configs.pop(old_name)
+        # Move in user overlay
+        user_strategies = self._user_overrides.get("strategies", {})
+        if old_name in user_strategies:
+            user_strategies[new_name] = user_strategies.pop(old_name)
+        _save_user_file(self._user_overrides)
+        logger.info("Renamed preset: %s -> %s", old_name, new_name)
+        return True
+
     def update_unified_rules(self, rules: dict) -> None:
         """Update the unified rules and rebuild all merged configs."""
         self._presets["unified_rules"] = rules

@@ -7,6 +7,7 @@ import {
   fetchArchives,
   savePreset,
   deletePreset,
+  renamePreset,
   runBacktest,
   submitBatch,
   trackArchive,
@@ -73,6 +74,8 @@ export default function StrategyPage() {
   const [cumulativeCapital, setCumulativeCapital] = useState(false)
   const [configActiveParams, setConfigActiveParams] = useState<Set<string>>(new Set())
   const [newStrategyActiveParams, setNewStrategyActiveParams] = useState<Set<string>>(new Set())
+  const [renameEditing, setRenameEditing] = useState(false)
+  const [renameValue, setRenameValue] = useState("")
 
   const { data: strategies = [], isLoading: loadingStrategies } = useQuery<StrategyInfo[]>({
     queryKey: ["strategies"],
@@ -146,6 +149,16 @@ export default function StrategyPage() {
     mutationFn: (name: string) => deletePreset(name),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["strategies"] })
+    },
+  })
+
+  const renamePresetMutation = useMutation({
+    mutationFn: (args: { oldName: string; newName: string }) =>
+      renamePreset(args.oldName, args.newName),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["strategies"] })
+      setSelectedStrategy(variables.newName)
+      setRenameEditing(false)
     },
   })
 
@@ -860,10 +873,80 @@ export default function StrategyPage() {
       </div>
 
       {/* Strategy config dialog */}
-      <Dialog open={configDialogOpen} onOpenChange={setConfigDialogOpen}>
+      <Dialog open={configDialogOpen} onOpenChange={(open) => {
+        setConfigDialogOpen(open)
+        if (!open) setRenameEditing(false)
+      }}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-5xl">
           <DialogHeader>
-            <DialogTitle>策略参数 — {activeStrategy?.name}</DialogTitle>
+            <DialogTitle>
+              <div className="flex items-center gap-2">
+                <span>策略参数 —</span>
+                {renameEditing ? (
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          const trimmed = renameValue.trim()
+                          if (trimmed && trimmed !== activeStrategy?.name) {
+                            renamePresetMutation.mutate({ oldName: activeStrategy!.name, newName: trimmed })
+                          } else {
+                            setRenameEditing(false)
+                          }
+                        }
+                        if (e.key === "Escape") setRenameEditing(false)
+                      }}
+                      autoFocus
+                      className="h-7 rounded-md border bg-background px-2 text-sm font-medium"
+                    />
+                    <button
+                      onClick={() => {
+                        const trimmed = renameValue.trim()
+                        if (trimmed && trimmed !== activeStrategy?.name) {
+                          renamePresetMutation.mutate({ oldName: activeStrategy!.name, newName: trimmed })
+                        } else {
+                          setRenameEditing(false)
+                        }
+                      }}
+                      disabled={renamePresetMutation.isPending}
+                      className="rounded-md bg-primary px-2 py-0.5 text-xs text-primary-foreground hover:bg-primary/90"
+                    >
+                      {renamePresetMutation.isPending ? "..." : "确定"}
+                    </button>
+                    <button
+                      onClick={() => setRenameEditing(false)}
+                      className="rounded-md border px-2 py-0.5 text-xs hover:bg-muted"
+                    >
+                      取消
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <span>{activeStrategy?.name}</span>
+                    {activeStrategy && !activeStrategy.builtin && (
+                      <button
+                        onClick={() => {
+                          setRenameValue(activeStrategy.name)
+                          setRenameEditing(true)
+                        }}
+                        className="rounded-md border px-1.5 py-0.5 text-xs font-normal text-muted-foreground hover:bg-muted hover:text-foreground"
+                        title="重命名策略"
+                      >
+                        重命名
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+              {renamePresetMutation.isError && (
+                <span className="text-xs font-normal text-destructive">
+                  重命名失败: {(renamePresetMutation.error as Error).message}
+                </span>
+              )}
+            </DialogTitle>
             <DialogDescription>
               {t(activeStrategy?.description)}
             </DialogDescription>

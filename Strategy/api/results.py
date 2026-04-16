@@ -125,12 +125,12 @@ class _FirstTradeSummaryReq(BaseModel):
 def _compute_first_trade(result: dict) -> dict | None:
     """Extract PnL from the first BUY trade in *result*.
 
-    Returns ``{pnl, return_pct, cost, side, token_id}`` or *None* when
+    Returns ``{pnl, return_pct, cost, token_id}`` or *None* when
     no BUY exists.
     """
     trades = result.get("trades", [])
     settlement = result.get("settlement_result") or {}
-    final_positions = result.get("final_positions") or {}
+    initial_balance = result.get("initial_balance", 0.0)
 
     # Find the chronologically first BUY
     first_buy = None
@@ -172,7 +172,8 @@ def _compute_first_trade(result: dict) -> dict | None:
 
     trade_pnl = sell_revenue - buy_price * sold_qty
     total_pnl = round(trade_pnl + settle_pnl, 6)
-    return_pct = round(total_pnl / cost, 6) if cost > 0 else 0.0
+    # Use initial_balance as denominator to stay consistent with total_return_pct
+    return_pct = round(total_pnl / initial_balance, 6) if initial_balance > 0 else 0.0
 
     return {
         "pnl": total_pnl,
