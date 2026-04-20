@@ -5,6 +5,7 @@ import { cn, fmtTimeCst, fmtFullCst } from "@/lib/utils"
 import { fetchBatchTask, cancelBatch, cleanupByBatch, rerunBacktest } from "@/api/client"
 import { Checkbox } from "@/components/ui/checkbox"
 import AddToPortfolioDialog from "@/components/AddToPortfolioDialog"
+import CompositeDetailPanel from "@/components/CompositeDetailPanel"
 import type { BatchTaskDetail, BatchResultSummary, SlugWorkflow, PortfolioItem } from "@/types"
 
 const statusLabel: Record<string, string> = {
@@ -143,9 +144,19 @@ export default function BatchDetailPage() {
     }
     if (sortField) {
       list = [...list].sort((a, b) => {
-        const va = (a[1] as unknown as Record<string, number>)[sortField] ?? 0
-        const vb = (b[1] as unknown as Record<string, number>)[sortField] ?? 0
-        return sortDir === "asc" ? va - vb : vb - va
+        const ra = a[1] as unknown as Record<string, unknown>
+        const rb = b[1] as unknown as Record<string, unknown>
+        const va = ra[sortField]
+        const vb = rb[sortField]
+        // String sort for matched_branch/matched_preset
+        if (typeof va === "string" || typeof vb === "string") {
+          const sa = (va as string) ?? ""
+          const sb = (vb as string) ?? ""
+          return sortDir === "asc" ? sa.localeCompare(sb) : sb.localeCompare(sa)
+        }
+        const na = (va as number) ?? 0
+        const nb = (vb as number) ?? 0
+        return sortDir === "asc" ? na - nb : nb - na
       })
     }
     return list
@@ -385,6 +396,15 @@ export default function BatchDetailPage() {
         </div>
       )}
 
+      {/* Composite strategy detail panel */}
+      {task.composite_detail && task.composite_name && (
+        <CompositeDetailPanel
+          compositeDetail={task.composite_detail}
+          compositeName={task.composite_name}
+          results={task.results}
+        />
+      )}
+
       {/* Persist errors */}
       {task.persist_errors && task.persist_errors.length > 0 && (
         <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4">
@@ -622,6 +642,9 @@ export default function BatchDetailPage() {
                     />
                   </th>
                   <th className="px-3 py-2">数据源</th>
+                  {task.composite_name && (
+                    <th className="cursor-pointer select-none px-3 py-2 hover:text-foreground" onClick={() => toggleSort("matched_branch")}>使用策略{sortIndicator("matched_branch")}</th>
+                  )}
                   <th className="cursor-pointer select-none px-3 py-2 text-right hover:text-foreground" onClick={() => toggleSort("total_return_pct")}>收益率{sortIndicator("total_return_pct")}</th>
                   <th className="cursor-pointer select-none px-3 py-2 text-right hover:text-foreground" onClick={() => toggleSort("sharpe_ratio")}>Sharpe{sortIndicator("sharpe_ratio")}</th>
                   <th className="cursor-pointer select-none px-3 py-2 text-right hover:text-foreground" onClick={() => toggleSort("win_rate")}>胜率{sortIndicator("win_rate")}</th>
@@ -648,6 +671,17 @@ export default function BatchDetailPage() {
                       />
                     </td>
                     <td className="px-3 py-2 font-mono text-xs">{slug}</td>
+                    {task.composite_name && (
+                      <td className="px-3 py-2 text-xs">
+                        {r.matched_branch ? (
+                          <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary">
+                            {r.matched_branch}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">未匹配</span>
+                        )}
+                      </td>
+                    )}
                     <td
                       className={cn(
                         "px-3 py-2 text-right font-mono",

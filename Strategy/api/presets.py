@@ -71,3 +71,69 @@ async def rename_preset(name: str, body: RenameBody):
     if not ok:
         raise HTTPException(status_code=400, detail="Rename failed")
     return {"old_name": name, "new_name": body.new_name}
+
+
+# ── Composite Presets CRUD ───────────────────────────────────────────────────
+
+composite_router = APIRouter(prefix="/composite-presets")
+
+
+class CompositeBranchBody(BaseModel):
+    label: str
+    min_momentum: float = Field(ge=0)
+    preset_name: str
+
+
+class CompositePresetBody(BaseModel):
+    description: str = ""
+    btc_windows: dict = Field(default_factory=lambda: {"btc_trend_window_1": 5, "btc_trend_window_2": 10})
+    branches: list[CompositeBranchBody] = Field(default_factory=list)
+
+
+@composite_router.get("")
+async def list_composite_presets():
+    """List all composite presets."""
+    return registry.list_composite_presets()
+
+
+@composite_router.get("/{name}")
+async def get_composite_preset(name: str):
+    preset = registry.get_composite_preset(name)
+    if preset is None:
+        raise HTTPException(status_code=404, detail=f"Composite preset '{name}' not found")
+    return {"name": name, **preset}
+
+
+@composite_router.put("/{name}")
+async def save_composite_preset(name: str, body: CompositePresetBody):
+    """Create or update a composite preset."""
+    data = {
+        "description": body.description,
+        "btc_windows": body.btc_windows,
+        "branches": [b.model_dump() for b in body.branches],
+    }
+    try:
+        registry.save_composite_preset(name, data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"name": name, **registry.get_composite_preset(name)}
+
+
+@composite_router.delete("/{name}")
+async def delete_composite_preset(name: str):
+    if registry.get_composite_preset(name) is None:
+        raise HTTPException(status_code=404, detail=f"Composite preset '{name}' not found")
+    registry.delete_composite_preset(name)
+    return {"deleted": name}
+
+
+@composite_router.patch("/{name}/rename")
+async def rename_composite_preset(name: str, body: RenameBody):
+    if registry.get_composite_preset(name) is None:
+        raise HTTPException(status_code=404, detail=f"Composite preset '{name}' not found")
+    if registry.get_composite_preset(body.new_name) is not None:
+        raise HTTPException(status_code=409, detail=f"Composite preset '{body.new_name}' already exists")
+    ok = registry.rename_composite_preset(name, body.new_name)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Rename failed")
+    return {"old_name": name, "new_name": body.new_name}

@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from config import config
 from core.backtest_executor import BacktestExecutor
 from core.btc_data import clear_kline_cache, fetch_btc_klines
+from core.btc_data import compute_btc_trend as _compute_btc_trend
 from core.registry import StrategyRegistry
 from core.types import BacktestSession, btc_trend_enabled, parse_slug_window
 
@@ -91,6 +92,8 @@ class ResultSummary:
     avg_slippage: float
     profit_factor: float
     btc_momentum: float
+    matched_branch: str | None = None
+    matched_preset: str | None = None
 
 
 @dataclass
@@ -117,6 +120,9 @@ class BatchTask:
     persist_errors: list[str] = field(default_factory=list)  # callback persistence failures
     workflows: dict[str, SlugWorkflow] = field(default_factory=dict)
     capital_chain: list[dict] = field(default_factory=list)  # cumulative mode: [{slug, start, end}]
+    # Composite strategy fields
+    composite_name: str | None = None
+    composite_detail: dict | None = None
 
 
 def _extract_summary(session: BacktestSession) -> ResultSummary:
@@ -137,6 +143,27 @@ def _extract_summary(session: BacktestSession) -> ResultSummary:
         avg_slippage=m.avg_slippage,
         profit_factor=m.profit_factor,
         btc_momentum=btc_momentum,
+    )
+
+
+def _create_skip_session(
+    slug: str,
+    initial_balance: float,
+    btc_trend_info: dict | None = None,
+) -> BacktestSession:
+    """Create an empty BacktestSession for a slug that didn't match any branch."""
+    from core.types import EvaluationMetrics
+    return BacktestSession(
+        session_id=uuid.uuid4().hex[:12],
+        strategy="composite:skip",
+        slug=slug,
+        initial_balance=initial_balance,
+        status="skipped",
+        created_at=datetime.now(timezone.utc).isoformat(),
+        final_equity=initial_balance,
+        metrics=EvaluationMetrics(),
+        btc_trend_info=btc_trend_info,
+        config={},
     )
 
 
@@ -508,6 +535,283 @@ class BatchRunner:
 
     def list_tasks(self) -> list[BatchTask]:
         return list(self._tasks.values())
+
+    # ── Composite batch ──────────────────────────────────────────────────
+
+    async def submit_composite(
+        self,
+        composite_name: str,
+        composite_detail: dict,
+        slugs: list[str],
+        initial_balance: float,
+        settlement_result: dict[str, float] | None = None,
+        cumulative_capital: bool = False,
+        matching_mode: str = "simple",
+    ) -> str:
+        """Submit a composite-strategy batch. Returns batch_id."""
+        batch_id = uuid.uuid4().hex[:12]
+        task = BatchTask(
+            batch_id=batch_id,
+            strategy=f"composite:{composite_name}",
+            slugs=slugs,
+            config={},  # no single config — each slug picks from branches
+            initial_balance=initial_balance,
+            settlement_result=settlement_result,
+            cumulative_capital=cumulative_capital,
+            matching_mode=matching_mode,
+            created_at=datetime.now(timezone.utc).isoformat(),
+            total=len(slugs),
+            workflows={s: SlugWorkflow(slug=s) for s in slugs},
+            composite_name=composite_name,
+            composite_detail=composite_detail,
+        )
+        self._tasks[batch_id] = task
+        async_task = asyncio.create_task(self._run_composite_batch(batch_id))
+        self._running[batch_id] = async_task
+        return batch_id
+
+    async def _run_composite_batch(self, batch_id: str) -> None:
+        """Execute a composite-strategy batch.
+
+        For each slug:
+        1. Fetch BTC klines and compute amplitude |a1+a2| using composite btc_windows
+        2. Match first branch where amplitude >= branch.min_momentum (descending order)
+        3. Execute backtest with matched branch's preset config
+        4. If no branch matches → generate skip session (0 trades, equity=initial_balance)
+        """
+        from core.evaluator import evaluate, compute_drawdown_curve, compute_drawdown_events
+
+        task = self._tasks[batch_id]
+        task.started_at = datetime.now(timezone.utc).isoformat()
+
+        detail = task.composite_detail or {}
+        btc_windows = detail.get("btc_windows", {})
+        branches = detail.get("branches", [])
+        w1 = btc_windows.get("btc_trend_window_1", 5)
+        w2 = btc_windows.get("btc_trend_window_2", 10)
+
+        # Pre-resolve each branch's preset config from registry
+        branch_configs: list[tuple[str, str, dict]] = []  # (label, preset_name, merged_config)
+        registry = self._executor._registry
+        for branch in branches:
+            preset_name = branch["preset_name"]
+            label = branch.get("label", preset_name)
+            cfg = registry.get_default_config(preset_name)
+            branch_configs.append((label, preset_name, cfg))
+
+        async def run_composite_one(
+            slug: str, override_balance: float | None = None,
+        ) -> BacktestSession | None:
+            wf = task.workflows[slug]
+            if task.status == "cancelled":
+                wf.status = "skipped"
+                wf.log("cancelled", "skip", "Batch was cancelled before this slug started")
+                task.completed_count += 1
+                return None
+
+            wf.status = "running"
+            slug_balance = override_balance if override_balance is not None else task.initial_balance
+
+            # ── Compute BTC amplitude ─────────────────────────────────
+            btc_klines: list[dict] | None = None
+            btc_trend_info: dict | None = None
+            amplitude = 0.0
+            try:
+                slug_window = parse_slug_window(slug)
+                if slug_window:
+                    async with self._http_sem:
+                        btc_klines = await fetch_btc_klines(slug_window[0], slug_window[1])
+                    if btc_klines:
+                        btc_trend_info = _compute_btc_trend(
+                            btc_klines, slug_window[0], w1, w2, 0,
+                        )
+                        a1 = btc_trend_info.get("a1", 0.0)
+                        a2 = btc_trend_info.get("a2", 0.0)
+                        amplitude = abs(a1 + a2)
+            except Exception as e:
+                logger.warning("Composite batch %s slug %s BTC klines failed: %s", batch_id, slug, e)
+
+            # ── Match branch (descending by min_momentum) ─────────────
+            matched_label: str | None = None
+            matched_preset: str | None = None
+            matched_config: dict | None = None
+            for label, preset_name, cfg in branch_configs:
+                min_mom = 0.0
+                for b in branches:
+                    if b.get("preset_name") == preset_name and b.get("label") == label:
+                        min_mom = b.get("min_momentum", 0)
+                        break
+                if amplitude >= min_mom:
+                    matched_label = label
+                    matched_preset = preset_name
+                    matched_config = cfg
+                    break
+
+            # ── No match → skip session ───────────────────────────────
+            if matched_config is None:
+                wf.log(
+                    "data_load", "ok",
+                    f"BTC amplitude={amplitude:.6f}, no branch matched → skip",
+                )
+                session = _create_skip_session(slug, slug_balance, btc_trend_info)
+                summary = _extract_summary(session)
+                summary.matched_branch = None
+                summary.matched_preset = None
+                task.results_summary[slug] = summary
+                task.results[slug] = session
+
+                # Persist skip result
+                if self._on_batch_complete:
+                    try:
+                        from api.execution import store_session as _store
+                        _store(session, cache=False)
+                    except Exception:
+                        pass
+
+                wf.status = "completed"
+                wf.log("done", "ok", f"Skipped — amplitude={amplitude:.6f} below all thresholds")
+                task.results.pop(slug, None)
+                del session
+                task.completed_count += 1
+                return None
+
+            wf.log(
+                "data_load", "ok",
+                f"BTC amplitude={amplitude:.6f} → branch '{matched_label}' (preset={matched_preset})",
+            )
+
+            # ── Execute matched branch strategy ───────────────────────
+            result = await self._executor.run_one(
+                slug=slug,
+                strategy=matched_preset,
+                cfg=matched_config,
+                initial_balance=slug_balance,
+                settlement_result=task.settlement_result,
+                btc_klines=btc_klines,
+                timeout=config.slug_timeout,
+                matching_mode=task.matching_mode,
+            )
+
+            # ── Step logging (same structure as normal batch) ─────────
+            if result.error_phase == "data_load":
+                wf.log("data_load", "fail", f"Failed: {result.error_msg}", detail=result.error_tb, duration_ms=result.dt_load_ms)
+                wf.status = "failed"
+                wf.error = f"[data_load] {result.error_msg}"
+                task.errors[slug] = wf.error
+                task.completed_count += 1
+                return None
+
+            if result.error_phase == "backtest":
+                msg = f"Timed out after {config.slug_timeout}s" if result.timed_out else f"Backtest error: {result.error_msg}"
+                wf.log("tick_loop", "fail", msg, detail=result.error_tb)
+                wf.status = "failed"
+                wf.error = f"[tick_loop] {msg}"
+                task.errors[slug] = wf.error
+                task.completed_count += 1
+                return None
+
+            session = result.session
+            wf.log("tick_loop", "ok", f"{len(session.trades)} trades", duration_ms=result.dt_run_ms)
+
+            if result.error_phase == "evaluate":
+                wf.log("evaluate", "fail", f"Eval error: {result.error_msg}", detail=result.error_tb)
+                wf.status = "failed"
+                wf.error = f"[evaluate] {result.error_msg}"
+                task.errors[slug] = wf.error
+                task.completed_count += 1
+                return None
+
+            wf.log("evaluate", "ok", f"return={session.metrics.total_return_pct:.2f}%", duration_ms=result.dt_eval_ms)
+
+            if result.persist_error:
+                task.persist_errors.append(f"[{slug}] persist failed: {result.persist_error}")
+
+            if task.cumulative_capital:
+                session.capital_mode = "cumulative"
+
+            summary = _extract_summary(session)
+            summary.matched_branch = matched_label
+            summary.matched_preset = matched_preset
+            task.results_summary[slug] = summary
+            task.results[slug] = session
+
+            wf.status = "completed"
+            wf.log("done", "ok", f"equity={session.final_equity:.2f}, branch='{matched_label}'")
+
+            task.results.pop(slug, None)
+            result.session = None
+            del session, result
+            if len(wf.steps) > 2:
+                wf.steps = wf.steps[-2:]
+            task.completed_count += 1
+            return None
+
+        # ── Process slugs ────────────────────────────────────────────
+        slugs = task.slugs
+        if task.cumulative_capital:
+            current_balance = task.initial_balance
+            for slug in slugs:
+                if task.status == "cancelled":
+                    break
+                task.capital_chain.append({
+                    "slug": slug, "start_balance": round(current_balance, 6),
+                    "end_balance": None, "status": "pending",
+                })
+                await run_composite_one(slug, override_balance=current_balance)
+                chain_entry = task.capital_chain[-1]
+                summary = task.results_summary.get(slug)
+                if summary is not None and summary.status in ("completed", "skipped"):
+                    chain_entry["end_balance"] = round(summary.final_equity, 6)
+                    chain_entry["status"] = "completed"
+                    current_balance = summary.final_equity
+                    if current_balance <= 0:
+                        chain_entry["status"] = "capital_exhausted"
+                        remaining_idx = slugs.index(slug) + 1
+                        for rem_slug in slugs[remaining_idx:]:
+                            wf_rem = task.workflows[rem_slug]
+                            wf_rem.status = "skipped"
+                            wf_rem.log("cancelled", "skip", f"Capital exhausted after {slug}")
+                            task.capital_chain.append({"slug": rem_slug, "start_balance": 0.0, "end_balance": 0.0, "status": "capital_exhausted"})
+                            task.completed_count += 1
+                        break
+                else:
+                    chain_entry["end_balance"] = round(current_balance, 6)
+                    chain_entry["status"] = "failed"
+                task.results.pop(slug, None)
+                gc.collect()
+        else:
+            chunk_size = max(config.batch_chunk_size, config.max_concurrency)
+            for chunk_start in range(0, len(slugs), chunk_size):
+                if task.status == "cancelled":
+                    break
+                chunk = slugs[chunk_start : chunk_start + chunk_size]
+                await asyncio.gather(*(run_composite_one(slug) for slug in chunk))
+                gc.collect()
+
+        if task.status != "cancelled":
+            task.status = "completed"
+        task.finished_at = datetime.now(timezone.utc).isoformat()
+        self._running.pop(batch_id, None)
+        clear_kline_cache()
+
+        if self._on_batch_complete:
+            try:
+                self._on_batch_complete(task)
+            except Exception as e:
+                task.persist_errors.append(f"batch_complete persist failed: {e}")
+
+        task.workflows.clear()
+        task.results_summary.clear()
+        task.results.clear()
+        task.errors.clear()
+        task.capital_chain.clear()
+        gc.collect()
+
+        async def _deferred_purge(bid: str = batch_id) -> None:
+            await asyncio.sleep(300)
+            self._tasks.pop(bid, None)
+
+        asyncio.create_task(_deferred_purge())
 
     def purge_task(self, batch_id: str) -> bool:
         """Remove a completed/cancelled task from in-memory registry."""

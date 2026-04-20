@@ -97,6 +97,8 @@ async def lifespan(app: FastAPI):
             "finished_at": task.finished_at,
             "cumulative_capital": task.cumulative_capital,
             "capital_chain": task.capital_chain,
+            "composite_name": task.composite_name,
+            "composite_detail": task.composite_detail,
             "results": results_summary,
             "errors": task.errors,
             "persist_errors": task.persist_errors,
@@ -190,6 +192,7 @@ from api.data import router as data_router
 from api.execution import router as execution_router
 from api.results import router as results_router
 from api.presets import router as presets_router
+from api.presets import composite_router as composite_presets_router
 from api.portfolios import router as portfolios_router
 from api.ai_optimize import router as ai_optimize_router
 from api.sensitivity import router as sensitivity_router
@@ -199,6 +202,7 @@ app.include_router(data_router, tags=["Data"])
 app.include_router(execution_router, tags=["Execution"])
 app.include_router(results_router, tags=["Results"])
 app.include_router(presets_router, tags=["Presets"])
+app.include_router(composite_presets_router, tags=["Composite Presets"])
 app.include_router(portfolios_router, tags=["Portfolios"])
 app.include_router(ai_optimize_router)
 app.include_router(sensitivity_router)

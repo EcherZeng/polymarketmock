@@ -303,6 +303,8 @@ export interface BatchResultSummary {
   avg_slippage: number
   profit_factor: number
   btc_momentum: number
+  matched_branch?: string | null
+  matched_preset?: string | null
 }
 
 export interface StepLog {
@@ -335,6 +337,34 @@ export interface BatchTaskDetail extends BatchTask {
   errors: Record<string, string>
   persist_errors: string[]
   workflows: Record<string, SlugWorkflow>
+  composite_name?: string | null
+  composite_detail?: CompositePreset | null
+}
+
+// ── Composite Strategy ─────────────────────────────────────────────────────
+
+export interface CompositeBranch {
+  label: string
+  min_momentum: number
+  preset_name: string
+}
+
+export interface CompositePreset {
+  description: string
+  btc_windows: {
+    btc_trend_window_1: number
+    btc_trend_window_2: number
+  }
+  branches: CompositeBranch[]
+}
+
+export interface CompositeBatchRequest {
+  composite_name: string
+  slugs: string[]
+  initial_balance: number
+  settlement_result?: Record<string, number>
+  cumulative_capital?: boolean
+  matching_mode?: "simple" | "vwap"
 }
 
 // ── Portfolios (data-source combinations) ──────────────────────────────────

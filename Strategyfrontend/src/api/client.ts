@@ -18,6 +18,8 @@ import type {
   Portfolio,
   PortfolioItem,
   RerunRequest,
+  CompositePreset,
+  CompositeBatchRequest,
 } from "@/types"
 
 const api = axios.create({ baseURL: "/strategy", timeout: 300_000 })
@@ -101,6 +103,60 @@ export async function fetchBatchTask(batchId: string): Promise<BatchTaskDetail> 
 
 export async function cancelBatch(batchId: string): Promise<void> {
   await api.post(`/tasks/${batchId}/cancel`)
+}
+
+// ── Composite Presets ───────────────────────────────────────────────────────
+
+export async function fetchCompositePresets(): Promise<
+  Array<{ name: string } & CompositePreset>
+> {
+  const { data } = await api.get("/composite-presets")
+  return data
+}
+
+export async function fetchCompositePreset(
+  name: string,
+): Promise<{ name: string } & CompositePreset> {
+  const { data } = await api.get(`/composite-presets/${name}`)
+  return data
+}
+
+export async function saveCompositePreset(
+  name: string,
+  body: {
+    description?: string
+    btc_windows: { btc_trend_window_1: number; btc_trend_window_2: number }
+    branches: Array<{ label: string; min_momentum: number; preset_name: string }>
+  },
+): Promise<{ name: string } & CompositePreset> {
+  const { data } = await api.put(`/composite-presets/${name}`, body)
+  return data
+}
+
+export async function deleteCompositePreset(name: string): Promise<void> {
+  await api.delete(`/composite-presets/${name}`)
+}
+
+export async function renameCompositePreset(
+  name: string,
+  newName: string,
+): Promise<{ old_name: string; new_name: string }> {
+  const { data } = await api.patch(`/composite-presets/${name}/rename`, {
+    new_name: newName,
+  })
+  return data
+}
+
+// ── Composite Batch ─────────────────────────────────────────────────────────
+
+export async function submitCompositeBatch(
+  req: CompositeBatchRequest,
+): Promise<{ batch_id: string; total: number }> {
+  const { data } = await api.post<{ batch_id: string; total: number }>(
+    "/composite-batch",
+    req,
+  )
+  return data
 }
 
 // ── Results ─────────────────────────────────────────────────────────────────

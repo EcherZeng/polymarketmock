@@ -9,6 +9,7 @@ import {
   renamePreset,
   runBacktest,
   submitBatch,
+  submitCompositeBatch,
   trackArchive,
   fetchTracked,
   fetchPortfolios,
@@ -21,8 +22,10 @@ import type {
   BatchRequest,
   I18nLabel,
   Portfolio,
+  CompositeBatchRequest,
 } from "@/types"
 import StrategyConfigForm from "@/components/StrategyConfigForm"
+import CompositeStrategyEditor from "@/components/CompositeStrategyEditor"
 import MechanismExplainer from "@/components/MechanismExplainer"
 import {
   Dialog,
@@ -74,6 +77,8 @@ export default function StrategyPage() {
   const [newStrategyActiveParams, setNewStrategyActiveParams] = useState<Set<string>>(new Set())
   const [renameEditing, setRenameEditing] = useState(false)
   const [renameValue, setRenameValue] = useState("")
+  const [strategyTab, setStrategyTab] = useState<"single" | "composite">("single")
+  const [selectedComposite, setSelectedComposite] = useState("")
 
   const { data: strategies = [], isLoading: loadingStrategies } = useQuery<StrategyInfo[]>({
     queryKey: ["strategies"],
@@ -221,6 +226,14 @@ export default function StrategyPage() {
     },
   })
 
+  const compositeBatchMutation = useMutation({
+    mutationFn: (req: CompositeBatchRequest) => submitCompositeBatch(req),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["batchTasks"] })
+      window.open(`/batch/${result.batch_id}`, '_blank')
+    },
+  })
+
   // ── Handlers ──────────────────────────────────────────────────────────────
 
   function handleStrategyClick(s: StrategyInfo) {
@@ -341,6 +354,39 @@ export default function StrategyPage() {
     })
   }
 
+  function handleCompositeBatchRun() {
+    if (!selectedComposite || selectedSlugs.size === 0) return
+    const firstSlug = [...selectedSlugs][0]
+    const firstArchive = archives.find((a) => a.slug === firstSlug)
+    const settlement_result = firstArchive
+      ? buildSettlementResult(firstArchive.token_ids)
+      : undefined
+    compositeBatchMutation.mutate({
+      composite_name: selectedComposite,
+      slugs: [...selectedSlugs],
+      initial_balance: balance,
+      ...(settlement_result ? { settlement_result } : {}),
+      cumulative_capital: cumulativeCapital,
+    })
+  }
+
+  function handleCompositePortfolioBatchRun() {
+    if (!selectedComposite || !selectedPortfolio) return
+    const slugs = [...new Set(selectedPortfolio.items.map((it) => it.slug))]
+    if (slugs.length === 0) return
+    const firstArchive = archives.find((a) => a.slug === slugs[0])
+    const settlement_result = firstArchive
+      ? buildSettlementResult(firstArchive.token_ids)
+      : undefined
+    compositeBatchMutation.mutate({
+      composite_name: selectedComposite,
+      slugs,
+      initial_balance: balance,
+      ...(settlement_result ? { settlement_result } : {}),
+      cumulative_capital: cumulativeCapital,
+    })
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -353,6 +399,91 @@ export default function StrategyPage() {
       <div className="grid gap-6 lg:grid-cols-12">
         {/* Left: Strategy selection + run controls */}
         <div className="flex flex-col gap-4 lg:col-span-4">
+          {/* Strategy mode tabs */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setStrategyTab("single")}
+              className={cn(
+                "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                strategyTab === "single"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:text-foreground",
+              )}
+            >
+              单一策略
+            </button>
+            <button
+              onClick={() => setStrategyTab("composite")}
+              className={cn(
+                "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                strategyTab === "composite"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:text-foreground",
+              )}
+            >
+              复合策略
+            </button>
+          </div>
+
+          {strategyTab === "composite" ? (
+            /* ── Composite strategy tab ─────────────────────────────── */
+            <div className="flex flex-col gap-4">
+              <CompositeStrategyEditor
+                selectedComposite={selectedComposite}
+                onSelectComposite={setSelectedComposite}
+              />
+
+              {/* Run controls for composite */}
+              <div className="rounded-lg border p-3">
+                <div className="flex flex-col gap-2">
+                  <label className="text-xs text-muted-foreground">初始资金</label>
+                  <input
+                    type="number"
+                    value={balance}
+                    onChange={(e) => setBalance(Number(e.target.value))}
+                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                  />
+
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={cumulativeCapital}
+                      onChange={(e) => setCumulativeCapital(e.target.checked)}
+                      className="size-4 rounded border accent-emerald-600"
+                    />
+                    <span className="text-muted-foreground">累计本金模式</span>
+                    {cumulativeCapital && (
+                      <span className="text-xs text-amber-600">(串行执行)</span>
+                    )}
+                  </label>
+
+                  <button
+                    onClick={handleCompositeBatchRun}
+                    disabled={
+                      !selectedComposite || selectedSlugs.size === 0 || compositeBatchMutation.isPending
+                    }
+                    className={cn(
+                      "h-9 w-full rounded-md text-sm font-medium transition-colors",
+                      "bg-emerald-600 text-white hover:bg-emerald-700",
+                      "disabled:pointer-events-none disabled:opacity-50",
+                    )}
+                  >
+                    {compositeBatchMutation.isPending
+                      ? "提交中..."
+                      : `复合批量回测 (${selectedSlugs.size} 条)`}
+                  </button>
+
+                  {compositeBatchMutation.isError && (
+                    <p className="text-sm text-destructive">
+                      提交失败: {(compositeBatchMutation.error as Error).message}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+          /* ── Single strategy tab (original content) ──────────────── */
+          <>
           <h2 className="text-sm font-medium text-muted-foreground">可用策略</h2>
           {loadingStrategies ? (
             <div className="text-sm text-muted-foreground">加载中...</div>
@@ -503,6 +634,8 @@ export default function StrategyPage() {
               )}
             </div>
           </div>
+          </>
+          )}
         </div>
 
         {/* Right: Data source */}
@@ -829,11 +962,11 @@ export default function StrategyPage() {
                       </span>
                     </div>
                     <button
-                      onClick={handlePortfolioBatchRun}
+                      onClick={strategyTab === "composite" ? handleCompositePortfolioBatchRun : handlePortfolioBatchRun}
                       disabled={
-                        !selectedStrategy ||
+                        (strategyTab === "single" ? !selectedStrategy : !selectedComposite) ||
                         selectedPortfolio.items.length === 0 ||
-                        batchMutation.isPending
+                        (strategyTab === "single" ? batchMutation.isPending : compositeBatchMutation.isPending)
                       }
                       className={cn(
                         "rounded-md px-4 py-1.5 text-sm font-medium transition-colors",
@@ -841,9 +974,9 @@ export default function StrategyPage() {
                         "disabled:pointer-events-none disabled:opacity-50",
                       )}
                     >
-                      {batchMutation.isPending
+                      {(strategyTab === "single" ? batchMutation.isPending : compositeBatchMutation.isPending)
                         ? "提交中..."
-                        : `批量回测 (${selectedPortfolio.items.length} 条)`}
+                        : `${strategyTab === "composite" ? "复合" : ""}批量回测 (${selectedPortfolio.items.length} 条)`}
                     </button>
                   </div>
                 )}

@@ -228,6 +228,66 @@ async def run_batch(req: BatchRequest):
     return {"batch_id": batch_id, "total": len(req.slugs)}
 
 
+# ── Composite Batch ──────────────────────────────────────────────────────────
+
+
+class CompositeBatchRequest(BaseModel):
+    composite_name: str
+    slugs: list[str]
+    initial_balance: float = Field(default=10000, gt=0)
+    settlement_result: dict[str, float] | None = None
+    cumulative_capital: bool = False
+    matching_mode: str = Field(default="simple", pattern="^(simple|vwap)$")
+
+
+@router.post("/composite-batch")
+async def run_composite_batch(req: CompositeBatchRequest):
+    """Submit a composite-strategy batch (async, returns batch_id)."""
+    if state.batch_runner is None:
+        raise HTTPException(status_code=503, detail="Batch runner not initialized")
+
+    composite = registry.get_composite_preset(req.composite_name)
+    if composite is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Composite preset '{req.composite_name}' not found",
+        )
+
+    batch_id = await state.batch_runner.submit_composite(
+        composite_name=req.composite_name,
+        composite_detail=composite,
+        slugs=req.slugs,
+        initial_balance=req.initial_balance,
+        settlement_result=req.settlement_result,
+        cumulative_capital=req.cumulative_capital,
+        matching_mode=req.matching_mode,
+    )
+
+    # Persist initial snapshot
+    if state.batch_store is not None:
+        task = state.batch_runner.get_task(batch_id)
+        if task is not None:
+            state.batch_store.put(batch_id, {
+                "batch_id": task.batch_id,
+                "strategy": task.strategy,
+                "slugs": task.slugs,
+                "config": task.config,
+                "status": task.status,
+                "total": task.total,
+                "completed": task.completed_count,
+                "created_at": task.created_at,
+                "cumulative_capital": task.cumulative_capital,
+                "capital_chain": task.capital_chain,
+                "composite_name": task.composite_name,
+                "composite_detail": task.composite_detail,
+                "results": {},
+                "errors": {},
+                "workflows": {s: _serialize_workflow(wf) for s, wf in task.workflows.items()},
+            })
+
+    return {"batch_id": batch_id, "total": len(req.slugs)}
+
+
 @router.get("/tasks")
 async def list_tasks():
     """List all batch tasks (live + persisted)."""
@@ -312,6 +372,8 @@ async def get_task(batch_id: str):
                     "avg_slippage": summary.avg_slippage,
                     "profit_factor": summary.profit_factor,
                     "btc_momentum": summary.btc_momentum,
+                    "matched_branch": summary.matched_branch,
+                    "matched_preset": summary.matched_preset,
                 }
 
         # Serialize workflow step logs
@@ -332,6 +394,8 @@ async def get_task(batch_id: str):
             "finished_at": task.finished_at,
             "cumulative_capital": task.cumulative_capital,
             "capital_chain": task.capital_chain,
+            "composite_name": task.composite_name,
+            "composite_detail": task.composite_detail,
             "results": results_summary,
             "errors": task.errors,
             "persist_errors": task.persist_errors,
@@ -384,6 +448,8 @@ def _build_result_summary(session: BacktestSession) -> dict:
         "avg_slippage": session.metrics.avg_slippage,
         "profit_factor": session.metrics.profit_factor,
         "btc_momentum": btc_momentum,
+        "matched_branch": None,
+        "matched_preset": None,
     }
 
 

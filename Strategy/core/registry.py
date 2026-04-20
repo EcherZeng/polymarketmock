@@ -25,12 +25,14 @@ logger = logging.getLogger(__name__)
 
 _STRATEGY_DIR = Path(__file__).resolve().parent.parent
 _PRESETS_DEFAULT_PATH = _STRATEGY_DIR / "strategy_presets.json"
+_COMPOSITE_DEFAULT_PATH = _STRATEGY_DIR / "composite_presets.json"
 
 # User overrides: prefer /app/user_config (Docker volume) → fallback to local dir
 _USER_CONFIG_DIR = Path("/app/user_config")
 if not _USER_CONFIG_DIR.exists():
     _USER_CONFIG_DIR = _STRATEGY_DIR
 _PRESETS_USER_PATH = _USER_CONFIG_DIR / "strategy_presets_user.json"
+_COMPOSITE_USER_PATH = _USER_CONFIG_DIR / "composite_presets_user.json"
 
 
 def _load_json(path: Path) -> dict:
@@ -76,12 +78,18 @@ class StrategyRegistry:
         self._presets: dict = {}  # merged presets (defaults + user)
         self._user_overrides: dict = {}  # user-only delta (persisted separately)
         self._configs: dict[str, dict] = {}  # name → merged default_config
+        # Composite presets (two-file overlay like strategy presets)
+        self._composite_presets: dict = {}
+        self._composite_user_overrides: dict = {}
 
     def scan(self, directory: Path) -> None:
         """Scan strategies/ for the concrete strategy class, then register presets."""
         self._presets, self._user_overrides = _load_presets_merged()
         unified_rules = self._presets.get("unified_rules", {})
         strategies_map = self._presets.get("strategies", {})
+
+        # Load composite presets (two-file overlay)
+        self._load_composite_presets()
 
         # Find the concrete strategy class
         if not directory.exists():
@@ -260,3 +268,72 @@ class StrategyRegistry:
         # Persist to user overlay only
         self._user_overrides["unified_rules"] = rules
         _save_user_file(self._user_overrides)
+
+    # ── Composite Presets ────────────────────────────────────────────────────
+
+    def _load_composite_presets(self) -> None:
+        """Load composite presets from two-file overlay."""
+        defaults = _load_json(_COMPOSITE_DEFAULT_PATH)
+        user = _load_json(_COMPOSITE_USER_PATH)
+        self._composite_presets = _deep_merge(defaults, user)
+        self._composite_user_overrides = user
+
+    def _save_composite_user_file(self) -> None:
+        with open(_COMPOSITE_USER_PATH, "w", encoding="utf-8") as f:
+            json.dump(self._composite_user_overrides, f, indent=2, ensure_ascii=False)
+
+    def list_composite_presets(self) -> list[dict]:
+        """Return list of all composite presets with metadata."""
+        result = []
+        for name, cfg in self._composite_presets.items():
+            result.append({"name": name, **cfg})
+        return result
+
+    def get_composite_preset(self, name: str) -> dict | None:
+        return self._composite_presets.get(name)
+
+    def save_composite_preset(self, name: str, data: dict) -> None:
+        """Create or update a composite preset. Validates branch preset references."""
+        branches = data.get("branches", [])
+        for branch in branches:
+            preset_name = branch.get("preset_name", "")
+            if not self.has(preset_name):
+                raise ValueError(f"Branch references unknown preset: '{preset_name}'")
+        # Sort branches by min_momentum descending for matching
+        branches.sort(key=lambda b: b.get("min_momentum", 0), reverse=True)
+        data["branches"] = branches
+        self._composite_presets[name] = data
+        self._composite_user_overrides[name] = data
+        self._save_composite_user_file()
+        logger.info("Saved composite preset: %s", name)
+
+    def delete_composite_preset(self, name: str) -> bool:
+        if name not in self._composite_presets:
+            return False
+        del self._composite_presets[name]
+        self._composite_user_overrides.pop(name, None)
+        self._save_composite_user_file()
+        logger.info("Deleted composite preset: %s", name)
+        return True
+
+    def rename_composite_preset(self, old_name: str, new_name: str) -> bool:
+        if old_name not in self._composite_presets:
+            return False
+        if new_name in self._composite_presets:
+            return False
+        self._composite_presets[new_name] = self._composite_presets.pop(old_name)
+        if old_name in self._composite_user_overrides:
+            self._composite_user_overrides[new_name] = self._composite_user_overrides.pop(old_name)
+        self._save_composite_user_file()
+        logger.info("Renamed composite preset: %s -> %s", old_name, new_name)
+        return True
+
+    def composite_references_preset(self, preset_name: str) -> list[str]:
+        """Return composite preset names that reference the given strategy preset."""
+        refs = []
+        for cname, cdata in self._composite_presets.items():
+            for branch in cdata.get("branches", []):
+                if branch.get("preset_name") == preset_name:
+                    refs.append(cname)
+                    break
+        return refs
