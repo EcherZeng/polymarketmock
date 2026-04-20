@@ -51,6 +51,8 @@ export default function AddItemsToPortfolioDialog({
   const [search, setSearch] = useState("")
   const [selectedItems, setSelectedItems] = useState<Map<string, PortfolioItem>>(new Map())
   const [expandedBatchId, setExpandedBatchId] = useState<string | null>(null)
+  const [archivePage, setArchivePage] = useState(1)
+  const ARCHIVE_PAGE_SIZE = 20
 
   // ── Data queries ──────────────────────────────────────────────────────────
 
@@ -99,6 +101,12 @@ export default function AddItemsToPortfolioDialog({
       : archives
     return list.filter((a) => !existingSlugs.has(a.slug))
   }, [archives, term, existingSlugs])
+
+  const archiveTotalPages = Math.max(1, Math.ceil(filteredArchives.length / ARCHIVE_PAGE_SIZE))
+  const pagedArchives = useMemo(() => {
+    const start = (archivePage - 1) * ARCHIVE_PAGE_SIZE
+    return filteredArchives.slice(start, start + ARCHIVE_PAGE_SIZE)
+  }, [filteredArchives, archivePage, ARCHIVE_PAGE_SIZE])
 
   const filteredBatchTasks = useMemo(() => {
     let completed = batchTasks.filter((t) => t.status === "completed")
@@ -218,10 +226,52 @@ export default function AddItemsToPortfolioDialog({
     }
   }
 
+  const allFilteredArchivesSelected = filteredArchives.length > 0 &&
+    filteredArchives.every((a) => selectedItems.has(`archive:${a.slug}`))
+
+  function toggleSelectAllArchives() {
+    if (allFilteredArchivesSelected) {
+      setSelectedItems((prev) => {
+        const next = new Map(prev)
+        for (const a of filteredArchives) {
+          next.delete(`archive:${a.slug}`)
+        }
+        return next
+      })
+    } else {
+      setSelectedItems((prev) => {
+        const next = new Map(prev)
+        for (const a of filteredArchives) {
+          const key = `archive:${a.slug}`
+          if (!next.has(key)) {
+            next.set(key, {
+              session_id: key,
+              strategy: "",
+              slug: a.slug,
+              total_return_pct: 0,
+              sharpe_ratio: 0,
+              win_rate: 0,
+              max_drawdown: 0,
+              profit_factor: 0,
+              total_trades: 0,
+              avg_slippage: 0,
+              initial_balance: 0,
+              final_equity: 0,
+              btc_momentum: 0,
+              config: {},
+            })
+          }
+        }
+        return next
+      })
+    }
+  }
+
   function handleClose() {
     setSelectedItems(new Map())
     setSearch("")
     setExpandedBatchId(null)
+    setArchivePage(1)
     onOpenChange(false)
   }
 
@@ -250,6 +300,7 @@ export default function AddItemsToPortfolioDialog({
                 setTab(t)
                 setSearch("")
                 setExpandedBatchId(null)
+                setArchivePage(1)
               }}
               className={cn(
                 "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
@@ -273,7 +324,10 @@ export default function AddItemsToPortfolioDialog({
                 : "搜索组合名称..."
           }
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value)
+            setArchivePage(1)
+          }}
         />
 
         {/* Content area */}
@@ -286,28 +340,65 @@ export default function AddItemsToPortfolioDialog({
                   {archives.length === 0 ? "暂无数据源" : "全部数据源已在组合中或无匹配"}
                 </div>
               ) : (
-                filteredArchives.map((a) => {
-                  const key = `archive:${a.slug}`
-                  const checked = selectedItems.has(key)
-                  return (
-                    <label
-                      key={a.slug}
-                      className={cn(
-                        "flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
-                        checked ? "bg-primary/5" : "hover:bg-muted",
-                      )}
-                    >
+                <>
+                  <div className="flex items-center gap-2 pb-1">
+                    <label className="flex cursor-pointer items-center gap-2 text-xs text-primary">
                       <Checkbox
-                        checked={checked}
-                        onCheckedChange={() => addArchiveAsPlaceholder(a)}
+                        checked={allFilteredArchivesSelected}
+                        onCheckedChange={toggleSelectAllArchives}
                       />
-                      <span className="flex-1 font-mono text-xs">{a.slug}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {a.size_mb} MB · {a.prices_count} 价格
-                      </span>
+                      {allFilteredArchivesSelected ? "取消全选" : `全选 (${filteredArchives.length})`}
                     </label>
-                  )
-                })
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {archivePage} / {archiveTotalPages} 页 · 共 {filteredArchives.length} 条
+                    </span>
+                  </div>
+                  {pagedArchives.map((a) => {
+                    const key = `archive:${a.slug}`
+                    const checked = selectedItems.has(key)
+                    return (
+                      <label
+                        key={a.slug}
+                        className={cn(
+                          "flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
+                          checked ? "bg-primary/5" : "hover:bg-muted",
+                        )}
+                      >
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={() => addArchiveAsPlaceholder(a)}
+                        />
+                        <span className="flex-1 font-mono text-xs">{a.slug}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {a.size_mb} MB · {a.prices_count} 价格
+                        </span>
+                      </label>
+                    )
+                  })}
+                  {archiveTotalPages > 1 && (
+                    <div className="flex items-center justify-center gap-2 pt-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={archivePage <= 1}
+                        onClick={() => setArchivePage((p) => p - 1)}
+                      >
+                        上一页
+                      </Button>
+                      <span className="text-xs text-muted-foreground">
+                        {archivePage} / {archiveTotalPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={archivePage >= archiveTotalPages}
+                        onClick={() => setArchivePage((p) => p + 1)}
+                      >
+                        下一页
+                      </Button>
+                    </div>
+                  )}
+                </>
               ))}
 
             {/* Batches tab */}
