@@ -15,6 +15,7 @@ import type {
   BatchTaskDetail,
   BtcKlineResponse,
   BtcHdAnalysis,
+  ExitAnalysisResponse,
   Portfolio,
   PortfolioItem,
   RerunRequest,
@@ -224,6 +225,11 @@ export async function fetchBtcKlines(sessionId: string): Promise<BtcKlineRespons
 
 export async function analyzeBtcHd(sessionId: string): Promise<BtcHdAnalysis> {
   const { data } = await api.post<BtcHdAnalysis>(`/results/${sessionId}/btc-analyze`)
+  return data
+}
+
+export async function analyzeExitFactors(sessionId: string): Promise<ExitAnalysisResponse> {
+  const { data } = await api.post<ExitAnalysisResponse>(`/results/${sessionId}/exit-analysis`)
   return data
 }
 

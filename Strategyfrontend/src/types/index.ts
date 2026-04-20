@@ -277,6 +277,49 @@ export interface BtcHdAnalysis {
   trend?: BtcTrendInfo | null
 }
 
+// ── Exit Factor Analysis ───────────────────────────────────────────────────
+
+export interface ExitFactorPoint {
+  time_ms: number
+  streak: number
+  streak_norm: number
+  acceleration: number
+  accel_norm: number
+  vol_coupling: number
+  vol_coupling_norm: number
+  composite_score: number
+  action: "hold" | "reduce" | "exit"
+  suggested_position_pct: number
+}
+
+export interface SimulatedEquityPoint {
+  time_ms: number
+  equity: number
+  position_pct: number
+}
+
+export interface ExitAnalysisSummary {
+  first_reduce_ts: number | null
+  first_exit_ts: number | null
+  actual_exit_ts: string | null
+  factor_final_equity: number
+  actual_final_equity: number
+  equity_diff: number
+}
+
+export interface ExitAnalysisResponse {
+  session_id: string
+  interval: string
+  kline_count: number
+  hold_start_ts: string
+  hold_end_ts: string
+  entry_direction: number
+  error?: string | null
+  factor_timeline: ExitFactorPoint[]
+  simulated_equity_curve: SimulatedEquityPoint[]
+  summary: ExitAnalysisSummary
+}
+
 export interface BatchTask {
   batch_id: string
   strategy: string

@@ -718,3 +718,259 @@ async def analyze_btc_hd(
         "kline_count": len(klines),
         "trend": trend,
     }
+
+
+# ── Rolling Exit Factor Analysis ─────────────────────────────────────────────
+#
+# On-demand deep analysis: given a backtest's trade history and BTC 1s klines
+# during the holding period, compute rolling top-3 factors (consistent streak,
+# acceleration, volume coupling) and derive a composite exit signal timeline.
+#
+# Weights (normalised from _ADJ_BETA top-3):
+#   consistent  0.15 / 0.35 ≈ 0.4286
+#   accel       0.10 / 0.35 ≈ 0.2857
+#   vol_couple  0.10 / 0.35 ≈ 0.2857
+#
+# composite_score ∈ [-1, 1]:
+#   > 0.3  → hold   (100%)
+#   0~0.3  → reduce ( 70%)
+#  -0.3~0  → reduce ( 40%)
+#   ≤-0.3  → exit   (  0%)
+
+_EXIT_WEIGHTS = {
+    "consistent": 0.4286,
+    "accel":      0.2857,
+    "vol_couple": 0.2857,
+}
+
+_EXIT_THRESHOLDS = [
+    (0.3,  "hold",   1.0),
+    (0.0,  "reduce", 0.7),
+    (-0.3, "reduce", 0.4),
+]
+# Below -0.3 → exit, 0%
+
+
+def _score_to_action(score: float) -> tuple[str, float]:
+    """Map composite score to (action, suggested_position_pct)."""
+    for threshold, action, pct in _EXIT_THRESHOLDS:
+        if score > threshold:
+            return action, pct
+    return "exit", 0.0
+
+
+def compute_rolling_exit_factors(
+    klines: list[dict],
+    hold_start_ms: int,
+    hold_end_ms: int,
+    entry_direction: float,
+    lookback: int = 60,
+) -> list[dict]:
+    """Compute per-second exit factor timeline from 1s BTC klines.
+
+    For every 1s kline in the holding period, look back *lookback* seconds
+    and compute the top-3 factors over that window.  This gives a decision
+    point at every second — no blind spots.
+
+    Args:
+        klines:          1s BTC/USDT klines covering the holding period
+        hold_start_ms:   epoch ms of first BUY fill
+        hold_end_ms:     epoch ms of holding end (slug_end or SELL fill)
+        entry_direction: +1.0 if entry was bullish (expecting BTC up),
+                         -1.0 if bearish; used to align factor signs
+        lookback:        number of 1s klines to look back (default 60)
+
+    Returns:
+        List of ExitFactorPoint dicts, one per second.
+    """
+    if not klines or len(klines) < 2:
+        return []
+
+    # Filter klines to holding period
+    hold_klines = [k for k in klines if hold_start_ms <= k["open_time"] <= hold_end_ms]
+    if len(hold_klines) < 2:
+        return []
+
+    lookback_ms = lookback * 1000
+    timeline: list[dict] = []
+
+    # Evaluate at every kline after the first *lookback* seconds
+    for i, cur in enumerate(hold_klines):
+        cursor_ms = cur["open_time"]
+        # Need at least some history; skip the very first kline
+        if cursor_ms <= hold_start_ms:
+            continue
+
+        # Collect lookback window: klines in (cursor - lookback_ms, cursor]
+        win = [k for k in hold_klines if (cursor_ms - lookback_ms) < k["open_time"] <= cursor_ms]
+        if len(win) < 2:
+            continue
+
+        # ── Factor 1: Direction streak ───────────────────────────────────
+        streak = _count_streak(win)
+        last_dir = 1.0 if win[-1]["close"] >= win[-1]["open"] else -1.0
+        streak_aligned = streak * (1.0 if last_dir == entry_direction else -1.0)
+        streak_norm = math.tanh(streak_aligned / 3.0)
+
+        # ── Factor 2: Momentum acceleration ──────────────────────────────
+        mid_idx = len(win) // 2
+        sub_w1 = win[:mid_idx]
+        sub_w2 = win[mid_idx:]
+        if sub_w1 and sub_w2 and sub_w1[0]["open"] > 0 and sub_w1[-1]["open"] > 0 and sub_w2[-1]["open"] > 0:
+            a1 = (sub_w1[-1]["close"] - sub_w1[0]["open"]) / sub_w1[0]["open"]
+            a2 = (sub_w2[-1]["close"] - sub_w2[0]["open"]) / sub_w2[0]["open"]
+            raw_accel = abs(a2) - abs(a1)
+            accel_sign = 1.0 if (a2 * entry_direction) > 0 else -1.0
+            accel_norm = math.tanh(raw_accel * 100) * accel_sign
+        else:
+            raw_accel = 0.0
+            accel_norm = 0.0
+
+        # ── Factor 3: Volume coupling (VWAP deviation + volume ratio) ────
+        total_cv = sum(k["close"] * k["volume"] for k in win)
+        total_vol = sum(k["volume"] for k in win)
+        vwap = total_cv / total_vol if total_vol > 1e-12 else win[-1]["close"]
+        vwap_dev = (win[-1]["close"] - vwap) / vwap if vwap > 0 else 0.0
+        vwap_aligned = vwap_dev * entry_direction
+
+        vol_h1 = sum(k["volume"] for k in sub_w1) if sub_w1 else 1e-12
+        vol_h2 = sum(k["volume"] for k in sub_w2) if sub_w2 else 1e-12
+        vol_ratio = vol_h2 / vol_h1 if vol_h1 > 1e-12 else 1.0
+        vol_ratio_aligned = math.tanh(math.log(max(vol_ratio, 0.01))) * entry_direction
+
+        vol_coupling_norm = (math.tanh(vwap_aligned * 100) + vol_ratio_aligned) / 2.0
+
+        # ── Composite score ──────────────────────────────────────────────
+        w = _EXIT_WEIGHTS
+        score = (
+            w["consistent"] * streak_norm
+            + w["accel"] * accel_norm
+            + w["vol_couple"] * vol_coupling_norm
+        )
+        score = max(-1.0, min(1.0, score))
+
+        action, position_pct = _score_to_action(score)
+
+        timeline.append({
+            "time_ms": cursor_ms,
+            "streak": streak,
+            "streak_norm": round(streak_norm, 4),
+            "acceleration": round(raw_accel, 8),
+            "accel_norm": round(accel_norm, 4),
+            "vol_coupling": round(vwap_dev, 8),
+            "vol_coupling_norm": round(vol_coupling_norm, 4),
+            "composite_score": round(score, 4),
+            "action": action,
+            "suggested_position_pct": position_pct,
+        })
+
+    return timeline
+
+
+def simulate_factor_exit_equity(
+    timeline: list[dict],
+    entry_price: float,
+    entry_qty: float,
+    initial_balance: float,
+    price_curve: list[dict],
+    token_id: str,
+) -> dict:
+    """Simulate equity if factor-based exit was followed.
+
+    Walks the factor timeline and whenever suggested_position_pct drops,
+    simulates partial sells at the Poly price at that time.
+
+    Returns:
+        {
+            simulated_equity_curve: [{time_ms, equity, position_pct}],
+            final_equity: float,
+            first_reduce_ts: int | None,
+            first_exit_ts: int | None,
+        }
+    """
+    if not timeline or entry_qty <= 0:
+        return {
+            "simulated_equity_curve": [],
+            "final_equity": initial_balance,
+            "first_reduce_ts": None,
+            "first_exit_ts": None,
+        }
+
+    # Build a time→price lookup from price_curve (Poly prices)
+    price_by_ms: dict[int, float] = {}
+    for p in price_curve:
+        if p.get("token_id") == token_id:
+            ts = p.get("timestamp", "")
+            if ts:
+                ms = _iso_to_ms(ts)
+                price_by_ms[ms] = p.get("anchor_price", 0) or p.get("mid_price", 0)
+
+    # Sorted time keys for nearest-price lookup
+    sorted_price_times = sorted(price_by_ms.keys())
+
+    def _get_price_at(target_ms: int) -> float:
+        """Get Poly price closest to target_ms."""
+        if not sorted_price_times:
+            return entry_price
+        # Binary search for nearest
+        lo, hi = 0, len(sorted_price_times) - 1
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if sorted_price_times[mid] < target_ms:
+                lo = mid + 1
+            else:
+                hi = mid
+        best = sorted_price_times[lo]
+        if lo > 0:
+            prev = sorted_price_times[lo - 1]
+            if abs(prev - target_ms) < abs(best - target_ms):
+                best = prev
+        return price_by_ms.get(best, entry_price)
+
+    balance = initial_balance - entry_price * entry_qty  # after buy
+    remaining_qty = entry_qty
+    current_pct = 1.0
+    sim_curve: list[dict] = []
+    first_reduce_ts: int | None = None
+    first_exit_ts: int | None = None
+
+    for point in timeline:
+        t_ms = point["time_ms"]
+        new_pct = point["suggested_position_pct"]
+
+        if new_pct < current_pct and remaining_qty > 0:
+            # Sell (current_pct - new_pct) fraction of original qty
+            sell_frac = current_pct - new_pct
+            sell_qty = min(sell_frac * entry_qty, remaining_qty)
+            sell_price = _get_price_at(t_ms)
+            balance += sell_qty * sell_price
+            remaining_qty -= sell_qty
+            remaining_qty = max(0.0, remaining_qty)
+
+            if first_reduce_ts is None and new_pct < 1.0:
+                first_reduce_ts = t_ms
+            if first_exit_ts is None and new_pct <= 0.0:
+                first_exit_ts = t_ms
+
+        current_pct = new_pct
+        current_price = _get_price_at(t_ms)
+        equity = balance + remaining_qty * current_price
+
+        sim_curve.append({
+            "time_ms": t_ms,
+            "equity": round(equity, 6),
+            "position_pct": new_pct,
+        })
+
+    # Final equity: remaining position at last known price
+    if sim_curve:
+        final_eq = sim_curve[-1]["equity"]
+    else:
+        final_eq = initial_balance
+
+    return {
+        "simulated_equity_curve": sim_curve,
+        "final_equity": round(final_eq, 6),
+        "first_reduce_ts": first_reduce_ts,
+        "first_exit_ts": first_exit_ts,
+    }

@@ -1,7 +1,7 @@
 import { useParams, Link } from "react-router-dom"
 import { useQuery, useMutation } from "@tanstack/react-query"
-import { fetchResult, fetchBtcKlines, analyzeBtcHd } from "@/api/client"
-import type { BacktestResult, BtcKlineResponse, BtcHdAnalysis } from "@/types"
+import { fetchResult, fetchBtcKlines, analyzeBtcHd, analyzeExitFactors } from "@/api/client"
+import type { BacktestResult, BtcKlineResponse, BtcHdAnalysis, ExitAnalysisResponse } from "@/types"
 import { useMemo, useState } from "react"
 import { fmtFullCst } from "@/lib/utils"
 import MetricsPanel from "@/components/MetricsPanel"
@@ -11,6 +11,7 @@ import AnchorBulletin from "@/components/AnchorBulletin"
 import TradesTable from "@/components/TradesTable"
 import BtcKlineChart from "@/components/BtcKlineChart"
 import BtcFactorsChart from "@/components/BtcFactorsChart"
+import ExitAnalysisPanel from "@/components/ExitAnalysisPanel"
 
 export default function ResultDetailPage() {
   const { sessionId } = useParams<{ sessionId: string }>()
@@ -42,8 +43,15 @@ export default function ResultDetailPage() {
     onSuccess: (data) => setHdResult(data),
   })
 
+  const [exitResult, setExitResult] = useState<ExitAnalysisResponse | null>(null)
+  const exitMutation = useMutation({
+    mutationFn: () => analyzeExitFactors(sessionId!),
+    onSuccess: (data) => setExitResult(data),
+  })
+
   const [p0Expanded, setP0Expanded] = useState(false)
   const [hdExpanded, setHdExpanded] = useState(true)
+  const [exitExpanded, setExitExpanded] = useState(true)
 
   if (isLoading) {
     return <div className="py-12 text-center text-muted-foreground">加载中...</div>
@@ -287,6 +295,48 @@ export default function ResultDetailPage() {
       {hdMutation.isError && (
         <div className="rounded-lg border border-red-200 p-3 text-sm text-red-500">
           深度分析失败: {hdMutation.error instanceof Error ? hdMutation.error.message : "未知错误"}
+        </div>
+      )}
+
+      {/* Exit Factor Analysis */}
+      <div className="rounded-lg border p-4">
+        <div className="flex items-center justify-between">
+          <button
+            className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+            onClick={() => setExitExpanded((v) => !v)}
+          >
+            <span className={`inline-block transition-transform ${exitExpanded ? "rotate-90" : ""}`}>▶</span>
+            因子退出分析
+            <span className="ml-1 text-[10px] text-muted-foreground/60">
+              基于 BTC 1s K线滚动计算 — 方向连续性·动量加速度·成交量耦合
+            </span>
+          </button>
+          <button
+            className="rounded-md border px-3 py-1 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-50"
+            disabled={exitMutation.isPending}
+            onClick={() => exitMutation.mutate()}
+          >
+            {exitMutation.isPending ? "分析中..." : exitResult ? "重新分析" : "因子退出分析"}
+          </button>
+        </div>
+        {exitExpanded && exitResult && !exitResult.error && (
+          <div className="mt-3">
+            <ExitAnalysisPanel
+              data={exitResult}
+              priceCurve={result.price_curve}
+              trades={result.trades}
+            />
+          </div>
+        )}
+        {exitResult?.error && (
+          <div className="mt-3 text-sm text-muted-foreground">
+            {exitResult.error === "no_buy_trades" ? "该回测无买入交易，无法进行退出分析" : exitResult.error}
+          </div>
+        )}
+      </div>
+      {exitMutation.isError && (
+        <div className="rounded-lg border border-red-200 p-3 text-sm text-red-500">
+          因子退出分析失败: {exitMutation.error instanceof Error ? exitMutation.error.message : "未知错误"}
         </div>
       )}
 

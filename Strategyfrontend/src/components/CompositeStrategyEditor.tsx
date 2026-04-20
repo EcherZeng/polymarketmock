@@ -9,7 +9,7 @@ import {
   deleteCompositePreset,
   renameCompositePreset,
 } from "@/api/client"
-import type { StrategyInfo, CompositeBranch, CompositePreset } from "@/types"
+import type { StrategyInfo, CompositePreset } from "@/types"
 
 interface CompositeStrategyEditorProps {
   /** Currently selected composite preset name (for batch run) */
@@ -240,7 +240,7 @@ export default function CompositeStrategyEditor({
             </button>
           </div>
 
-          {sortedBranches.map((branch, displayIdx) => {
+          {sortedBranches.map((branch, _displayIdx) => {
             // Find original index for editing
             const origIdx = editBranches.indexOf(branch)
             return (

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 import api.state as state
 from api.result_store import sanitize_floats
-from core.btc_data import analyze_btc_hd, fetch_btc_klines
+from core.btc_data import _iso_to_ms, analyze_btc_hd, compute_rolling_exit_factors, fetch_btc_klines, simulate_factor_exit_equity
 from core.types import parse_slug_window
 
 logger = logging.getLogger(__name__)
@@ -491,4 +491,113 @@ async def btc_hd_analyze(session_id: str):
     return sanitize_floats({
         "session_id": session_id,
         **analysis,
+    })
+
+
+@router.post("/results/{session_id}/exit-analysis")
+async def exit_factor_analysis(session_id: str):
+    """On-demand rolling BTC factor exit analysis for a single backtest result.
+
+    Computes top-3 factors (direction streak, momentum acceleration, volume
+    coupling) on a rolling window over the holding period using 1s BTC klines.
+    Simulates factor-based partial exits and compares to actual equity.
+    """
+    store = _get_store()
+    result = store.get(session_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Result not found")
+
+    # ── Determine holding period ─────────────────────────────────────────
+    trades = result.get("trades", [])
+    buy_fills = [t for t in trades if t.get("side") == "BUY"]
+    if not buy_fills:
+        return sanitize_floats({
+            "session_id": session_id,
+            "error": "no_buy_trades",
+            "kline_count": 0,
+            "factor_timeline": [],
+            "summary": {},
+        })
+
+    first_buy = buy_fills[0]
+    hold_start_ts = first_buy.get("timestamp", "")
+    entry_price = float(first_buy.get("avg_price", 0))
+    entry_qty = float(first_buy.get("filled_amount", 0))
+    token_id = first_buy.get("token_id", "")
+
+    # slug_end as holding end
+    slug_end = result.get("slug_end", "")
+    if not slug_end:
+        slug_window = parse_slug_window(result.get("slug", ""))
+        if slug_window:
+            slug_end = slug_window[1]
+    if not hold_start_ts or not slug_end:
+        raise HTTPException(status_code=400, detail="Cannot determine holding period")
+
+    # ── Determine entry direction (BTC-relative) ─────────────────────────
+    # If entry price >= 0.5, user is betting UP (bullish BTC) → direction = +1
+    # If entry price < 0.5, user is betting DOWN (bearish BTC) → direction = -1
+    entry_direction = 1.0 if entry_price >= 0.5 else -1.0
+
+    # ── Fetch 1s BTC klines ──────────────────────────────────────────────
+    try:
+        klines = await fetch_btc_klines(hold_start_ts, slug_end, interval="1s")
+    except Exception as e:
+        logger.warning("Exit analysis kline fetch failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"Binance API error: {e}")
+
+    if not klines:
+        return sanitize_floats({
+            "session_id": session_id,
+            "error": "no_klines",
+            "kline_count": 0,
+            "factor_timeline": [],
+            "summary": {},
+        })
+
+    # ── Compute rolling factors ──────────────────────────────────────────
+    hold_start_ms = _iso_to_ms(hold_start_ts)
+    hold_end_ms = _iso_to_ms(slug_end)
+
+    factor_timeline = compute_rolling_exit_factors(
+        klines, hold_start_ms, hold_end_ms, entry_direction,
+    )
+
+    # ── Simulate factor-based equity ─────────────────────────────────────
+    price_curve = result.get("price_curve", [])
+    initial_balance = float(result.get("initial_balance", 100.0))
+
+    sim = simulate_factor_exit_equity(
+        timeline=factor_timeline,
+        entry_price=entry_price,
+        entry_qty=entry_qty,
+        initial_balance=initial_balance,
+        price_curve=price_curve,
+        token_id=token_id,
+    )
+
+    # ── Actual exit info ─────────────────────────────────────────────────
+    sell_fills = [t for t in trades if t.get("side") == "SELL"]
+    actual_exit_ts: str | None = sell_fills[0].get("timestamp") if sell_fills else None
+    actual_exit_equity = float(result.get("final_equity", initial_balance))
+
+    summary = {
+        "first_reduce_ts": sim["first_reduce_ts"],
+        "first_exit_ts": sim["first_exit_ts"],
+        "actual_exit_ts": actual_exit_ts,
+        "factor_final_equity": sim["final_equity"],
+        "actual_final_equity": actual_exit_equity,
+        "equity_diff": round(sim["final_equity"] - actual_exit_equity, 6),
+    }
+
+    return sanitize_floats({
+        "session_id": session_id,
+        "interval": "1s",
+        "kline_count": len(klines),
+        "hold_start_ts": hold_start_ts,
+        "hold_end_ts": slug_end,
+        "entry_direction": entry_direction,
+        "factor_timeline": factor_timeline,
+        "simulated_equity_curve": sim["simulated_equity_curve"],
+        "summary": summary,
     })
