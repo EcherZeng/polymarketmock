@@ -90,6 +90,7 @@ class ResultSummary:
     max_drawdown: float
     avg_slippage: float
     profit_factor: float
+    btc_momentum: float
 
 
 @dataclass
@@ -121,6 +122,8 @@ class BatchTask:
 def _extract_summary(session: BacktestSession) -> ResultSummary:
     """Extract lightweight summary from a BacktestSession."""
     m = session.metrics
+    btc = session.btc_trend_info
+    btc_momentum = abs(btc["a1"] + btc["a2"]) if btc and "a1" in btc and "a2" in btc else 0.0
     return ResultSummary(
         session_id=session.session_id,
         status=session.status,
@@ -133,6 +136,7 @@ def _extract_summary(session: BacktestSession) -> ResultSummary:
         max_drawdown=m.max_drawdown,
         avg_slippage=m.avg_slippage,
         profit_factor=m.profit_factor,
+        btc_momentum=btc_momentum,
     )
 
 

@@ -54,6 +54,8 @@ export default function BatchDetailPage() {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [rerunningIds, setRerunningIds] = useState<Set<string>>(new Set())
+  const [sortField, setSortField] = useState<string | null>(null)
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
   const pageSize = 50
 
   const { data: task, isLoading, isError } = useQuery<BatchTaskDetail>({
@@ -133,11 +135,21 @@ export default function BatchDetailPage() {
   }, [results, workflows])
 
   const filteredResults = useMemo(() => {
-    if (returnFilter === "all") return results
-    return results.filter(([, r]) =>
-      returnFilter === "positive" ? r.total_return_pct > 0 : r.total_return_pct < 0,
-    )
-  }, [results, returnFilter])
+    let list = results
+    if (returnFilter !== "all") {
+      list = list.filter(([, r]) =>
+        returnFilter === "positive" ? r.total_return_pct > 0 : r.total_return_pct < 0,
+      )
+    }
+    if (sortField) {
+      list = [...list].sort((a, b) => {
+        const va = (a[1] as unknown as Record<string, number>)[sortField] ?? 0
+        const vb = (b[1] as unknown as Record<string, number>)[sortField] ?? 0
+        return sortDir === "asc" ? va - vb : vb - va
+      })
+    }
+    return list
+  }, [results, returnFilter, sortField, sortDir])
 
   const filteredStats = useMemo(() => {
     if (returnFilter === "all" || filteredResults.length === 0) return null
@@ -207,6 +219,19 @@ export default function BatchDetailPage() {
     }
   }
 
+  const toggleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"))
+    } else {
+      setSortField(field)
+      setSortDir("desc")
+    }
+    setCurrentPage(1)
+  }
+
+  const sortIndicator = (field: string) =>
+    sortField === field ? (sortDir === "asc" ? " ↑" : " ↓") : ""
+
   const selectedItems = useMemo<PortfolioItem[]>(() => {
     return results
       .filter(([, r]) => selectedIds.has(r.session_id))
@@ -223,6 +248,7 @@ export default function BatchDetailPage() {
         avg_slippage: r.avg_slippage,
         initial_balance: r.initial_balance,
         final_equity: r.final_equity,
+        btc_momentum: r.btc_momentum ?? 0,
         config: task?.config ?? {},
       }))
   }, [results, selectedIds, task])
@@ -596,13 +622,13 @@ export default function BatchDetailPage() {
                     />
                   </th>
                   <th className="px-3 py-2">数据源</th>
-                  <th className="px-3 py-2 text-right">收益率</th>
-                  <th className="px-3 py-2 text-right">Sharpe</th>
-                  <th className="px-3 py-2 text-right">胜率</th>
-                  <th className="px-3 py-2 text-right">最大回撤</th>
-                  <th className="px-3 py-2 text-right">盈亏比</th>
-                  <th className="px-3 py-2 text-right">交易数</th>
-                  <th className="px-3 py-2 text-right">滑点</th>
+                  <th className="cursor-pointer select-none px-3 py-2 text-right hover:text-foreground" onClick={() => toggleSort("total_return_pct")}>收益率{sortIndicator("total_return_pct")}</th>
+                  <th className="cursor-pointer select-none px-3 py-2 text-right hover:text-foreground" onClick={() => toggleSort("sharpe_ratio")}>Sharpe{sortIndicator("sharpe_ratio")}</th>
+                  <th className="cursor-pointer select-none px-3 py-2 text-right hover:text-foreground" onClick={() => toggleSort("win_rate")}>胜率{sortIndicator("win_rate")}</th>
+                  <th className="cursor-pointer select-none px-3 py-2 text-right hover:text-foreground" onClick={() => toggleSort("max_drawdown")}>最大回撤{sortIndicator("max_drawdown")}</th>
+                  <th className="cursor-pointer select-none px-3 py-2 text-right hover:text-foreground" onClick={() => toggleSort("btc_momentum")}>BTC动量{sortIndicator("btc_momentum")}</th>
+                  <th className="cursor-pointer select-none px-3 py-2 text-right hover:text-foreground" onClick={() => toggleSort("total_trades")}>交易数{sortIndicator("total_trades")}</th>
+                  <th className="cursor-pointer select-none px-3 py-2 text-right hover:text-foreground" onClick={() => toggleSort("avg_slippage")}>滑点{sortIndicator("avg_slippage")}</th>
                   <th className="px-3 py-2"></th>
                 </tr>
               </thead>
@@ -641,9 +667,7 @@ export default function BatchDetailPage() {
                       {(r.max_drawdown * 100).toFixed(2)}%
                     </td>
                     <td className="px-3 py-2 text-right font-mono">
-                      {r.profit_factor === Infinity
-                        ? "∞"
-                        : r.profit_factor.toFixed(2)}
+                      {(r.btc_momentum * 100).toFixed(4)}%
                     </td>
                     <td className="px-3 py-2 text-right font-mono">
                       {r.total_trades}

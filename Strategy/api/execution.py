@@ -311,6 +311,7 @@ async def get_task(batch_id: str):
                     "max_drawdown": summary.max_drawdown,
                     "avg_slippage": summary.avg_slippage,
                     "profit_factor": summary.profit_factor,
+                    "btc_momentum": summary.btc_momentum,
                 }
 
         # Serialize workflow step logs
@@ -368,6 +369,8 @@ async def cancel_task(batch_id: str):
 
 def _build_result_summary(session: BacktestSession) -> dict:
     """Build a compact result summary for batch task responses."""
+    btc = session.btc_trend_info
+    btc_momentum = abs(btc["a1"] + btc["a2"]) if btc and "a1" in btc and "a2" in btc else 0.0
     return {
         "session_id": session.session_id,
         "status": session.status,
@@ -380,6 +383,7 @@ def _build_result_summary(session: BacktestSession) -> dict:
         "max_drawdown": session.metrics.max_drawdown,
         "avg_slippage": session.metrics.avg_slippage,
         "profit_factor": session.metrics.profit_factor,
+        "btc_momentum": btc_momentum,
     }
 
 

@@ -302,6 +302,7 @@ export interface BatchResultSummary {
   max_drawdown: number
   avg_slippage: number
   profit_factor: number
+  btc_momentum: number
 }
 
 export interface StepLog {
@@ -351,6 +352,7 @@ export interface PortfolioItem {
   avg_slippage: number
   initial_balance: number
   final_equity: number
+  btc_momentum: number
   config: Record<string, unknown>
 }
 

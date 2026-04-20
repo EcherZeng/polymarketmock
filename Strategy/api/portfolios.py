@@ -41,6 +41,7 @@ class PortfolioItemBody(BaseModel):
     avg_slippage: float = 0.0
     initial_balance: float = 0.0
     final_equity: float = 0.0
+    btc_momentum: float = 0.0
     config: dict = Field(default_factory=dict)
 
 

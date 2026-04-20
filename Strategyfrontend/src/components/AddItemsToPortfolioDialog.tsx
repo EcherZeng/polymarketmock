@@ -150,6 +150,7 @@ export default function AddItemsToPortfolioDialog({
           avg_slippage: r.avg_slippage,
           initial_balance: r.initial_balance,
           final_equity: r.final_equity,
+          btc_momentum: (r as Record<string, unknown>).btc_momentum as number ?? 0,
           config: batchDetail.config ?? {},
         } as PortfolioItem,
       ])
@@ -189,6 +190,7 @@ export default function AddItemsToPortfolioDialog({
           avg_slippage: 0,
           initial_balance: 0,
           final_equity: 0,
+          btc_momentum: 0,
           config: {},
         })
       }

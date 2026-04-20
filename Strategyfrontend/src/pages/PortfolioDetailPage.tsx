@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dialog"
 import AddItemsToPortfolioDialog from "@/components/AddItemsToPortfolioDialog"
 import ReturnDistributionChart from "@/components/ReturnDistributionChart"
+import BtcMomentumDistChart from "@/components/BtcMomentumDistChart"
 import type { Portfolio } from "@/types"
 
 export default function PortfolioDetailPage() {
@@ -389,6 +390,16 @@ export default function PortfolioDetailPage() {
               <h3 className="mb-1 text-xs font-medium text-muted-foreground">收益率分布</h3>
               <ReturnDistributionChart
                 returns={portfolio.items.map((it) => getReturnPct(it.session_id, it.total_return_pct))}
+              />
+            </div>
+          )}
+
+          {/* BTC momentum distribution chart */}
+          {portfolio.items.length >= 2 && portfolio.items.some((it) => (it.btc_momentum ?? 0) > 0) && (
+            <div className="mt-4">
+              <h3 className="mb-1 text-xs font-medium text-muted-foreground">BTC 动量分布</h3>
+              <BtcMomentumDistChart
+                values={portfolio.items.map((it) => it.btc_momentum ?? 0).filter((v) => v > 0)}
               />
             </div>
           )}
