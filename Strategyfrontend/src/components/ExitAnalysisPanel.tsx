@@ -175,12 +175,13 @@ export default function ExitAnalysisPanel({ data, priceCurve, trades }: ExitAnal
               />
               <Tooltip
                 labelFormatter={(_, payload) => payload?.[0]?.payload?.fullTime ?? ""}
-                formatter={(value: number, name: string) => {
-                  if (name === "score") return [value.toFixed(4), "综合评分"]
-                  if (name === "position_pct") return [`${value.toFixed(0)}%`, "建议仓位"]
-                  if (name === "poly_price") return [`$${value.toFixed(4)}`, "Poly价格"]
-                  if (name === "sim_equity") return [`$${value.toFixed(2)}`, "模拟权益"]
-                  return [value, name]
+                formatter={(value, name) => {
+                  const v = Number(value ?? 0)
+                  if (name === "score") return [v.toFixed(4), "综合评分"]
+                  if (name === "position_pct") return [`${v.toFixed(0)}%`, "建议仓位"]
+                  if (name === "poly_price") return [`$${v.toFixed(4)}`, "Poly价格"]
+                  if (name === "sim_equity") return [`$${v.toFixed(2)}`, "模拟权益"]
+                  return [v, name]
                 }}
               />
               <Legend
