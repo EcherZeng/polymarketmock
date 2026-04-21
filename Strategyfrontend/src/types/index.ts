@@ -346,6 +346,9 @@ export interface BatchResultSummary {
   avg_slippage: number
   profit_factor: number
   btc_momentum: number
+  slug_start?: string
+  slug_end?: string
+  final_position?: number
   matched_branch?: string | null
   matched_preset?: string | null
 }

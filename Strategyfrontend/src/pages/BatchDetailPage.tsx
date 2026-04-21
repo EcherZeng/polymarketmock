@@ -642,6 +642,15 @@ export default function BatchDetailPage() {
                     />
                   </th>
                   <th className="px-3 py-2">数据源</th>
+                  {task.cumulative_capital && (
+                    <th className="cursor-pointer select-none px-3 py-2 hover:text-foreground" onClick={() => toggleSort("slug_start")}>时间{sortIndicator("slug_start")}</th>
+                  )}
+                  {task.cumulative_capital && (
+                    <th className="cursor-pointer select-none px-3 py-2 text-right hover:text-foreground" onClick={() => toggleSort("initial_balance")}>本金{sortIndicator("initial_balance")}</th>
+                  )}
+                  {task.cumulative_capital && (
+                    <th className="cursor-pointer select-none px-3 py-2 text-right hover:text-foreground" onClick={() => toggleSort("final_position")}>仓位{sortIndicator("final_position")}</th>
+                  )}
                   {task.composite_name && (
                     <th className="cursor-pointer select-none px-3 py-2 hover:text-foreground" onClick={() => toggleSort("matched_branch")}>使用策略{sortIndicator("matched_branch")}</th>
                   )}
@@ -671,6 +680,23 @@ export default function BatchDetailPage() {
                       />
                     </td>
                     <td className="px-3 py-2 font-mono text-xs">{slug}</td>
+                    {task.cumulative_capital && (
+                      <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">
+                        {r.slug_start ? fmtTimeCst(r.slug_start) : "—"}
+                        {" ~ "}
+                        {r.slug_end ? fmtTimeCst(r.slug_end) : "—"}
+                      </td>
+                    )}
+                    {task.cumulative_capital && (
+                      <td className="px-3 py-2 text-right font-mono">
+                        {r.initial_balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                    )}
+                    {task.cumulative_capital && (
+                      <td className="px-3 py-2 text-right font-mono">
+                        {(r.final_position ?? 0).toFixed(4)}
+                      </td>
+                    )}
                     {task.composite_name && (
                       <td className="px-3 py-2 text-xs">
                         {r.matched_branch ? (

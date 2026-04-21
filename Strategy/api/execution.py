@@ -372,6 +372,9 @@ async def get_task(batch_id: str):
                     "avg_slippage": summary.avg_slippage,
                     "profit_factor": summary.profit_factor,
                     "btc_momentum": summary.btc_momentum,
+                    "slug_start": summary.slug_start,
+                    "slug_end": summary.slug_end,
+                    "final_position": summary.final_position,
                     "matched_branch": summary.matched_branch,
                     "matched_preset": summary.matched_preset,
                 }
@@ -448,6 +451,9 @@ def _build_result_summary(session: BacktestSession) -> dict:
         "avg_slippage": session.metrics.avg_slippage,
         "profit_factor": session.metrics.profit_factor,
         "btc_momentum": btc_momentum,
+        "slug_start": session.slug_start,
+        "slug_end": session.slug_end,
+        "final_position": round(sum(abs(v) for v in session.final_positions.values()), 6),
         "matched_branch": None,
         "matched_preset": None,
     }

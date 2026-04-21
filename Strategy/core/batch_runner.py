@@ -92,6 +92,9 @@ class ResultSummary:
     avg_slippage: float
     profit_factor: float
     btc_momentum: float
+    slug_start: str = ""
+    slug_end: str = ""
+    final_position: float = 0.0
     matched_branch: str | None = None
     matched_preset: str | None = None
 
@@ -130,6 +133,7 @@ def _extract_summary(session: BacktestSession) -> ResultSummary:
     m = session.metrics
     btc = session.btc_trend_info
     btc_momentum = abs(btc["a1"] + btc["a2"]) if btc and "a1" in btc and "a2" in btc else 0.0
+    final_position = sum(abs(v) for v in session.final_positions.values())
     return ResultSummary(
         session_id=session.session_id,
         status=session.status,
@@ -143,6 +147,9 @@ def _extract_summary(session: BacktestSession) -> ResultSummary:
         avg_slippage=m.avg_slippage,
         profit_factor=m.profit_factor,
         btc_momentum=btc_momentum,
+        slug_start=session.slug_start,
+        slug_end=session.slug_end,
+        final_position=round(final_position, 6),
     )
 
 
