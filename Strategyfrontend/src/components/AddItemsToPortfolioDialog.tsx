@@ -142,11 +142,11 @@ export default function AddItemsToPortfolioDialog({
   const batchResults = useMemo<[string, PortfolioItem][]>(() => {
     if (!batchDetail?.results) return []
 
-    // Build slug → trade_order from capital_chain (cumulative mode)
+    // Build slug → trade_order from slugs array (preserves execution order)
     const slugOrderMap = new Map<string, number>()
-    if (batchDetail.cumulative_capital && batchDetail.capital_chain?.length) {
-      batchDetail.capital_chain.forEach((entry, idx) => {
-        slugOrderMap.set(entry.slug, idx + 1)
+    if (batchDetail.slugs?.length) {
+      batchDetail.slugs.forEach((s, idx) => {
+        slugOrderMap.set(s, idx + 1)
       })
     }
 

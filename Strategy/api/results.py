@@ -119,7 +119,7 @@ async def get_positions(session_id: str):
 
 
 class _FirstTradeSummaryReq(BaseModel):
-    session_ids: list[str] = Field(..., min_length=1, max_length=500)
+    session_ids: list[str] = Field(..., max_length=2000)
 
 
 def _compute_first_trade(result: dict) -> dict | None:
@@ -188,8 +188,10 @@ def _compute_first_trade(result: dict) -> dict | None:
 async def first_trade_summary(req: _FirstTradeSummaryReq):
     """Batch-compute first-trade PnL for given session_ids.
 
-    Returns ``{session_id: {pnl, return_pct, cost, token_id} | null}``.
+    Returns ``{session_id: {pnl, return_pct, cost, token_id, trades_count} | null}``.
     """
+    if not req.session_ids:
+        return {}
     store = _get_store()
     out: dict[str, dict | None] = {}
     for sid in req.session_ids:

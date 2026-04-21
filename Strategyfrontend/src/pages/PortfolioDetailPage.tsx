@@ -60,12 +60,15 @@ export default function PortfolioDetailPage() {
 
   // First-trade summary (lazy, only when toggle is on)
   const sessionIdsForFirstTrade = useMemo(
-    () => portfolio?.items.map((it) => it.session_id) ?? [],
+    () => portfolio?.items.map((it) => it.session_id).filter(Boolean) ?? [],
     [portfolio],
   )
   const { data: firstTradeMap } = useQuery<Record<string, FirstTradeSummaryItem | null>>({
-    queryKey: ["first-trade-summary", portfolioId],
-    queryFn: () => fetchFirstTradeSummary(sessionIdsForFirstTrade),
+    queryKey: ["first-trade-summary", portfolioId, sessionIdsForFirstTrade.length],
+    queryFn: () => {
+      if (sessionIdsForFirstTrade.length === 0) return Promise.resolve({})
+      return fetchFirstTradeSummary(sessionIdsForFirstTrade)
+    },
     enabled: firstTradeMode && sessionIdsForFirstTrade.length > 0,
     staleTime: 5 * 60_000,
   })
