@@ -206,6 +206,7 @@ export interface FirstTradeSummaryItem {
   return_pct: number
   cost: number
   token_id: string
+  trades_count: number
 }
 
 export async function fetchFirstTradeSummary(

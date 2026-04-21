@@ -141,6 +141,15 @@ export default function AddItemsToPortfolioDialog({
 
   const batchResults = useMemo<[string, PortfolioItem][]>(() => {
     if (!batchDetail?.results) return []
+
+    // Build slug → trade_order from capital_chain (cumulative mode)
+    const slugOrderMap = new Map<string, number>()
+    if (batchDetail.cumulative_capital && batchDetail.capital_chain?.length) {
+      batchDetail.capital_chain.forEach((entry, idx) => {
+        slugOrderMap.set(entry.slug, idx + 1)
+      })
+    }
+
     return Object.entries(batchDetail.results)
       .filter(([, r]) => !existingSessionIds.has(r.session_id))
       .map(([slug, r]) => [
@@ -160,6 +169,8 @@ export default function AddItemsToPortfolioDialog({
           final_equity: r.final_equity,
           btc_momentum: (r as unknown as Record<string, unknown>).btc_momentum as number ?? 0,
           config: batchDetail.config ?? {},
+          trade_order: slugOrderMap.get(slug) ?? null,
+          final_position: r.final_position ?? null,
         } as PortfolioItem,
       ])
   }, [batchDetail, existingSessionIds])

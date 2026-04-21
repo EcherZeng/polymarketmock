@@ -346,8 +346,6 @@ export interface BatchResultSummary {
   avg_slippage: number
   profit_factor: number
   btc_momentum: number
-  slug_start?: string
-  slug_end?: string
   final_position?: number
   matched_branch?: string | null
   matched_preset?: string | null
@@ -430,6 +428,8 @@ export interface PortfolioItem {
   final_equity: number
   btc_momentum: number
   config: Record<string, unknown>
+  trade_order?: number | null
+  final_position?: number | null
 }
 
 export interface Portfolio {
@@ -442,6 +442,7 @@ export interface Portfolio {
   items: PortfolioItem[]
   is_container: boolean
   is_strategy_group: boolean
+  is_cumulative_capital: boolean
   group_strategy: string | null
   group_config: Record<string, unknown> | null
 }

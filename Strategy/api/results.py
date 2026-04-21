@@ -125,12 +125,11 @@ class _FirstTradeSummaryReq(BaseModel):
 def _compute_first_trade(result: dict) -> dict | None:
     """Extract PnL from the first BUY trade in *result*.
 
-    Returns ``{pnl, return_pct, cost, token_id}`` or *None* when
-    no BUY exists.
+    Returns ``{pnl, return_pct, cost, token_id, trades_count}`` or
+    *None* when no BUY exists.
     """
     trades = result.get("trades", [])
     settlement = result.get("settlement_result") or {}
-    initial_balance = result.get("initial_balance", 0.0)
 
     # Find the chronologically first BUY
     first_buy = None
@@ -149,6 +148,7 @@ def _compute_first_trade(result: dict) -> dict | None:
     # Check if first-buy quantity was (partially) sold later
     sold_qty = 0.0
     sell_revenue = 0.0
+    sell_count = 0
     remaining = buy_qty
     for t in trades:
         if t is first_buy:
@@ -160,6 +160,7 @@ def _compute_first_trade(result: dict) -> dict | None:
             continue
         sell_revenue += can_sell * t.get("avg_price", 0.0)
         sold_qty += can_sell
+        sell_count += 1
         remaining -= can_sell
         if remaining <= 0:
             break
@@ -172,14 +173,14 @@ def _compute_first_trade(result: dict) -> dict | None:
 
     trade_pnl = sell_revenue - buy_price * sold_qty
     total_pnl = round(trade_pnl + settle_pnl, 6)
-    # Use initial_balance as denominator to stay consistent with total_return_pct
-    return_pct = round(total_pnl / initial_balance, 6) if initial_balance > 0 else 0.0
+    return_pct = round(total_pnl / cost, 6) if cost > 0 else 0.0
 
     return {
         "pnl": total_pnl,
         "return_pct": return_pct,
         "cost": round(cost, 6),
         "token_id": token_id,
+        "trades_count": 1 + sell_count,
     }
 
 

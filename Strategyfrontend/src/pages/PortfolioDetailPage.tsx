@@ -156,6 +156,15 @@ export default function PortfolioDetailPage() {
     return ft != null ? ft.return_pct : fallback
   }
 
+  // Helper: get trades count for an item (respects first-trade mode)
+  const getTradesCount = (sessionId: string, fallback: number) => {
+    if (!firstTradeMode || !firstTradeMap) return { count: fallback, isFirstTrade: false }
+    const ft = firstTradeMap[sessionId]
+    return ft != null
+      ? { count: ft.trades_count, isFirstTrade: true }
+      : { count: fallback, isFirstTrade: false }
+  }
+
   const stats = useMemo(() => {
     if (!portfolio || portfolio.items.length === 0) return null
     const items = portfolio.items
@@ -172,6 +181,12 @@ export default function PortfolioDetailPage() {
       avgDrawdown:
         items.reduce((a, it) => a + it.max_drawdown, 0) / items.length * 100,
       totalTrades: items.reduce((a, it) => a + it.total_trades, 0),
+      firstTradeTotalTrades: firstTradeMode && firstTradeMap
+        ? items.reduce((a, it) => {
+            const ft = firstTradeMap[it.session_id]
+            return a + (ft != null ? ft.trades_count : it.total_trades)
+          }, 0)
+        : undefined,
     }
   }, [portfolio, firstTradeMode, firstTradeMap])
 
@@ -207,6 +222,12 @@ export default function PortfolioDetailPage() {
       medianReturn: median * 100,
       avgSharpe: filteredItems.reduce((a, it) => a + it.sharpe_ratio, 0) / filteredItems.length,
       totalTrades: filteredItems.reduce((a, it) => a + it.total_trades, 0),
+      firstTradeTotalTrades: firstTradeMode && firstTradeMap
+        ? filteredItems.reduce((a, it) => {
+            const ft = firstTradeMap[it.session_id]
+            return a + (ft != null ? ft.trades_count : it.total_trades)
+          }, 0)
+        : undefined,
     }
   }, [filteredItems, returnFilter, firstTradeMode, firstTradeMap])
 
@@ -351,6 +372,11 @@ export default function PortfolioDetailPage() {
               <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
                 策略组
               </span>
+              {portfolio.is_cumulative_capital && (
+                <span className="rounded-full bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-600">
+                  累计本金
+                </span>
+              )}
               <span className="text-sm font-semibold">{portfolio.group_strategy}</span>
             </div>
             <Button
@@ -724,7 +750,14 @@ export default function PortfolioDetailPage() {
           <StatCard label="最差收益" value={`${stats.worstReturn.toFixed(2)}%`} color="red" />
           <StatCard label="平均 Sharpe" value={stats.avgSharpe.toFixed(4)} />
           <StatCard label="平均回撤" value={`${stats.avgDrawdown.toFixed(2)}%`} />
-          <StatCard label="总交易数" value={`${stats.totalTrades}`} />
+          <StatCard
+            label="总交易数"
+            value={
+              stats.firstTradeTotalTrades != null
+                ? `${stats.firstTradeTotalTrades}(${stats.totalTrades})`
+                : `${stats.totalTrades}`
+            }
+          />
         </div>
       )}
 
@@ -813,7 +846,11 @@ export default function PortfolioDetailPage() {
                 </b>
               </span>
               <span>平均 Sharpe: <b>{filteredStats.avgSharpe.toFixed(4)}</b></span>
-              <span>总交易数: <b>{filteredStats.totalTrades}</b></span>
+              <span>总交易数: <b>{
+                filteredStats.firstTradeTotalTrades != null
+                  ? `${filteredStats.firstTradeTotalTrades}(${filteredStats.totalTrades})`
+                  : filteredStats.totalTrades
+              }</b></span>
             </div>
           )}
           <div className="overflow-auto">
@@ -829,14 +866,23 @@ export default function PortfolioDetailPage() {
                       onCheckedChange={toggleSelectAll}
                     />
                   </th>
+                  {portfolio.is_cumulative_capital && (
+                    <th className="px-3 py-2 text-right">序号</th>
+                  )}
                   <th className="px-3 py-2">数据源</th>
                   <th className="px-3 py-2">策略</th>
+                  {portfolio.is_cumulative_capital && (
+                    <th className="px-3 py-2 text-right">本金</th>
+                  )}
                   <th className="px-3 py-2 text-right">收益率</th>
                   <th className="px-3 py-2 text-right">Sharpe</th>
                   <th className="px-3 py-2 text-right">胜率</th>
                   <th className="px-3 py-2 text-right">最大回撤</th>
                   <th className="px-3 py-2 text-right">盈亏比</th>
                   <th className="px-3 py-2 text-right">交易数</th>
+                  {portfolio.is_cumulative_capital && (
+                    <th className="px-3 py-2 text-right">仓位</th>
+                  )}
                   <th className="px-3 py-2"></th>
                 </tr>
               </thead>
@@ -855,8 +901,18 @@ export default function PortfolioDetailPage() {
                         onCheckedChange={() => toggleSelect(it.session_id)}
                       />
                     </td>
+                    {portfolio.is_cumulative_capital && (
+                      <td className="px-3 py-2 text-right font-mono text-xs text-muted-foreground">
+                        {it.trade_order ?? "-"}
+                      </td>
+                    )}
                     <td className="px-3 py-2 font-mono text-xs">{it.slug}</td>
                     <td className="px-3 py-2 text-xs">{it.strategy}</td>
+                    {portfolio.is_cumulative_capital && (
+                      <td className="px-3 py-2 text-right font-mono text-xs">
+                        {it.initial_balance.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                      </td>
+                    )}
                     {(() => {
                       const ret = getReturnPct(it.session_id, it.total_return_pct)
                       return (
@@ -885,9 +941,25 @@ export default function PortfolioDetailPage() {
                         ? "∞"
                         : it.profit_factor.toFixed(2)}
                     </td>
-                    <td className="px-3 py-2 text-right font-mono">
-                      {it.total_trades}
-                    </td>
+                    {(() => {
+                      const tc = getTradesCount(it.session_id, it.total_trades)
+                      return (
+                        <td className="px-3 py-2 text-right font-mono">
+                          {tc.isFirstTrade ? (
+                            <>{tc.count}<span className="text-muted-foreground">({it.total_trades})</span></>
+                          ) : (
+                            it.total_trades
+                          )}
+                        </td>
+                      )
+                    })()}
+                    {portfolio.is_cumulative_capital && (
+                      <td className="px-3 py-2 text-right font-mono text-xs">
+                        {it.final_position != null && it.final_position > 0
+                          ? it.final_position.toLocaleString(undefined, { maximumFractionDigits: 4 })
+                          : <span className="text-muted-foreground">0</span>}
+                      </td>
+                    )}
                     <td className="px-3 py-2 text-right">
                       <Link
                         to={`/results/${it.session_id}`}

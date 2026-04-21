@@ -43,6 +43,8 @@ class PortfolioItemBody(BaseModel):
     final_equity: float = 0.0
     btc_momentum: float = 0.0
     config: dict = Field(default_factory=dict)
+    trade_order: int | None = None
+    final_position: float | None = None
 
 
 class CreatePortfolioBody(BaseModel):
@@ -106,6 +108,7 @@ def _enrich_portfolio(p: dict) -> dict:
         p["is_strategy_group"] = False
         p["group_strategy"] = None
         p["group_config"] = None
+        p["is_cumulative_capital"] = False
         return p
 
     first_strategy = items[0].get("strategy", "")
@@ -120,6 +123,14 @@ def _enrich_portfolio(p: dict) -> dict:
     p["is_strategy_group"] = is_group
     p["group_strategy"] = first_strategy if is_group else None
     p["group_config"] = first_config if is_group else None
+
+    # Cumulative capital detection: strategy group with non-uniform initial_balance
+    if is_group and len(items) >= 2:
+        balances = {it.get("initial_balance", 0) for it in items}
+        p["is_cumulative_capital"] = len(balances) > 1
+    else:
+        p["is_cumulative_capital"] = False
+
     return p
 
 

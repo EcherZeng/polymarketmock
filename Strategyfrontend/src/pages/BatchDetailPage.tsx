@@ -111,6 +111,14 @@ export default function BatchDetailPage() {
     return Object.entries(task.results)
   }, [task])
 
+  // Slug → 1-based execution order (cumulative capital mode)
+  const slugOrderMap = useMemo<Record<string, number>>(() => {
+    if (!task?.slugs) return {}
+    const m: Record<string, number> = {}
+    task.slugs.forEach((s, i) => { m[s] = i + 1 })
+    return m
+  }, [task])
+
   const workflows = useMemo<[string, SlugWorkflow][]>(() => {
     if (!task?.workflows) return []
     return Object.entries(task.workflows)
@@ -144,6 +152,12 @@ export default function BatchDetailPage() {
     }
     if (sortField) {
       list = [...list].sort((a, b) => {
+        // Virtual _order field: sort by execution sequence in cumulative mode
+        if (sortField === "_order") {
+          const oa = slugOrderMap[a[0]] ?? 0
+          const ob = slugOrderMap[b[0]] ?? 0
+          return sortDir === "asc" ? oa - ob : ob - oa
+        }
         const ra = a[1] as unknown as Record<string, unknown>
         const rb = b[1] as unknown as Record<string, unknown>
         const va = ra[sortField]
@@ -160,7 +174,7 @@ export default function BatchDetailPage() {
       })
     }
     return list
-  }, [results, returnFilter, sortField, sortDir])
+  }, [results, returnFilter, sortField, sortDir, slugOrderMap])
 
   const filteredStats = useMemo(() => {
     if (returnFilter === "all" || filteredResults.length === 0) return null
@@ -643,7 +657,7 @@ export default function BatchDetailPage() {
                   </th>
                   <th className="px-3 py-2">数据源</th>
                   {task.cumulative_capital && (
-                    <th className="cursor-pointer select-none px-3 py-2 hover:text-foreground" onClick={() => toggleSort("slug_start")}>时间{sortIndicator("slug_start")}</th>
+                    <th className="cursor-pointer select-none px-3 py-2 text-right hover:text-foreground" onClick={() => toggleSort("_order")}>顺序{sortIndicator("_order")}</th>
                   )}
                   {task.cumulative_capital && (
                     <th className="cursor-pointer select-none px-3 py-2 text-right hover:text-foreground" onClick={() => toggleSort("initial_balance")}>本金{sortIndicator("initial_balance")}</th>
@@ -681,10 +695,8 @@ export default function BatchDetailPage() {
                     </td>
                     <td className="px-3 py-2 font-mono text-xs">{slug}</td>
                     {task.cumulative_capital && (
-                      <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">
-                        {r.slug_start ? fmtTimeCst(r.slug_start) : "—"}
-                        {" ~ "}
-                        {r.slug_end ? fmtTimeCst(r.slug_end) : "—"}
+                      <td className="px-3 py-2 text-right font-mono text-xs">
+                        {slugOrderMap[slug] ?? "—"}
                       </td>
                     )}
                     {task.cumulative_capital && (
