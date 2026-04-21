@@ -173,7 +173,8 @@ def _compute_first_trade(result: dict) -> dict | None:
 
     trade_pnl = sell_revenue - buy_price * sold_qty
     total_pnl = round(trade_pnl + settle_pnl, 6)
-    return_pct = round(total_pnl / cost, 6) if cost > 0 else 0.0
+    initial_balance = result.get("initial_balance", 0)
+    return_pct = round(total_pnl / initial_balance, 6) if initial_balance > 0 else 0.0
 
     return {
         "pnl": total_pnl,

@@ -131,7 +131,7 @@ def _extract_summary(session: BacktestSession) -> ResultSummary:
     m = session.metrics
     btc = session.btc_trend_info
     btc_momentum = abs(btc["a1"] + btc["a2"]) if btc and "a1" in btc and "a2" in btc else 0.0
-    final_position = sum(abs(v) for v in session.final_positions.values())
+    final_position = session.config.get("position_max_pct", 1.0)
     return ResultSummary(
         session_id=session.session_id,
         status=session.status,

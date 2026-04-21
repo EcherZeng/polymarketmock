@@ -275,8 +275,10 @@ export default function BatchDetailPage() {
         final_equity: r.final_equity,
         btc_momentum: r.btc_momentum ?? 0,
         config: task?.config ?? {},
+        trade_order: task?.cumulative_capital ? slugOrderMap[slug] : undefined,
+        final_position: r.final_position ?? undefined,
       }))
-  }, [results, selectedIds, task])
+  }, [results, selectedIds, task, slugOrderMap])
 
   if (isLoading) {
     return <div className="py-12 text-center text-muted-foreground">加载中...</div>

@@ -449,7 +449,7 @@ def _build_result_summary(session: BacktestSession) -> dict:
         "avg_slippage": session.metrics.avg_slippage,
         "profit_factor": session.metrics.profit_factor,
         "btc_momentum": btc_momentum,
-        "final_position": round(sum(abs(v) for v in session.final_positions.values()), 6),
+        "final_position": session.config.get("position_max_pct", 1.0),
         "matched_branch": None,
         "matched_preset": None,
     }
