@@ -117,6 +117,29 @@ export function useLiveWs(): UseLiveWsReturn {
           break
         }
 
+        case "poly_price_history": {
+          // Session-scoped Poly Up/Down price history cache (like btc_history)
+          // Data format: { token_id: [{mid, bid, ask, anchor, outcome, timestamp}, ...] }
+          const historyMap = msg.data as Record<string, Array<{
+            mid: number; bid: number; ask: number; anchor: number; outcome: string; timestamp: string
+          }>>
+          const upPoints: { timestamp: string; mid: number; bid: number; ask: number }[] = []
+          const downPoints: { timestamp: string; mid: number; bid: number; ask: number }[] = []
+          for (const points of Object.values(historyMap)) {
+            for (const pt of points) {
+              const mapped = { timestamp: pt.timestamp, mid: pt.mid, bid: pt.bid, ask: pt.ask }
+              if (pt.outcome === "Up") {
+                upPoints.push(mapped)
+              } else if (pt.outcome === "Down") {
+                downPoints.push(mapped)
+              }
+            }
+          }
+          if (upPoints.length > 0) setUpPrices(upPoints.slice(-MAX_MARKET_POINTS))
+          if (downPoints.length > 0) setDownPrices(downPoints.slice(-MAX_MARKET_POINTS))
+          break
+        }
+
         case "ping":
           // Server keepalive, no action needed
           break

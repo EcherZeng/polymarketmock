@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { cn, fmtUsd, pnlColor, fmtDateTimeCst } from "@/lib/utils"
+import { cn, fmtUsd, pnlColor, fmtDateTimeCst, descText } from "@/lib/utils"
 import type { SessionSlot, SessionState } from "@/types"
 import {
   Activity,
@@ -27,8 +27,10 @@ import {
   CircleDot,
   Settings2,
   X,
+  Download,
 } from "lucide-react"
 import { useState } from "react"
+import { toast } from "sonner"
 
 const stateColors: Record<SessionState, string> = {
   discovered: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",
@@ -80,6 +82,17 @@ export default function DashboardPage() {
   const { data: trades } = useTrades(undefined, 20)
   const { data: config } = useConfig()
   const [showStrategy, setShowStrategy] = useState(false)
+
+  const loadPresetMut = useMutation({
+    mutationFn: (presetName: string) => tradeApi.loadPreset(presetName),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["trade", "config"] })
+      toast.success(`已加载预设「${data.preset_name}」：${Object.keys(data.applied).length} 个参数已应用`)
+    },
+    onError: (err: Error) => {
+      toast.error(`加载失败: ${err.message}`)
+    },
+  })
 
   const pauseMut = useMutation({
     mutationFn: tradeApi.pause,
@@ -138,19 +151,39 @@ export default function DashboardPage() {
             <CardDescription>当前运行的实时交易策略及其参数</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {config.strategy && config.strategy.length > 0 && (
+            {/* Active live strategy */}
+            {config.active_strategy && (
               <div>
-                <p className="text-sm text-muted-foreground mb-1">策略名称</p>
+                <p className="text-sm text-muted-foreground mb-1">当前实时策略</p>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="font-mono">{config.active_strategy}</Badge>
+                  {config.local_strategies?.find((s) => s.name === config.active_strategy) && (
+                    <span className="text-xs text-muted-foreground">
+                      v{config.local_strategies.find((s) => s.name === config.active_strategy)!.version}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+            {/* Backtest strategies from Strategy service */}
+            {config.backtest_strategies && config.backtest_strategies.length > 0 && (
+              <div>
+                <p className="text-sm text-muted-foreground mb-1">可用回测策略（点击加载参数）</p>
                 <div className="flex flex-wrap gap-2">
-                  {config.strategy.map((s) => (
-                    <Badge key={s.name} variant="outline" className="font-mono">{s.name}</Badge>
+                  {config.backtest_strategies.map((s) => (
+                    <Button
+                      key={s.name}
+                      variant="secondary"
+                      size="sm"
+                      className="font-mono text-xs gap-1"
+                      disabled={loadPresetMut.isPending}
+                      onClick={() => loadPresetMut.mutate(s.name)}
+                    >
+                      <Download className="h-3 w-3" />
+                      {s.name}
+                    </Button>
                   ))}
                 </div>
-                {config.strategy.map((s) => (
-                  s.description && (
-                    <p key={s.name} className="text-xs text-muted-foreground mt-1">{s.description} · v{s.version}</p>
-                  )
-                ))}
               </div>
             )}
             {config.current_config && Object.keys(config.current_config).length > 0 && (

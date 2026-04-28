@@ -36,11 +36,11 @@ class TradeSettings(BaseSettings):
     executor_mode: str = "mock"         # "real" | "mock"
 
     # ── Market scanning ───────────────────────────────────────────────────────
-    scan_interval_s: int = 30           # Gamma API poll interval
+    scan_interval_s: int = 120          # Gamma API poll interval (2 min, 15-min sessions)
     scan_slug_prefix: str = "btc-updown-15m"
     scan_duration_s: int = 900          # 15 minutes
     scan_slots_before: int = 1          # past sessions to keep
-    scan_slots_after: int = 4           # future sessions to discover
+    scan_slots_after: int = 2           # future sessions to discover
 
     # ── WebSocket ─────────────────────────────────────────────────────────────
     ws_ping_interval: int = 10          # app-level PING every N seconds
@@ -48,7 +48,6 @@ class TradeSettings(BaseSettings):
 
     # ── Session management ────────────────────────────────────────────────────
     session_prepare_ahead_s: int = 60   # pre-connect WS N seconds before start
-    session_observation_s: int = 600    # first 10 min: observe only, no trades
 
     # ── Order execution ───────────────────────────────────────────────────────
     min_trade_usdc: float = 10.0        # Polymarket minimum
@@ -57,11 +56,14 @@ class TradeSettings(BaseSettings):
     chain_id: int = 137                 # Polygon mainnet
 
     # ── Settlement ────────────────────────────────────────────────────────────
-    settlement_poll_interval_s: int = 30  # poll Gamma for resolution
+    settlement_poll_interval_s: int = 60  # poll Gamma for resolution (1 min)
     settlement_poll_max_s: int = 600      # give up after 10 min
 
     # ── Strategy defaults ─────────────────────────────────────────────────────
     initial_balance: float = 0.0        # for PnL tracking (0 = auto-detect from API)
+
+    # ── Strategy service ──────────────────────────────────────────────────────
+    strategy_service_url: str = "http://localhost:8072"  # Strategy backtest engine
 
     model_config = {"env_prefix": "TRADE_", "env_file": _TRADE_DIR / ".env"}
 

@@ -58,3 +58,10 @@ export function pnlColor(value: number): string {
   if (value < 0) return "text-red-600 dark:text-red-400"
   return "text-muted-foreground"
 }
+
+/** Extract display text from a description that may be string or i18n dict */
+export function descText(desc: string | { zh: string; en: string } | undefined): string {
+  if (!desc) return ""
+  if (typeof desc === "string") return desc
+  return desc.zh || desc.en || ""
+}

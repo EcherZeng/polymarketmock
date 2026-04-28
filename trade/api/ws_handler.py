@@ -101,6 +101,12 @@ async def _send_initial_snapshot(ws: WebSocket):
         if slot.btc_history:
             await _ws_send(ws, "btc_history", slot.btc_history)
 
+    # Poly Up/Down price history — session-scoped cache (like BTC)
+    if _session_manager and _session_manager.current_session:
+        slot = _session_manager.current_session
+        if slot.poly_price_history:
+            await _ws_send(ws, "poly_price_history", slot.poly_price_history)
+
     # Recent price snapshots for active session
     if _store and _session_manager and _session_manager.current_session:
         slug = _session_manager.current_session.session.slug

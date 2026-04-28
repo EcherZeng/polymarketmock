@@ -2,6 +2,11 @@
 
 Manages the lifecycle: discover → prepare → active → closing → settled,
 with seamless handoff between consecutive sessions.
+
+Integrates BTC two-window sita mechanism:
+- After window_2 time elapses, computes BTC trend from Binance klines
+- Feeds trend result to strategy (gatekeeper for entry)
+- Supports composite strategy: selects branch config by BTC amplitude
 """
 
 from __future__ import annotations
@@ -13,13 +18,14 @@ from datetime import datetime, timezone
 
 from config import settings
 from core.base_executor import BaseExecutor
+from core.btc_trend import compute_session_btc_trend
 from core.data_store import DataStore
 from core.live_hub import LiveHub
 from core.market_scanner import MarketScanner
 from core.orderbook_builder import OrderbookBuilder
 from core.position_tracker import PositionTracker
 from core.settlement_tracker import SettlementTracker
-from core.strategy_engine import get_strategy
+from core.strategy_engine import CompositeConfig, get_strategy
 from core.types import (
     ErrorAction,
     LiveFill,
@@ -29,6 +35,7 @@ from core.types import (
     SessionResult,
     SessionState,
     TradeError,
+    slug_to_iso,
 )
 from core.ws_client import PolymarketWSClient
 from strategies.base_live import BaseLiveStrategy
@@ -48,6 +55,15 @@ class SessionSlot:
         self.error: str = ""
         # Per-session BTC price history (recorded during ACTIVE window)
         self.btc_history: list[dict] = []
+        # BTC trend computation state
+        self.btc_trend_computed = False
+        self.btc_trend_info: dict = {}
+        self.matched_branch: str | None = None
+        # Whether the session ended without any trades
+        self.no_trades = False
+        # Per-session Poly Up/Down price history (recorded during ACTIVE window)
+        # token_id → list of {mid, bid, ask, anchor, timestamp}
+        self.poly_price_history: dict[str, list[dict]] = {}
 
 
 class SessionManager:
@@ -64,6 +80,7 @@ class SessionManager:
         btc_streamer=None,
         strategy_name: str = "btc_15m_live",
         strategy_config: dict | None = None,
+        composite_config: CompositeConfig | None = None,
     ) -> None:
         self._scanner = scanner
         self._executor = executor
@@ -74,6 +91,7 @@ class SessionManager:
         self._btc_streamer = btc_streamer
         self._strategy_name = strategy_name
         self._strategy_config = strategy_config or {}
+        self._composite_config = composite_config  # None = single strategy mode
 
         self._ws: PolymarketWSClient | None = None
         self._current: SessionSlot | None = None
@@ -89,6 +107,8 @@ class SessionManager:
         self._last_price_write: dict[str, float] = {}
         # BTC recording throttle (1s)
         self._last_btc_record: float = 0.0
+        # Poly price recording throttle (1s)
+        self._last_poly_record: float = 0.0
 
     # ── Public state ──────────────────────────────────────────
 
@@ -131,6 +151,12 @@ class SessionManager:
             "time_remaining_s": round(max(0, remaining), 1),
             "trades": len(slot.trades),
             "has_position": self._tracker.has_position(),
+            "btc_trend_computed": slot.btc_trend_computed,
+            "btc_trend_passed": slot.btc_trend_info.get("passed") if slot.btc_trend_info else None,
+            "btc_amplitude": slot.btc_trend_info.get("amplitude") if slot.btc_trend_info else None,
+            "btc_direction": slot.btc_trend_info.get("direction") if slot.btc_trend_info else None,
+            "matched_branch": slot.matched_branch,
+            "no_trades": slot.no_trades,
         }
 
     # ── Config update ─────────────────────────────────────────
@@ -138,6 +164,18 @@ class SessionManager:
     def update_config(self, config: dict) -> None:
         self._strategy_config.update(config)
         logger.info("Strategy config updated: %s", config)
+
+    def set_composite_config(self, composite: CompositeConfig | None) -> None:
+        """Set or clear composite strategy configuration."""
+        self._composite_config = composite
+        if composite:
+            logger.info("Composite strategy set: %s (%d branches)", composite.name, len(composite.branches))
+        else:
+            logger.info("Composite strategy cleared — using single strategy mode")
+
+    @property
+    def composite_config(self) -> CompositeConfig | None:
+        return self._composite_config
 
     def pause(self) -> None:
         self._paused = True
@@ -200,6 +238,33 @@ class SessionManager:
                     }
                     self._current.btc_history.append(point)
 
+        # ── 0b. Record Poly Up/Down prices into active session ──
+        if self._current and self._current.state == SessionState.ACTIVE:
+            mono_now = time.monotonic()
+            if mono_now - self._last_poly_record >= 1.0:
+                self._last_poly_record = mono_now
+                for i, token_id in enumerate(self._current.session.token_ids):
+                    mkt = self._current.ob.get_market_data(token_id)
+                    if mkt.mid_price > 0:
+                        outcome = (
+                            self._current.session.outcomes[i]
+                            if i < len(self._current.session.outcomes)
+                            else "Unknown"
+                        )
+                        point = {
+                            "mid": mkt.mid_price,
+                            "bid": mkt.best_bid,
+                            "ask": mkt.best_ask,
+                            "anchor": mkt.anchor_price,
+                            "outcome": outcome,
+                            "timestamp": now.isoformat(),
+                        }
+                        hist = self._current.poly_price_history.setdefault(token_id, [])
+                        hist.append(point)
+                        # Cap at 900 points (15 min @ 1s)
+                        if len(hist) > 900:
+                            self._current.poly_price_history[token_id] = hist[-900:]
+
         # ── 1. Discover sessions ──
         if not self._current and not self._next:
             info = self._scanner.get_current_or_next()
@@ -227,13 +292,13 @@ class SessionManager:
             if now_ts >= self._current.session.start_epoch:
                 await self._activate_slot(self._current)
 
-        # ── 4. Handle active session expiry → rotate immediately ──
-        if self._current and self._current.state == SessionState.ACTIVE:
+        # ── 4. Handle active/skipped session expiry → rotate immediately ──
+        if self._current and self._current.state in (SessionState.ACTIVE, SessionState.SKIPPED):
             remaining = self._current.session.end_epoch - now_ts
             if remaining <= 0:
                 # Session ended — move to settling (background) and rotate
                 await self._expire_and_rotate()
-            elif not self._paused:
+            elif not self._paused and self._current.state == SessionState.ACTIVE:
                 await self._process_active_session(self._current, remaining)
 
         # ── 5. Background settlement processing ──
@@ -248,16 +313,35 @@ class SessionManager:
                     await self._hub.broadcast("market", market)
 
     async def _expire_and_rotate(self) -> None:
-        """Current session ended — move to settling, promote next immediately."""
+        """Current session ended — finalize before moving to settling.
+
+        1. Attempt one final close check (force-close open positions).
+        2. Mark whether any trades happened (no_trades flag).
+        3. Transition to CLOSING → settling queue.
+        4. Promote next session.
+        WS events continue to flow to settling sessions via _on_ws_event.
+        """
         old = self._current
         assert old is not None
 
+        # ── 1. Finalize session: force-close attempt if positions open ──
+        await self._finalize_session(old)
+
+        # ── 2. Mark no-trades if the session had zero fills ──
+        if len(old.trades) == 0:
+            old.no_trades = True
+            logger.info("Session %s ended with no trades", old.session.slug)
+
+        # ── 3. Transition to CLOSING and add to settling queue ──
         old.state = SessionState.CLOSING
         self._store.save_session(old.session, SessionState.CLOSING)
         self._settling.append(old)
-        logger.info("Session expired → settling: %s", old.session.slug)
+        logger.info(
+            "Session expired → settling: %s (trades=%d, no_trades=%s)",
+            old.session.slug, len(old.trades), old.no_trades,
+        )
 
-        # Immediately promote next → current
+        # ── 4. Promote next → current ──
         self._current = self._next
         self._next = None
 
@@ -273,8 +357,32 @@ class SessionManager:
                 await self._hub.broadcast("session", self.get_status())
                 # Send empty btc_history for the new session (will fill as data arrives)
                 await self._hub.broadcast("btc_history", self._current.btc_history)
+                # Send empty poly_price_history for the new session
+                await self._hub.broadcast("poly_price_history", self._current.poly_price_history)
         else:
             logger.warning("No next session available after rotation")
+
+    async def _finalize_session(self, slot: SessionSlot) -> None:
+        """Complete session-end work before moving to settling.
+
+        - If strategy holds a position, attempt a final force-close.
+        - Let strategy know the session is ending.
+        - WS stays connected so settlement can resolve later.
+        """
+        if not slot.strategy:
+            return
+
+        # Check if we still hold a position that should be force-closed
+        if self._tracker.has_position():
+            ctx = self._build_context(slot, remaining=0)
+            # Give strategy one last chance to produce a close signal
+            close_signal = slot.strategy.should_close(ctx)
+            if close_signal:
+                logger.info(
+                    "Final close signal for %s: %s %s",
+                    slot.session.slug, close_signal.side, close_signal.reason,
+                )
+                await self._execute_signal(slot, close_signal)
 
     async def _process_settling(self) -> None:
         """Process background settlement for all settling sessions."""
@@ -309,12 +417,26 @@ class SessionManager:
         logger.info("Session ACTIVE: %s", slot.session.slug)
 
     async def _process_active_session(self, slot: SessionSlot, remaining: float) -> None:
-        """Run strategy logic for the active session."""
+        """Run strategy logic for the active session.
+
+        BTC trend integration:
+        - Once window_2 time has elapsed, compute BTC trend from klines
+        - Feed result to strategy (gatekeeper for entry)
+        - If composite mode, select branch config by amplitude
+        """
         if not slot.strategy:
             return
 
+        # ── BTC trend computation (once per session, after window_2 elapsed) ──
+        if not slot.btc_trend_computed:
+            await self._maybe_compute_btc_trend(slot, remaining)
+
         # Build context
         ctx = self._build_context(slot, remaining)
+
+        # If strategy decided to skip, don't process
+        if hasattr(slot.strategy, 'session_skipped') and slot.strategy.session_skipped:
+            return
 
         # Check close first
         close_signal = slot.strategy.should_close(ctx)
@@ -327,6 +449,87 @@ class SessionManager:
         if signals:
             for signal in signals:
                 await self._execute_signal(slot, signal)
+
+    async def _maybe_compute_btc_trend(self, slot: SessionSlot, remaining: float) -> None:
+        """Compute BTC trend once window_2 time has elapsed since session start."""
+        # Determine window parameters (from composite or strategy config)
+        if self._composite_config:
+            w1 = self._composite_config.window_1
+            w2 = self._composite_config.window_2
+            min_mom = self._composite_config.btc_min_momentum
+        else:
+            w1 = int(self._strategy_config.get("btc_trend_window_1", 5))
+            w2 = int(self._strategy_config.get("btc_trend_window_2", 10))
+            min_mom = float(self._strategy_config.get("btc_min_momentum", 0.001))
+
+        # Check if enough time has elapsed (window_2 minutes from session start)
+        elapsed = slot.session.duration_s - remaining
+        window_2_seconds = w2 * 60
+        if elapsed < window_2_seconds:
+            return  # Not yet time to compute
+
+        # Compute BTC trend from Binance klines
+        # Only fetch klines up to window_2 boundary (not entire session)
+        iso_times = slug_to_iso(slot.session.slug)
+        if not iso_times:
+            start_dt = datetime.fromtimestamp(slot.session.start_epoch, tz=timezone.utc)
+            start_iso = start_dt.isoformat()
+        else:
+            start_iso = iso_times[0]
+
+        # end range = session_start + window_2 + 1min buffer (for the last kline)
+        w2_end_dt = datetime.fromtimestamp(
+            slot.session.start_epoch + window_2_seconds + 60, tz=timezone.utc
+        )
+        w2_end_iso = w2_end_dt.isoformat()
+
+        trend_info = await compute_session_btc_trend(
+            session_start_iso=start_iso,
+            session_end_iso=w2_end_iso,
+            window_1_min=w1,
+            window_2_min=w2,
+            min_momentum=min_mom,
+        )
+
+        slot.btc_trend_computed = True
+        slot.btc_trend_info = trend_info
+
+        # ── Composite branch selection ──
+        effective_config = dict(self._strategy_config)
+        if self._composite_config and trend_info.get("passed"):
+            amplitude = trend_info.get("amplitude", 0.0)
+            branch = self._composite_config.select_branch(amplitude)
+            if branch:
+                # Merge branch config into strategy config
+                branch_cfg = branch.get("config", {})
+                effective_config.update(branch_cfg)
+                slot.matched_branch = branch.get("label", "unknown")
+                logger.info(
+                    "Composite branch '%s' selected for %s (amp=%.6f)",
+                    slot.matched_branch, slot.session.slug, amplitude,
+                )
+            else:
+                # No branch matched → skip session
+                trend_info["passed"] = False
+                logger.info(
+                    "No composite branch matched for %s (amp=%.6f) → skip",
+                    slot.session.slug, amplitude,
+                )
+
+        # Re-initialize strategy with effective config if composite branch was selected
+        if slot.matched_branch and slot.strategy:
+            slot.strategy.on_session_start(slot.session, effective_config)
+
+        # Feed BTC trend result to strategy
+        if hasattr(slot.strategy, 'on_btc_trend_result'):
+            slot.strategy.on_btc_trend_result(trend_info)
+
+        # Mark session as skipped if trend didn't pass
+        if not trend_info.get("passed") and hasattr(slot.strategy, 'session_skipped'):
+            if slot.strategy.session_skipped:
+                slot.state = SessionState.SKIPPED
+                self._store.save_session(slot.session, SessionState.SKIPPED)
+                logger.info("Session %s SKIPPED by BTC trend filter", slot.session.slug)
 
     async def _execute_signal(self, slot: SessionSlot, signal: LiveSignal) -> None:
         """Execute a trading signal via the order executor."""
@@ -421,9 +624,20 @@ class SessionManager:
             slot.strategy.on_session_end(result)
 
         logger.info(
-            "Session SETTLED: %s | outcome=%s | PnL=$%.4f",
-            slot.session.slug, winning_outcome, result.total_pnl,
+            "Session SETTLED: %s | outcome=%s | PnL=$%.4f | no_trades=%s",
+            slot.session.slug, winning_outcome, result.total_pnl, slot.no_trades,
         )
+
+        # Unsubscribe old token IDs that are no longer needed by current/next
+        active_tokens: set[str] = set()
+        for s in (self._current, self._next):
+            if s:
+                active_tokens.update(s.session.token_ids)
+        stale = set(slot.session.token_ids) - active_tokens
+        if stale and self._ws:
+            await self._ws.unsubscribe(list(stale))
+            logger.debug("Unsubscribed stale tokens after settlement: %s", stale)
+
         return True
 
     # ── Context builder ───────────────────────────────────────
@@ -468,6 +682,7 @@ class SessionManager:
             ],
             session_pnl=self._tracker.realised_pnl,
             unrealized_pnl=self._tracker.unrealised_pnl(current_prices),
+            btc_trend=slot.btc_trend_info,
         )
 
     # ── Market broadcast builder ────────────────────────────────
@@ -495,8 +710,13 @@ class SessionManager:
     # ── WS event handler ─────────────────────────────────────
 
     async def _on_ws_event(self, event_type: str, asset_id: str, data: dict) -> None:
-        """Route WS events to the appropriate session's orderbook builder."""
-        for slot in (self._current, self._next):
+        """Route WS events to the appropriate session's orderbook builder.
+
+        Also routes to settling sessions so they can receive final price
+        updates needed for settlement resolution.
+        """
+        all_slots = [self._current, self._next] + self._settling
+        for slot in all_slots:
             if not slot:
                 continue
             if asset_id not in slot.session.token_ids:

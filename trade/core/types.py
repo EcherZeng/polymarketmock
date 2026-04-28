@@ -120,6 +120,9 @@ class LiveMarketContext:
     session_pnl: float = 0.0
     unrealized_pnl: float = 0.0
 
+    # BTC trend data (populated after window_2 elapsed)
+    btc_trend: dict = field(default_factory=dict)  # {a1, a2, passed, amplitude, direction, ...}
+
 
 @dataclass
 class LiveSignal:

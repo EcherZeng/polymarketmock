@@ -109,16 +109,41 @@ export interface SessionDetailResponse {
 
 export interface StrategyInfo {
   name: string
-  description: string
+  description: string | { zh: string; en: string }
   version: string
   default_config: Record<string, unknown>
+  builtin?: boolean
 }
 
 export interface ConfigResponse {
-  strategy: StrategyInfo[]
+  local_strategies: StrategyInfo[]
+  backtest_strategies: StrategyInfo[]
+  composite_presets: CompositePreset[]
   current_config: Record<string, unknown>
+  composite_config: CompositeConfigInfo | null
   allowed_keys?: Record<string, [number, number]>
   executor_mode?: string
+  active_strategy?: string
+}
+
+export interface CompositePreset {
+  name: string
+  description?: string
+  btc_windows: { btc_trend_window_1: number; btc_trend_window_2: number }
+  branches: CompositeBranch[]
+}
+
+export interface CompositeBranch {
+  label: string
+  min_momentum: number
+  preset_name: string
+  config?: Record<string, unknown>
+}
+
+export interface CompositeConfigInfo {
+  composite_name: string
+  btc_windows: { btc_trend_window_1: number; btc_trend_window_2: number }
+  branches: CompositeBranch[]
 }
 
 // ── WebSocket message types ─────────────────────────────────────────────────
@@ -161,6 +186,12 @@ export interface WsSessionStatus {
     time_remaining_s: number
     trades: number
     has_position: boolean
+    btc_trend_computed?: boolean
+    btc_trend_passed?: boolean | null
+    btc_amplitude?: number | null
+    btc_direction?: string | null
+    matched_branch?: string | null
+    no_trades?: boolean
   } | null
   next_session: {
     slug: string

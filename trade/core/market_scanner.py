@@ -192,13 +192,23 @@ class MarketScanner:
     # ── Internal ─────────────────────────────────────────────
 
     async def _full_load(self) -> None:
+        """Initial load — batch fetch via tag search to minimize API calls."""
         prefix = settings.scan_slug_prefix
         interval = settings.scan_duration_s
         now_ts = int(datetime.now(timezone.utc).timestamp())
         window_start = now_ts - (now_ts % interval)
 
+        # Try batch fetch first (single API call)
+        slugs_needed = []
         for offset in range(-settings.scan_slots_before, settings.scan_slots_after + 1):
-            slug = f"{prefix}-{window_start + offset * interval}"
+            slugs_needed.append(f"{prefix}-{window_start + offset * interval}")
+
+        loaded = await self._batch_fetch(slugs_needed)
+        if loaded:
+            return
+
+        # Fallback: individual fetches (only if batch fails)
+        for slug in slugs_needed:
             event = await self._fetch_slug(slug)
             if event:
                 self._window.append((slug, event))
@@ -225,8 +235,8 @@ class MarketScanner:
                 if _compute_status(slug, now_utc) == "upcoming"
             )
 
-            # Expand right if needed
-            if upcoming <= 2:
+            # Only call Gamma if we're running low on upcoming slots
+            if upcoming <= 1:
                 await self._expand_right()
 
             # Trim ended from left (keep scan_slots_before)
@@ -243,16 +253,28 @@ class MarketScanner:
             now_ts = int(datetime.now(timezone.utc).timestamp())
             rightmost_ts = now_ts - (now_ts % interval) - interval
 
-        added = 0
+        slugs_to_fetch = []
         for i in range(1, settings.scan_slots_after + 2):
             slug = f"{prefix}-{rightmost_ts + i * interval}"
-            if slug in existing:
-                continue
-            event = await self._fetch_slug(slug)
-            if event:
-                self._window.append((slug, event))
-                self._index[slug] = event
-                added += 1
+            if slug not in existing:
+                slugs_to_fetch.append(slug)
+
+        if not slugs_to_fetch:
+            return
+
+        # Try batch first, fallback to individual
+        added = 0
+        if not await self._batch_fetch(slugs_to_fetch):
+            for slug in slugs_to_fetch:
+                if slug in self._index:
+                    continue
+                event = await self._fetch_slug(slug)
+                if event:
+                    self._window.append((slug, event))
+                    self._index[slug] = event
+                    added += 1
+        else:
+            added = sum(1 for s in slugs_to_fetch if s in self._index)
 
         if added:
             logger.info("MarketScanner: expanded +%d sessions", added)
@@ -284,3 +306,58 @@ class MarketScanner:
         except Exception as e:
             logger.warning("MarketScanner: failed to fetch %s: %s", slug, e)
             return None
+
+    async def _batch_fetch(self, slugs: list[str]) -> bool:
+        """Fetch multiple sessions in a single Gamma API query.
+
+        Uses tag-based search to get all BTC 15-min events in one call.
+        Returns True if successful and at least one session was loaded.
+        """
+        url = f"{settings.gamma_api_url}/events"
+        try:
+            resp = await _get_client().get(url, params={
+                "tag": "BTC",
+                "limit": len(slugs) + 5,
+                "closed": "false",
+            })
+            if resp.status_code != 200:
+                return False
+            data = resp.json()
+            if not data:
+                return False
+
+            slug_set = set(slugs)
+            loaded = 0
+            for event in data:
+                for m0 in event.get("markets", []):
+                    market_slug = m0.get("groupItemTitle", "") or ""
+                    # Also check the event-level slug
+                    event_slug = event.get("slug", "")
+                    for slug in (market_slug, event_slug):
+                        if slug in slug_set and slug not in self._index:
+                            norm = _normalize_event(event)
+                            self._window.append((slug, norm))
+                            self._index[slug] = norm
+                            loaded += 1
+
+            # Also try matching by extracting slugs from market questions
+            for slug in slugs:
+                if slug in self._index:
+                    continue
+                # Individual fallback for any missing
+                event = await self._fetch_slug(slug)
+                if event:
+                    self._window.append((slug, event))
+                    self._index[slug] = event
+                    loaded += 1
+
+            if loaded:
+                # Sort window by epoch
+                items = sorted(self._window, key=lambda x: _extract_epoch(x[0]))
+                self._window.clear()
+                self._window.extend(items)
+                return True
+            return False
+        except Exception as e:
+            logger.debug("MarketScanner: batch fetch failed: %s", e)
+            return False
