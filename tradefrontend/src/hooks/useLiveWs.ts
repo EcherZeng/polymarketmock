@@ -115,11 +115,6 @@ export function useLiveWs(): UseLiveWsReturn {
           break
         }
 
-        case "price_history": {
-          // Initial price history from snapshots — placeholder for future use
-          break
-        }
-
         case "poly_price_history": {
           // Session-scoped Poly Up/Down price history cache (like btc_history)
           // Data format: { token_id: [{mid, bid, ask, anchor, outcome, timestamp}, ...] }
