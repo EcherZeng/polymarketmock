@@ -116,12 +116,7 @@ export function useLiveWs(): UseLiveWsReturn {
         }
 
         case "price_history": {
-          // Initial price history from snapshots — build up/down series
-          const _snapshots = msg.data as Array<{
-            token_id: string; mid_price: number; best_bid: number; best_ask: number; timestamp: string
-          }>
-          // Group by outcome (need slug context from session to map token to outcome)
-          // For now store raw; the page can map via market snapshot
+          // Initial price history from snapshots — placeholder for future use
           break
         }
 
