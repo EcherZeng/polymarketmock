@@ -598,8 +598,8 @@ export default function LiveSessionPage() {
                   tickFormatter={(v: number) => `$${v.toLocaleString()}`}
                 />
                 <Tooltip
-                  labelFormatter={(ep: number) => epochToLabel(ep)}
-                  formatter={(value: number) => [`$${value.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, "BTC"]}
+                  labelFormatter={(ep) => epochToLabel(Number(ep))}
+                  formatter={(value) => [`$${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, "BTC"]}
                   contentStyle={{ fontSize: 12 }}
                 />
                 {endEpoch && (
@@ -649,10 +649,10 @@ export default function LiveSessionPage() {
                   tickFormatter={(v: number) => v.toFixed(2)}
                 />
                 <Tooltip
-                  labelFormatter={(ep: number) => epochToLabel(ep)}
-                  formatter={(value: number | null, name: string) => [
-                    value !== null ? value.toFixed(4) : "—",
-                    name,
+                  labelFormatter={(ep) => epochToLabel(Number(ep))}
+                  formatter={(value, name) => [
+                    value != null ? Number(value).toFixed(4) : "—",
+                    String(name),
                   ]}
                   contentStyle={{ fontSize: 12 }}
                 />

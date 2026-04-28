@@ -27,7 +27,7 @@ interface UseLiveWsReturn {
 
 export function useLiveWs(): UseLiveWsReturn {
   const wsRef = useRef<WebSocket | null>(null)
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>()
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   // Track current session slug to detect rotation
   const currentSlugRef = useRef<string | null>(null)
 
@@ -117,7 +117,7 @@ export function useLiveWs(): UseLiveWsReturn {
 
         case "price_history": {
           // Initial price history from snapshots — build up/down series
-          const snapshots = msg.data as Array<{
+          const _snapshots = msg.data as Array<{
             token_id: string; mid_price: number; best_bid: number; best_ask: number; timestamp: string
           }>
           // Group by outcome (need slug context from session to map token to outcome)
