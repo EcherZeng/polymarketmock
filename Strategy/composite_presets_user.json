@@ -1,1 +1,21 @@
-{}
+{
+  "ttt1": {
+    "description": "ttt",
+    "btc_windows": {
+      "btc_trend_window_1": 5,
+      "btc_trend_window_2": 10
+    },
+    "branches": [
+      {
+        "label": "分支2",
+        "min_momentum": 0.002,
+        "preset_name": "test1"
+      },
+      {
+        "label": "分支1",
+        "min_momentum": 0.001,
+        "preset_name": "Test4"
+      }
+    ]
+  }
+}

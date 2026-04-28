@@ -1,0 +1,286 @@
+"""Market scanner — discovers upcoming BTC 15-minute sessions via Gamma API."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import re
+from collections import deque
+from datetime import datetime, timezone
+
+import httpx
+
+from config import settings
+from core.types import SessionInfo, parse_slug_window
+
+logger = logging.getLogger(__name__)
+
+BTC_OUTCOMES: list[str] = ["Up", "Down"]
+
+_BTC_SLUG_RE = re.compile(r"^(btc-updown-\d+m)-(\d{10})$")
+
+_JSON_STR_FIELDS = ("outcomes", "outcomePrices", "clobTokenIds")
+
+_client: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None or _client.is_closed:
+        _client = httpx.AsyncClient(timeout=15.0)
+    return _client
+
+
+def _parse_json_str(value: str | list) -> list:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str) and value.startswith("["):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return []
+
+
+def _normalize_event(e: dict) -> dict:
+    for m in e.get("markets", []):
+        for f in _JSON_STR_FIELDS:
+            if f in m:
+                m[f] = _parse_json_str(m[f])
+    return e
+
+
+def _extract_epoch(slug: str) -> int:
+    m = _BTC_SLUG_RE.match(slug)
+    if m:
+        return int(m.group(2))
+    try:
+        return int(slug.rsplit("-", 1)[-1])
+    except (ValueError, IndexError):
+        return 0
+
+
+def _compute_status(slug: str, now_utc: datetime) -> str:
+    """Compute status from slug-derived timestamps (authoritative)."""
+    parsed = parse_slug_window(slug)
+    if not parsed:
+        return "unknown"
+    start_epoch, end_epoch, _ = parsed
+    start_dt = datetime.fromtimestamp(start_epoch, tz=timezone.utc)
+    end_dt = datetime.fromtimestamp(end_epoch, tz=timezone.utc)
+    if end_dt <= now_utc:
+        return "ended"
+    if start_dt <= now_utc:
+        return "live"
+    return "upcoming"
+
+
+def _event_to_session_info(slug: str, event: dict) -> SessionInfo | None:
+    """Convert a Gamma API event to SessionInfo."""
+    parsed = parse_slug_window(slug)
+    if not parsed:
+        return None
+    start_epoch, end_epoch, interval_min = parsed
+
+    markets = event.get("markets", [])
+    if not markets:
+        return None
+    m0 = markets[0]
+
+    token_ids = m0.get("clobTokenIds", [])
+    if not token_ids or len(token_ids) < 2:
+        return None
+
+    outcomes = m0.get("outcomes", BTC_OUTCOMES)
+    condition_id = m0.get("conditionId", "")
+    question = m0.get("question", event.get("title", ""))
+
+    return SessionInfo(
+        slug=slug,
+        token_ids=token_ids,
+        outcomes=outcomes if isinstance(outcomes, list) else BTC_OUTCOMES,
+        start_epoch=start_epoch,
+        end_epoch=end_epoch,
+        duration_s=interval_min * 60,
+        condition_id=condition_id,
+        question=question,
+    )
+
+
+class MarketScanner:
+    """Scans Gamma API for BTC 15-minute sessions, maintains a sliding window."""
+
+    def __init__(self) -> None:
+        self._window: deque[tuple[str, dict]] = deque()  # (slug, event)
+        self._index: dict[str, dict] = {}
+        self._task: asyncio.Task | None = None
+        self._stop = asyncio.Event()
+        self._lock = asyncio.Lock()
+        # Notify listeners when new sessions are discovered
+        self._new_session_event = asyncio.Event()
+
+    async def start(self) -> None:
+        self._stop.clear()
+        await self._full_load()
+        self._task = asyncio.create_task(self._scan_loop())
+        logger.info("MarketScanner started — %d sessions loaded", len(self._window))
+
+    async def stop(self) -> None:
+        self._stop.set()
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        global _client
+        if _client and not _client.is_closed:
+            await _client.aclose()
+            _client = None
+        logger.info("MarketScanner stopped")
+
+    def get_current_or_next(self) -> SessionInfo | None:
+        """Find the current LIVE or first upcoming session."""
+        now_utc = datetime.now(timezone.utc)
+        for slug, event in self._window:
+            status = _compute_status(slug, now_utc)
+            if status in ("live", "upcoming"):
+                return _event_to_session_info(slug, event)
+        return None
+
+    def get_next_after(self, current_slug: str) -> SessionInfo | None:
+        """Find the next session after the given slug."""
+        curr_epoch = _extract_epoch(current_slug)
+        now_utc = datetime.now(timezone.utc)
+        for slug, event in self._window:
+            epoch = _extract_epoch(slug)
+            if epoch <= curr_epoch:
+                continue
+            status = _compute_status(slug, now_utc)
+            if status in ("live", "upcoming"):
+                return _event_to_session_info(slug, event)
+        return None
+
+    def get_session_info(self, slug: str) -> SessionInfo | None:
+        """Look up a session by slug."""
+        event = self._index.get(slug)
+        if event:
+            return _event_to_session_info(slug, event)
+        return None
+
+    def get_all_sessions(self) -> list[dict]:
+        """Return all sessions with current status."""
+        now_utc = datetime.now(timezone.utc)
+        result = []
+        for slug, event in self._window:
+            status = _compute_status(slug, now_utc)
+            info = _event_to_session_info(slug, event)
+            if info:
+                result.append({"slug": slug, "status": status, "session": info})
+        return result
+
+    async def wait_for_new_session(self, timeout: float = 60.0) -> bool:
+        """Wait until a new session is discovered. Returns True if notified."""
+        self._new_session_event.clear()
+        try:
+            await asyncio.wait_for(self._new_session_event.wait(), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
+
+    # ── Internal ─────────────────────────────────────────────
+
+    async def _full_load(self) -> None:
+        prefix = settings.scan_slug_prefix
+        interval = settings.scan_duration_s
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        window_start = now_ts - (now_ts % interval)
+
+        for offset in range(-settings.scan_slots_before, settings.scan_slots_after + 1):
+            slug = f"{prefix}-{window_start + offset * interval}"
+            event = await self._fetch_slug(slug)
+            if event:
+                self._window.append((slug, event))
+                self._index[slug] = event
+
+    async def _scan_loop(self) -> None:
+        while not self._stop.is_set():
+            for _ in range(settings.scan_interval_s):
+                if self._stop.is_set():
+                    return
+                await asyncio.sleep(1)
+            try:
+                await self._refresh()
+            except Exception as e:
+                logger.warning("MarketScanner refresh error: %s", e)
+
+    async def _refresh(self) -> None:
+        async with self._lock:
+            now_utc = datetime.now(timezone.utc)
+
+            # Count upcoming
+            upcoming = sum(
+                1 for slug, _ in self._window
+                if _compute_status(slug, now_utc) == "upcoming"
+            )
+
+            # Expand right if needed
+            if upcoming <= 2:
+                await self._expand_right()
+
+            # Trim ended from left (keep scan_slots_before)
+            self._trim_left()
+
+    async def _expand_right(self) -> None:
+        prefix = settings.scan_slug_prefix
+        interval = settings.scan_duration_s
+        existing = {slug for slug, _ in self._window}
+
+        if self._window:
+            rightmost_ts = _extract_epoch(self._window[-1][0])
+        else:
+            now_ts = int(datetime.now(timezone.utc).timestamp())
+            rightmost_ts = now_ts - (now_ts % interval) - interval
+
+        added = 0
+        for i in range(1, settings.scan_slots_after + 2):
+            slug = f"{prefix}-{rightmost_ts + i * interval}"
+            if slug in existing:
+                continue
+            event = await self._fetch_slug(slug)
+            if event:
+                self._window.append((slug, event))
+                self._index[slug] = event
+                added += 1
+
+        if added:
+            logger.info("MarketScanner: expanded +%d sessions", added)
+            self._new_session_event.set()
+
+    def _trim_left(self) -> None:
+        now_utc = datetime.now(timezone.utc)
+        ended = 0
+        for slug, _ in self._window:
+            if _compute_status(slug, now_utc) == "ended":
+                ended += 1
+            else:
+                break
+        while ended > settings.scan_slots_before and self._window:
+            slug, _ = self._window.popleft()
+            self._index.pop(slug, None)
+            ended -= 1
+
+    async def _fetch_slug(self, slug: str) -> dict | None:
+        url = f"{settings.gamma_api_url}/events"
+        try:
+            resp = await _get_client().get(url, params={"limit": 1, "slug": slug})
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+            if not data:
+                return None
+            return _normalize_event(data[0])
+        except Exception as e:
+            logger.warning("MarketScanner: failed to fetch %s: %s", slug, e)
+            return None

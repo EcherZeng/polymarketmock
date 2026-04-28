@@ -113,6 +113,43 @@ services:
       - strategy
     restart: unless-stopped
 
+  # ── Live Trade Service ───────────────────────────────────────────────────
+  trade:
+    build:
+      context: ./trade
+      dockerfile: Dockerfile
+    ports:
+      - "8073:8073"
+    volumes:
+      - trade_data:/app/data
+    env_file:
+      - ./trade/.env
+    environment:
+      TRADE_PORT: "8073"
+      TRADE_DATA_DIR: /app/data
+    networks:
+      - polymarket
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8073/trade-api/health', timeout=5).raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ── Trade Frontend (Live Dashboard) ──────────────────────────────────────
+  tradefrontend:
+    build:
+      context: ./tradefrontend
+      dockerfile: Dockerfile
+    ports:
+      - "3023:3023"
+    networks:
+      - polymarket
+    depends_on:
+      - trade
+    restart: unless-stopped
+
 networks:
   polymarket:
     name: polymarketmock_default
@@ -122,3 +159,4 @@ volumes:
   backend_data:
   strategy_results:
   strategy_user_presets:
+  trade_data:

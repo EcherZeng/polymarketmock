@@ -9,6 +9,8 @@ Polymarket 模拟交易平台 — 代理真实行情数据，提供模拟买卖 
 ├── frontend/         # React + Vite 前端
 ├── Strategy/         # 策略回测引擎后端 (FastAPI, port 8072)
 ├── Strategyfrontend/ # 策略回测前端 (React + Vite, port 3022)
+├── trade/            # 实盘交易引擎后端 (FastAPI, port 8073)
+├── tradefrontend/    # 实盘交易 Dashboard (React + Vite, port 3023)
 ├── docker-compose.yml          # Docker 完整部署（前端 + 后端 + Redis）
 ├── docker-compose-redis.yml    # Docker 部署（后端 + Redis，无前端）
 └── docs/             # 设计文档
@@ -118,6 +120,29 @@ npm run dev
 
 策略前端页面: http://localhost:3022
 
+#### 6. 启动实盘交易后端
+
+```bash
+cd trade
+cp .env.example .env    # 复制并填写 Polymarket 钱包凭据
+pip install -r requirements.txt
+python main.py
+```
+
+实盘交易 API: http://localhost:8073
+
+> 需要配置 `.env` 中的 `TRADE_POLY_PRIVATE_KEY`、`TRADE_POLY_FUNDER_ADDRESS`、`TRADE_POLY_API_KEY` 等凭据，详见 `trade/.env.example`。
+
+#### 7. 启动实盘交易前端
+
+```bash
+cd tradefrontend
+npm install
+npm run dev
+```
+
+实盘 Dashboard: http://localhost:3023
+
 ---
 
 ## 环境变量
@@ -133,6 +158,20 @@ npm run dev
 | `PM_WS_URL` | `wss://ws-subscriptions-clob.polymarket.com/ws/market` | Polymarket WebSocket 地址 |
 | `PM_WS_PING_INTERVAL` | `10` | WS 应用级 PING 间隔（秒） |
 | `PM_WS_RECONNECT_MAX` | `30` | WS 断线重连最大退避（秒） |
+
+实盘交易后端通过环境变量配置（前缀 `TRADE_`）：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `TRADE_POLY_PRIVATE_KEY` | — | Polymarket 钱包私钥（必填） |
+| `TRADE_POLY_FUNDER_ADDRESS` | — | Polymarket UI 显示的钱包地址（必填） |
+| `TRADE_POLY_API_KEY` | — | CLOB API Key（必填） |
+| `TRADE_POLY_API_SECRET` | — | CLOB API Secret（必填） |
+| `TRADE_POLY_PASSPHRASE` | — | CLOB API Passphrase（必填） |
+| `TRADE_PORT` | `8073` | 服务端口 |
+| `TRADE_DATA_DIR` | `./data` | DuckDB 数据存储目录 |
+| `TRADE_SCAN_INTERVAL` | `30` | 市场扫描间隔（秒） |
+| `TRADE_MIN_TRADE_USDC` | `10` | 最小下单金额（USDC） |
 
 
 ## 录制生命周期
