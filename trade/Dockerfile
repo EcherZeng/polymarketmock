@@ -27,8 +27,14 @@ COPY --from=builder /opt/venv /opt/venv
 
 COPY config.py .
 COPY main.py .
-COPY core/ core/
 COPY api/ api/
+COPY core/ core/
+COPY engine/ engine/
+COPY execution/ execution/
+COPY infra/ infra/
+COPY market/ market/
+COPY models/ models/
+COPY portfolio/ portfolio/
 COPY strategies/ strategies/
 
 RUN mkdir -p /app/data

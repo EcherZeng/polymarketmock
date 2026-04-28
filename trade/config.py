@@ -63,7 +63,7 @@ class TradeSettings(BaseSettings):
     initial_balance: float = 0.0        # for PnL tracking (0 = auto-detect from API)
 
     # ── Strategy service ──────────────────────────────────────────────────────
-    strategy_service_url: str = "http://localhost:8072"  # Strategy backtest engine
+    strategy_service_url: str = "http://strategy:8072"  # Strategy backtest engine
 
     model_config = {"env_prefix": "TRADE_", "env_file": _TRADE_DIR / ".env"}
 
