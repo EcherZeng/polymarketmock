@@ -1,43 +1,12 @@
 import { useQuery } from "@tanstack/react-query"
 import { tradeApi } from "@/api/trade"
 
-export function useStatus() {
-  return useQuery({
-    queryKey: ["trade", "status"],
-    queryFn: tradeApi.status,
-    refetchInterval: 3000,
-  })
-}
-
-export function usePositions() {
-  return useQuery({
-    queryKey: ["trade", "positions"],
-    queryFn: tradeApi.positions,
-    refetchInterval: 5000,
-  })
-}
-
-export function useBalance() {
-  return useQuery({
-    queryKey: ["trade", "balance"],
-    queryFn: tradeApi.balance,
-    refetchInterval: 5000,
-  })
-}
-
-export function usePnl() {
-  return useQuery({
-    queryKey: ["trade", "pnl"],
-    queryFn: tradeApi.pnl,
-    refetchInterval: 10000,
-  })
-}
-
+/** Historical sessions list — for SessionsPage. Polling only when needed. */
 export function useSessions(limit = 50) {
   return useQuery({
     queryKey: ["trade", "sessions", limit],
     queryFn: () => tradeApi.sessions(limit),
-    refetchInterval: 10000,
+    refetchInterval: 30_000,
   })
 }
 
@@ -49,17 +18,19 @@ export function useSessionDetail(slug: string) {
   })
 }
 
-export function useTrades(sessionSlug?: string, limit = 100) {
+/** Strategy catalog — available strategies & composites. Fetched once on mount. */
+export function useCatalog() {
   return useQuery({
-    queryKey: ["trade", "trades", sessionSlug, limit],
-    queryFn: () => tradeApi.trades(sessionSlug, limit),
-    refetchInterval: 10000,
+    queryKey: ["trade", "catalog"],
+    queryFn: tradeApi.catalog,
+    staleTime: 5 * 60 * 1000,
   })
 }
 
-export function useConfig() {
+/** Current strategy state — active preset, config, composite. Instant (no external calls). */
+export function useConfigState() {
   return useQuery({
-    queryKey: ["trade", "config"],
+    queryKey: ["trade", "config-state"],
     queryFn: tradeApi.config,
   })
 }

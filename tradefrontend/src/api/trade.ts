@@ -8,7 +8,9 @@ import type {
   SessionRow,
   SessionDetailResponse,
   TradeRow,
-  ConfigResponse,
+  CatalogResponse,
+  ConfigStateResponse,
+  MutationWithState,
 } from "@/types"
 
 const api = axios.create({ baseURL: "/trade-api" })
@@ -38,36 +40,23 @@ export const tradeApi = {
       })
       .then((r) => r.data),
 
-  config: () => api.get<ConfigResponse>("/config").then((r) => r.data),
+  config: () => api.get<ConfigStateResponse>("/config/state").then((r) => r.data),
+
+  catalog: () => api.get<CatalogResponse>("/config/catalog").then((r) => r.data),
 
   updateConfig: (config: Record<string, unknown>) =>
-    api.put("/config", { config }).then((r) => r.data),
+    api.put<MutationWithState>("/config", { config }).then((r) => r.data),
 
   loadPreset: (presetName: string) =>
-    api.post<{
-      ok: boolean
-      preset_name: string
-      applied: Record<string, number>
-      skipped: string[]
-      current_config: Record<string, unknown>
-    }>("/config/load-preset", { preset_name: presetName }).then((r) => r.data),
+    api.post<MutationWithState & { preset_name: string; applied: Record<string, number>; skipped: string[] }>(
+      "/config/load-preset", { preset_name: presetName }
+    ).then((r) => r.data),
 
   loadComposite: (compositeName: string) =>
-    api.post<{
-      ok: boolean
-      composite_name: string
-      branches: number
-      btc_windows: { window_1: number; window_2: number }
-      branch_details: Array<{
-        label: string
-        min_momentum: number
-        preset_name: string
-        config: Record<string, unknown>
-      }>
-    }>("/config/load-composite", { composite_name: compositeName }).then((r) => r.data),
+    api.post<MutationWithState>("/config/load-composite", { composite_name: compositeName }).then((r) => r.data),
 
   clearComposite: () =>
-    api.delete<{ ok: boolean }>("/config/composite").then((r) => r.data),
+    api.delete<MutationWithState>("/config/composite").then((r) => r.data),
 
   getExecutorMode: () =>
     api.get<{ executor_mode: string }>("/executor-mode").then((r) => r.data),

@@ -11,14 +11,14 @@ from api.auth import ApiKeyMiddleware
 from api.routes import init_routes, router
 from api.ws_handler import init_ws, ws_router
 from config import settings
-from core.btc_price import BtcPriceStreamer
-from core.data_store import DataStore
-from core.executor_factory import create_executor
-from core.live_hub import LiveHub
-from core.market_scanner import MarketScanner
-from core.position_tracker import PositionTracker
-from core.session_manager import SessionManager
-from core.settlement_tracker import SettlementTracker
+from engine.session_manager import SessionManager
+from execution.executor_factory import create_executor
+from infra.data_store import DataStore
+from infra.live_hub import LiveHub
+from market.btc_price import BtcPriceStreamer
+from market.market_scanner import MarketScanner
+from portfolio.position_tracker import PositionTracker
+from portfolio.settlement_tracker import SettlementTracker
 
 
 @asynccontextmanager
@@ -48,7 +48,8 @@ async def lifespan(app: FastAPI):
         await executor.check_allowance()
 
     # ── P0-3: Restore positions from DuckDB ───────────────────
-    await store.restore_positions(tracker)
+    for fill in store.get_unsettled_fills():
+        tracker.apply_fill(fill)
 
     manager = SessionManager(
         scanner=scanner,
@@ -84,6 +85,9 @@ async def lifespan(app: FastAPI):
     await executor.stop()
     await settlement.close()
     await store.stop()
+    # Close shared httpx client for BTC kline fetches
+    from engine.btc_trend import close_client as close_btc_client
+    await close_btc_client()
 
 
 app = FastAPI(

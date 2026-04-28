@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import httpx
 
 from config import settings
-from core.types import SessionInfo
+from models.types import SessionInfo
 
 logger = logging.getLogger(__name__)
 
@@ -101,22 +101,6 @@ class SettlementTracker:
         except Exception as e:
             logger.warning("Settlement check failed for %s: %s", session.slug, e)
             return None
-
-    async def wait_for_resolution(self, session: SessionInfo) -> dict | None:
-        """Poll until market is resolved or timeout."""
-        deadline = asyncio.get_event_loop().time() + settings.settlement_poll_max_s
-        while asyncio.get_event_loop().time() < deadline:
-            result = await self.check_resolution(session)
-            if result:
-                logger.info(
-                    "Settlement resolved for %s: %s wins",
-                    session.slug, result.get("winning_outcome"),
-                )
-                return result
-            await asyncio.sleep(settings.settlement_poll_interval_s)
-
-        logger.warning("Settlement timeout for %s after %ds", session.slug, settings.settlement_poll_max_s)
-        return None
 
     async def close(self) -> None:
         global _client

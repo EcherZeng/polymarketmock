@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 import websockets
 
-from core.live_hub import LiveHub
+from infra.live_hub import LiveHub
 
 logger = logging.getLogger(__name__)
 

@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/sonner"
 import { Badge } from "@/components/ui/badge"
-import { useConfig } from "@/hooks/useTradeData"
+import { useConfigState } from "@/hooks/useTradeData"
 import DashboardPage from "@/pages/DashboardPage"
 import LiveSessionPage from "@/pages/LiveSessionPage"
 import SessionsPage from "@/pages/SessionsPage"
@@ -18,7 +18,7 @@ const navItems = [
 ]
 
 function ExecutorModeBadge() {
-  const { data: config } = useConfig()
+  const { data: config } = useConfigState()
   const mode = config?.executor_mode
   if (!mode) return null
   const isReal = mode === "real"

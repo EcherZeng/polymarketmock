@@ -1,5 +1,6 @@
-import { useStatus, usePositions, usePnl, useTrades, useConfig } from "@/hooks/useTradeData"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useConfigState } from "@/hooks/useTradeData"
+import { useLiveWs } from "@/hooks/useLiveWs"
+import { useMutation } from "@tanstack/react-query"
 import { tradeApi } from "@/api/trade"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -14,8 +15,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { cn, fmtUsd, pnlColor, fmtDateTimeCst, descText } from "@/lib/utils"
-import type { SessionSlot, SessionState } from "@/types"
+import { cn, fmtUsd, pnlColor, fmtDateTimeCst } from "@/lib/utils"
+import type { SessionState } from "@/types"
 import {
   Activity,
   Pause,
@@ -24,25 +25,20 @@ import {
   TrendingDown,
   Wallet,
   Timer,
-  CircleDot,
   Settings2,
   X,
-  Download,
+  Layers,
 } from "lucide-react"
 import { useState } from "react"
-import { toast } from "sonner"
 
 const stateColors: Record<SessionState, string> = {
-  discovered: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",
-  preparing: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300",
+  pending: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",
   active: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300",
-  closing: "bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300",
+  settling: "bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300",
   settled: "bg-muted text-muted-foreground",
-  skipped: "bg-muted text-muted-foreground",
-  error: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300",
 }
 
-function SessionSlotCard({ slot, label }: { slot: SessionSlot | null; label: string }) {
+function SessionSlotCard({ slot, label }: { slot: { slug: string; state: SessionState; time_remaining_s: number } | null; label: string }) {
   if (!slot) {
     return (
       <Card>
@@ -75,39 +71,20 @@ function SessionSlotCard({ slot, label }: { slot: SessionSlot | null; label: str
 }
 
 export default function DashboardPage() {
-  const queryClient = useQueryClient()
-  const { data: status, isLoading: statusLoading } = useStatus()
-  const { data: positions } = usePositions()
-  const { data: pnl } = usePnl()
-  const { data: trades } = useTrades(undefined, 20)
-  const { data: config } = useConfig()
+  const { connected, session, portfolio, pnl, trades } = useLiveWs()
+  const { data: config } = useConfigState()
   const [showStrategy, setShowStrategy] = useState(false)
 
-  const loadPresetMut = useMutation({
-    mutationFn: (presetName: string) => tradeApi.loadPreset(presetName),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["trade", "config"] })
-      toast.success(`已加载预设「${data.preset_name}」：${Object.keys(data.applied).length} 个参数已应用`)
-    },
-    onError: (err: Error) => {
-      toast.error(`加载失败: ${err.message}`)
-    },
-  })
+  const statusLoading = !session && !connected
 
-  const pauseMut = useMutation({
-    mutationFn: tradeApi.pause,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["trade", "status"] }),
-  })
-  const resumeMut = useMutation({
-    mutationFn: tradeApi.resume,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["trade", "status"] }),
-  })
+  const pauseMut = useMutation({ mutationFn: tradeApi.pause })
+  const resumeMut = useMutation({ mutationFn: tradeApi.resume })
 
   return (
     <div className="flex flex-col gap-6">
       {/* ── Top Bar ─────────────────────────── */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">实时交易仪表盘</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">仪表盘</h1>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setShowStrategy(!showStrategy)}>
             <Settings2 className="mr-1 h-4 w-4" />
@@ -115,7 +92,7 @@ export default function DashboardPage() {
           </Button>
           {statusLoading ? (
             <Skeleton className="h-9 w-24" />
-          ) : status?.paused ? (
+          ) : session?.paused ? (
             <Button
               size="sm"
               onClick={() => resumeMut.mutate()}
@@ -148,47 +125,39 @@ export default function DashboardPage() {
                 <X className="h-4 w-4" />
               </Button>
             </div>
-            <CardDescription>当前运行的实时交易策略及其参数</CardDescription>
+            <CardDescription>
+              {config.active_preset_name
+                ? `当前${config.active_preset_type === "composite" ? "复合" : "单一"}策略：${config.active_preset_name}`
+                : "尚未加载策略 — 前往「策略配置」页面选择"}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Active live strategy */}
-            {config.active_strategy && (
-              <div>
-                <p className="text-sm text-muted-foreground mb-1">当前实时策略</p>
+            {/* Composite strategy branches */}
+            {config.active_preset_type === "composite" && config.composite_config && (
+              <div className="rounded-md border border-purple-200 dark:border-purple-800 p-3 space-y-2">
                 <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="font-mono">{config.active_strategy}</Badge>
-                  {config.local_strategies?.find((s) => s.name === config.active_strategy) && (
-                    <span className="text-xs text-muted-foreground">
-                      v{config.local_strategies.find((s) => s.name === config.active_strategy)!.version}
-                    </span>
-                  )}
+                  <Layers className="h-4 w-4 text-purple-600" />
+                  <Badge variant="outline" className="font-mono text-xs">{config.composite_config.composite_name}</Badge>
+                  <span className="text-xs text-muted-foreground">
+                    W1={config.composite_config.btc_windows.btc_trend_window_1}m W2={config.composite_config.btc_windows.btc_trend_window_2}m
+                  </span>
                 </div>
-              </div>
-            )}
-            {/* Backtest strategies from Strategy service */}
-            {config.backtest_strategies && config.backtest_strategies.length > 0 && (
-              <div>
-                <p className="text-sm text-muted-foreground mb-1">可用回测策略（点击加载参数）</p>
-                <div className="flex flex-wrap gap-2">
-                  {config.backtest_strategies.map((s) => (
-                    <Button
-                      key={s.name}
-                      variant="secondary"
-                      size="sm"
-                      className="font-mono text-xs gap-1"
-                      disabled={loadPresetMut.isPending}
-                      onClick={() => loadPresetMut.mutate(s.name)}
-                    >
-                      <Download className="h-3 w-3" />
-                      {s.name}
-                    </Button>
+                <div className="space-y-1">
+                  {config.composite_config.branches.map((b, i) => (
+                    <div key={i} className="flex items-center gap-2 text-xs">
+                      <Badge variant="outline" className="font-mono">{b.label} ≥{b.min_momentum}</Badge>
+                      <span className="text-muted-foreground font-mono">{b.preset_name}</span>
+                    </div>
                   ))}
                 </div>
               </div>
             )}
-            {config.current_config && Object.keys(config.current_config).length > 0 && (
+            {/* Single strategy params */}
+            {config.active_preset_type === "single" && config.current_config && Object.keys(config.current_config).length > 0 && (
               <div>
-                <p className="text-sm text-muted-foreground mb-2">当前参数</p>
+                <div className="flex items-center gap-2 mb-2">
+                  <Badge variant="outline" className="font-mono">{config.active_preset_name}</Badge>
+                </div>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
                   {Object.entries(config.current_config).map(([k, v]) => (
                     <div key={k} className="contents">
@@ -218,7 +187,7 @@ export default function DashboardPage() {
               <CardDescription>系统状态</CardDescription>
               <CardTitle className="flex items-center gap-2">
                 <Activity className="text-primary" />
-                {status?.paused ? (
+                {session?.paused ? (
                   <Badge variant="outline">已暂停</Badge>
                 ) : (
                   <Badge className="bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
@@ -227,23 +196,18 @@ export default function DashboardPage() {
                 )}
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">
-                运行时间: {status ? Math.floor(status.uptime_s / 60) : 0} 分钟
-              </p>
-            </CardContent>
           </Card>
 
           {/* Current session */}
-          <SessionSlotCard slot={status?.current ?? null} label="当前 Session" />
+          <SessionSlotCard slot={session?.current_session ?? null} label="当前 Session" />
 
           {/* Next session */}
-          <SessionSlotCard slot={status?.next ?? null} label="下一个 Session" />
+          <SessionSlotCard slot={session?.next_session ?? null} label="下一个 Session" />
         </div>
       )}
 
       {/* ── PnL & Balance Summary ─────────── */}
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription className="flex items-center gap-1">
@@ -251,9 +215,9 @@ export default function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-semibold">{fmtUsd(positions?.balance ?? 0)}</p>
+            <p className="text-2xl font-semibold">{fmtUsd(portfolio?.balance ?? 0)}</p>
             <p className="text-xs text-muted-foreground">
-              初始: {fmtUsd(positions?.initial_balance ?? 0)}
+              初始: {fmtUsd(portfolio?.initial_balance ?? 0)}
             </p>
           </CardContent>
         </Card>
@@ -261,30 +225,25 @@ export default function DashboardPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription className="flex items-center gap-1">
-              <CircleDot /> 权益
+              <TrendingUp /> 收益率
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-semibold">{fmtUsd(positions?.equity ?? 0)}</p>
-            <p className={cn("text-xs", pnlColor(positions?.unrealised_pnl ?? 0))}>
-              浮动 PnL: {fmtUsd(positions?.unrealised_pnl ?? 0)}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center gap-1">
-              <TrendingUp /> 总 PnL
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className={cn("text-2xl font-semibold", pnlColor(pnl?.total.total_pnl ?? 0))}>
-              {fmtUsd(pnl?.total.total_pnl ?? 0)}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {pnl?.total.total_sessions ?? 0} 场 Session
-            </p>
+            {(() => {
+              const init = portfolio?.initial_balance ?? 0
+              const totalPnl = pnl?.total.total_pnl ?? 0
+              const rate = init > 0 ? totalPnl / init : 0
+              return (
+                <>
+                  <p className={cn("text-2xl font-semibold", pnlColor(rate))}>
+                    {(rate >= 0 ? "+" : "") + (rate * 100).toFixed(2)}%
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {pnl?.total.total_sessions ?? 0} 场
+                  </p>
+                </>
+              )
+            })()}
           </CardContent>
         </Card>
 
@@ -315,7 +274,7 @@ export default function DashboardPage() {
       {pnl?.recent && pnl.recent.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">近期 Session PnL</CardTitle>
+            <CardTitle className="text-base">近期场次收益</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-2">
@@ -351,13 +310,13 @@ export default function DashboardPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {trades.map((t) => (
-                  <TableRow key={t.id}>
+                {trades.slice(0, 20).map((t, i) => (
+                  <TableRow key={t.id ?? i}>
                     <TableCell className="font-mono text-xs">
                       {t.timestamp ? fmtDateTimeCst(t.timestamp) : "—"}
                     </TableCell>
                     <TableCell className="max-w-[120px] truncate font-mono text-xs">
-                      {t.session_slug.replace("btc-updown-15m-", "")}
+                      {(t.session_slug ?? "").replace("btc-updown-15m-", "")}
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline" className={t.side === "BUY" ? "text-green-600" : "text-red-600"}>

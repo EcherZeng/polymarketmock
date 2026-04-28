@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 import httpx
 
 from config import settings
-from core.types import SessionInfo, parse_slug_window
+from models.types import SessionInfo, parse_slug_window
 
 logger = logging.getLogger(__name__)
 
@@ -168,26 +168,6 @@ class MarketScanner:
         if event:
             return _event_to_session_info(slug, event)
         return None
-
-    def get_all_sessions(self) -> list[dict]:
-        """Return all sessions with current status."""
-        now_utc = datetime.now(timezone.utc)
-        result = []
-        for slug, event in self._window:
-            status = _compute_status(slug, now_utc)
-            info = _event_to_session_info(slug, event)
-            if info:
-                result.append({"slug": slug, "status": status, "session": info})
-        return result
-
-    async def wait_for_new_session(self, timeout: float = 60.0) -> bool:
-        """Wait until a new session is discovered. Returns True if notified."""
-        self._new_session_event.clear()
-        try:
-            await asyncio.wait_for(self._new_session_event.wait(), timeout=timeout)
-            return True
-        except asyncio.TimeoutError:
-            return False
 
     # ── Internal ─────────────────────────────────────────────
 

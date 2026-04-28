@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from core.types import LiveFill
+from models.types import LiveFill
 
 logger = logging.getLogger(__name__)
 

@@ -14,8 +14,8 @@ import time
 from datetime import datetime, timezone
 
 from config import settings
-from core.base_executor import BaseExecutor
-from core.types import LiveFill, LiveSignal
+from execution.base_executor import BaseExecutor
+from models.types import LiveFill, LiveSignal
 
 logger = logging.getLogger(__name__)
 
@@ -128,13 +128,6 @@ class MockExecutor(BaseExecutor):
             fees=0.0,
         )
 
-    # ── Cancel ────────────────────────────────────────────────
-
-    async def cancel_all(self) -> None:
-        logger.info("Mock: cancel_all (no-op)")
-
-    async def cancel_order(self, order_id: str) -> None:
-        logger.info("Mock: cancel %s (no-op)", order_id)
 
     # ── Balance / Allowance ───────────────────────────────────
 

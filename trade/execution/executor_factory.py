@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from core.base_executor import BaseExecutor
+from execution.base_executor import BaseExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -16,11 +16,11 @@ def create_executor(mode: str) -> BaseExecutor:
         mode: "real" or "mock"
     """
     if mode == "real":
-        from core.order_executor import OrderExecutor
+        from execution.order_executor import OrderExecutor
         logger.info("Creating REAL order executor")
         return OrderExecutor()
     elif mode == "mock":
-        from core.mock_executor import MockExecutor
+        from execution.mock_executor import MockExecutor
         logger.info("Creating MOCK order executor")
         return MockExecutor()
     else:

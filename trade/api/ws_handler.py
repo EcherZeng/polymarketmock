@@ -9,7 +9,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from core.live_hub import LiveHub
+from infra.live_hub import LiveHub
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +110,7 @@ async def _send_initial_snapshot(ws: WebSocket):
     # Recent price snapshots for active session
     if _store and _session_manager and _session_manager.current_session:
         slug = _session_manager.current_session.session.slug
-        snapshots = _store.get_price_snapshots(slug, limit=300)
+        snapshots = _store.get_snapshots(slug)
         if snapshots:
             await _ws_send(ws, "price_history", snapshots)
 
@@ -120,6 +120,14 @@ async def _send_initial_snapshot(ws: WebSocket):
         trades = _store.get_trades(session_slug=slug, limit=50)
         if trades:
             await _ws_send(ws, "trades", trades)
+
+    # PnL summary (settled sessions)
+    if _store:
+        pnl_data = {
+            "total": _store.get_total_pnl(),
+            "recent": _store.get_recent_pnl(10),
+        }
+        await _ws_send(ws, "pnl", pnl_data)
 
 
 def _build_market_snapshot(slot) -> dict | None:

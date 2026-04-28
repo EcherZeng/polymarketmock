@@ -4,15 +4,18 @@ import type {
   BtcPricePoint,
   MarketSnapshot,
   WsSessionStatus,
+  WsPortfolio,
+  WsPnlData,
   TradeRow,
 } from "@/types"
 
 const MAX_BTC_POINTS = 900
-const MAX_MARKET_POINTS = 300
 
 interface UseLiveWsReturn {
   connected: boolean
   session: WsSessionStatus | null
+  portfolio: WsPortfolio | null
+  pnl: WsPnlData | null
   btcPrices: BtcPricePoint[]
   market: MarketSnapshot | null
   /** Up token price series — [{timestamp, mid_price, best_bid, best_ask}] */
@@ -30,6 +33,8 @@ export function useLiveWs(): UseLiveWsReturn {
 
   const [connected, setConnected] = useState(false)
   const [session, setSession] = useState<WsSessionStatus | null>(null)
+  const [portfolio, setPortfolio] = useState<WsPortfolio | null>(null)
+  const [pnl, setPnl] = useState<WsPnlData | null>(null)
   const [btcPrices, setBtcPrices] = useState<BtcPricePoint[]>([])
   const [market, setMarket] = useState<MarketSnapshot | null>(null)
   const [upPrices, setUpPrices] = useState<{ timestamp: string; mid: number; bid: number; ask: number }[]>([])
@@ -55,6 +60,15 @@ export function useLiveWs(): UseLiveWsReturn {
           }
           currentSlugRef.current = newSlug
           setSession(status)
+          // Extract portfolio from session event
+          if (status.portfolio) {
+            setPortfolio(status.portfolio)
+          }
+          break
+        }
+
+        case "pnl": {
+          setPnl(msg.data as WsPnlData)
           break
         }
 
@@ -81,15 +95,9 @@ export function useLiveWs(): UseLiveWsReturn {
           for (const t of tokens) {
             const point = { timestamp: ts, mid: t.mid_price, bid: t.best_bid, ask: t.best_ask }
             if (t.outcome === "Up") {
-              setUpPrices((prev) => {
-                const next = [...prev, point]
-                return next.length > MAX_MARKET_POINTS ? next.slice(-MAX_MARKET_POINTS) : next
-              })
+              setUpPrices((prev) => [...prev, point])
             } else if (t.outcome === "Down") {
-              setDownPrices((prev) => {
-                const next = [...prev, point]
-                return next.length > MAX_MARKET_POINTS ? next.slice(-MAX_MARKET_POINTS) : next
-              })
+              setDownPrices((prev) => [...prev, point])
             }
           }
           break
@@ -135,8 +143,8 @@ export function useLiveWs(): UseLiveWsReturn {
               }
             }
           }
-          if (upPoints.length > 0) setUpPrices(upPoints.slice(-MAX_MARKET_POINTS))
-          if (downPoints.length > 0) setDownPrices(downPoints.slice(-MAX_MARKET_POINTS))
+          if (upPoints.length > 0) setUpPrices(upPoints)
+          if (downPoints.length > 0) setDownPrices(downPoints)
           break
         }
 
@@ -183,5 +191,5 @@ export function useLiveWs(): UseLiveWsReturn {
     }
   }, [connect])
 
-  return { connected, session, btcPrices, market, upPrices, downPrices, trades }
+  return { connected, session, portfolio, pnl, btcPrices, market, upPrices, downPrices, trades }
 }

@@ -1,8 +1,6 @@
 import { useState, useMemo } from "react"
 import { useLiveWs } from "@/hooks/useLiveWs"
-import { useConfig } from "@/hooks/useTradeData"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { tradeApi } from "@/api/trade"
+import { useConfigState } from "@/hooks/useTradeData"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -15,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { cn, fmtUsd, fmtTimeCst, descText } from "@/lib/utils"
+import { cn, fmtUsd, fmtTimeCst } from "@/lib/utils"
 import type { SessionState, TokenMarket, WsSessionStatus } from "@/types"
 import {
   LineChart,
@@ -28,18 +26,13 @@ import {
   Legend,
   ReferenceLine,
 } from "recharts"
-import { Activity, Wifi, WifiOff, Timer, TrendingUp, TrendingDown, Settings2, X, Download, Layers } from "lucide-react"
-
-import { toast } from "sonner"
+import { Activity, Wifi, WifiOff, Timer, TrendingUp, TrendingDown, Settings2, X, Layers } from "lucide-react"
 
 const stateColors: Record<SessionState, string> = {
-  discovered: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",
-  preparing: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300",
+  pending: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",
   active: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300",
-  closing: "bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300",
+  settling: "bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300",
   settled: "bg-muted text-muted-foreground",
-  skipped: "bg-muted text-muted-foreground",
-  error: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300",
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -51,10 +44,10 @@ function parseSlugEpoch(slug: string | undefined): number | null {
   return m ? Number(m[1]) : null
 }
 
-/** Generate 15-minute tick values (epoch) every 3 minutes */
+/** Generate 15-minute tick values (epoch) every 1 minute */
 function generate15mTicks(startEpoch: number): number[] {
   const ticks: number[] = []
-  for (let i = 0; i <= 15; i += 3) {
+  for (let i = 0; i <= 15; i += 1) {
     ticks.push(startEpoch + i * 60)
   }
   return ticks
@@ -88,23 +81,12 @@ function formatTime(iso: string): string {
 // ── Strategy Detail Panel ────────────────────────────────────────────────────
 
 function StrategyDetailPanel({ onClose, session }: { onClose: () => void; session: WsSessionStatus | null }) {
-  const queryClient = useQueryClient()
-  const { data: config } = useConfig()
-
-  const loadPresetMut = useMutation({
-    mutationFn: (presetName: string) => tradeApi.loadPreset(presetName),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["trade", "config"] })
-      toast.success(`已加载预设「${data.preset_name}」：${Object.keys(data.applied).length} 个参数已应用`)
-    },
-    onError: (err: Error) => {
-      toast.error(`加载失败: ${err.message}`)
-    },
-  })
+  const { data: config } = useConfigState()
 
   if (!config) return null
 
-  const activeLocal = config.local_strategies?.find((s) => s.name === config.active_strategy)
+  const presetName = config.active_preset_name
+  const presetType = config.active_preset_type ?? "none"
   const cs = session?.current_session
 
   return (
@@ -114,50 +96,43 @@ function StrategyDetailPanel({ onClose, session }: { onClose: () => void; sessio
           <CardTitle className="text-base">策略详情</CardTitle>
           <Button variant="ghost" size="icon" onClick={onClose}><X className="h-4 w-4" /></Button>
         </div>
-        <CardDescription>当前运行的实时交易策略及其参数</CardDescription>
+        <CardDescription>
+          {presetName
+            ? `当前${presetType === "composite" ? "复合" : "单一"}策略：${presetName}`
+            : "尚未加载策略"}
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Active live strategy */}
-        {activeLocal && (
-          <div>
-            <p className="text-sm text-muted-foreground mb-1">当前实时策略</p>
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" className="font-mono">{activeLocal.name}</Badge>
-              <span className="text-xs text-muted-foreground">v{activeLocal.version}</span>
-            </div>
-            {descText(activeLocal.description) && (
-              <p className="text-xs text-muted-foreground mt-1">{descText(activeLocal.description)}</p>
-            )}
-          </div>
-        )}
-
-        {/* Active composite strategy */}
-        {config.composite_config && (
+        {/* Active composite strategy with branch match highlight */}
+        {presetType === "composite" && config.composite_config && (
           <div className="rounded-md border border-purple-200 dark:border-purple-800 p-3 space-y-2">
             <div className="flex items-center gap-2">
               <Layers className="h-4 w-4 text-purple-600" />
-              <span className="text-sm font-medium">复合策略</span>
               <Badge variant="outline" className="font-mono text-xs">{config.composite_config.composite_name}</Badge>
-            </div>
-            <div className="text-xs text-muted-foreground">
-              BTC 窗口: W1={config.composite_config.btc_windows.btc_trend_window_1}m W2={config.composite_config.btc_windows.btc_trend_window_2}m
+              <span className="text-xs text-muted-foreground">
+                W1={config.composite_config.btc_windows.btc_trend_window_1}m W2={config.composite_config.btc_windows.btc_trend_window_2}m
+              </span>
             </div>
             <div className="space-y-1.5">
               {config.composite_config.branches.map((b, i) => {
                 const isMatched = cs?.matched_branch === b.label
                 return (
-                  <div key={i} className="space-y-0.5">
-                    <Badge
-                      variant={isMatched ? "default" : "outline"}
-                      className={cn(
-                        "text-xs font-mono",
-                        isMatched && "bg-purple-600 text-white",
-                      )}
-                    >
-                      {b.label} ≥{b.min_momentum} ({b.preset_name})
-                    </Badge>
-                    {isMatched && b.config && Object.keys(b.config).length > 0 && (
-                      <div className="flex flex-wrap gap-x-2 gap-y-0.5 pl-2">
+                  <div key={i} className={cn(
+                    "rounded border px-2 py-1.5 space-y-0.5",
+                    isMatched && "border-purple-400 bg-purple-50/50 dark:bg-purple-950/20",
+                  )}>
+                    <div className="flex items-center gap-2 text-xs">
+                      <Badge
+                        variant={isMatched ? "default" : "outline"}
+                        className={cn("font-mono", isMatched && "bg-purple-600 text-white")}
+                      >
+                        {b.label} ≥{b.min_momentum}
+                      </Badge>
+                      <span className="text-muted-foreground font-mono">{b.preset_name}</span>
+                      {isMatched && <span className="text-purple-600 text-xs font-medium">← 当前场次</span>}
+                    </div>
+                    {b.config && Object.keys(b.config).length > 0 && (
+                      <div className="flex flex-wrap gap-x-2 gap-y-0.5 pl-1">
                         {Object.entries(b.config).map(([k, v]) => (
                           <span key={k} className="text-xs text-muted-foreground font-mono">
                             {k}={String(v)}
@@ -168,6 +143,23 @@ function StrategyDetailPanel({ onClose, session }: { onClose: () => void; sessio
                   </div>
                 )
               })}
+            </div>
+          </div>
+        )}
+
+        {/* Single strategy params */}
+        {presetType === "single" && config.current_config && Object.keys(config.current_config).length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Badge variant="outline" className="font-mono">{presetName}</Badge>
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+              {Object.entries(config.current_config).map(([k, v]) => (
+                <div key={k} className="contents">
+                  <span className="text-muted-foreground font-mono">{k}</span>
+                  <span className="text-right font-mono font-medium">{String(v)}</span>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -183,55 +175,39 @@ function StrategyDetailPanel({ onClose, session }: { onClose: () => void; sessio
                 <Badge variant="destructive" className="text-xs">未通过 — 跳过</Badge>
               )}
             </p>
-            <div className="grid grid-cols-3 gap-2 text-xs">
+            <div className="grid grid-cols-3 gap-2 text-xs md:grid-cols-6">
               <div>
-                <span className="text-muted-foreground">方向</span>
-                <p className="font-mono font-medium">{cs.btc_direction ?? "—"}</p>
+                <span className="text-muted-foreground">P₀</span>
+                <p className="font-mono font-medium">{cs.btc_p0 != null ? `$${cs.btc_p0.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "—"}</p>
               </div>
               <div>
-                <span className="text-muted-foreground">振幅</span>
-                <p className="font-mono font-medium">{cs.btc_amplitude != null ? cs.btc_amplitude.toFixed(6) : "—"}</p>
+                <span className="text-muted-foreground">P<sub>W1</sub></span>
+                <p className="font-mono font-medium">{cs.btc_p_w1 != null ? `$${cs.btc_p_w1.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "—"}</p>
               </div>
               <div>
-                <span className="text-muted-foreground">匹配分支</span>
-                <p className="font-mono font-medium">{cs.matched_branch ?? "—"}</p>
+                <span className="text-muted-foreground">P<sub>W2</sub></span>
+                <p className="font-mono font-medium">{cs.btc_p_w2 != null ? `$${cs.btc_p_w2.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "—"}</p>
               </div>
-            </div>
-          </div>
-        )}
-
-        {/* Backtest strategies quick-load */}
-        {config.backtest_strategies && config.backtest_strategies.length > 0 && (
-          <div>
-            <p className="text-sm text-muted-foreground mb-1">可用回测策略（点击加载参数）</p>
-            <div className="flex flex-wrap gap-2">
-              {config.backtest_strategies.map((s) => (
-                <Button
-                  key={s.name}
-                  variant="secondary"
-                  size="sm"
-                  className="font-mono text-xs gap-1"
-                  disabled={loadPresetMut.isPending}
-                  onClick={() => loadPresetMut.mutate(s.name)}
-                >
-                  <Download className="h-3 w-3" />
-                  {s.name}
-                </Button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {config.current_config && Object.keys(config.current_config).length > 0 && (
-          <div>
-            <p className="text-sm text-muted-foreground mb-2">当前参数</p>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-              {Object.entries(config.current_config).map(([k, v]) => (
-                <div key={k} className="contents">
-                  <span className="text-muted-foreground font-mono">{k}</span>
-                  <span className="text-right font-mono font-medium">{String(v)}</span>
-                </div>
-              ))}
+              <div>
+                <span className="text-muted-foreground">a₁ (P₀→W1)</span>
+                <p className={cn("font-mono font-medium", cs.btc_a1 != null && cs.btc_a1 > 0 ? "text-green-600" : cs.btc_a1 != null && cs.btc_a1 < 0 ? "text-red-600" : "")}>
+                  {cs.btc_a1 != null ? (cs.btc_a1 >= 0 ? "+" : "") + (cs.btc_a1 * 100).toFixed(4) + "%" : "—"}
+                </p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">a₂ (W1→W2)</span>
+                <p className={cn("font-mono font-medium", cs.btc_a2 != null && cs.btc_a2 > 0 ? "text-green-600" : cs.btc_a2 != null && cs.btc_a2 < 0 ? "text-red-600" : "")}>
+                  {cs.btc_a2 != null ? (cs.btc_a2 >= 0 ? "+" : "") + (cs.btc_a2 * 100).toFixed(4) + "%" : "—"}
+                </p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">|a₁+a₂| / 方向 / 分支</span>
+                <p className="font-mono font-medium">
+                  {cs.btc_amplitude != null ? (cs.btc_amplitude * 100).toFixed(4) + "%" : "—"}
+                  {" "}{cs.btc_direction ?? "—"}
+                  {cs.matched_branch ? ` · ${cs.matched_branch}` : ""}
+                </p>
+              </div>
             </div>
           </div>
         )}
@@ -249,7 +225,7 @@ export default function LiveSessionPage() {
   const { connected, session, btcPrices, market, upPrices, downPrices, trades } = useLiveWs()
   const [showStrategy, setShowStrategy] = useState(false)
 
-  const { data: config } = useConfig()
+  const { data: config } = useConfigState()
 
   const currentSlot = session?.current_session
   const nextSlot = session?.next_session
@@ -276,47 +252,94 @@ export default function LiveSessionPage() {
 
   // ── Real-time sita (momentum) computation ──────────────────────────
   const sitaInfo = useMemo(() => {
-    if (!startEpoch || !config?.composite_config) return null
-    const w1 = config.composite_config.btc_windows.btc_trend_window_1
-    const w2 = config.composite_config.btc_windows.btc_trend_window_2
+    if (!startEpoch) return null
+
+    // Read w1/w2 from composite config or single-strategy config
+    let w1: number | null = null
+    let w2: number | null = null
+    if (config?.composite_config) {
+      w1 = config.composite_config.btc_windows.btc_trend_window_1
+      w2 = config.composite_config.btc_windows.btc_trend_window_2
+    } else if (config?.current_config) {
+      const cw1 = config.current_config.btc_trend_window_1
+      const cw2 = config.current_config.btc_trend_window_2
+      if (typeof cw1 === "number" && typeof cw2 === "number") {
+        w1 = cw1
+        w2 = cw2
+      }
+    }
+    if (w1 == null || w2 == null) return null
 
     const w1Epoch = startEpoch + w1 * 60
     const w2Epoch = startEpoch + w2 * 60
-
-    // P0 = first BTC price at or after session start
-    const p0Entry = btcPrices.find((p) => isoToEpoch(p.timestamp) >= startEpoch)
-    if (!p0Entry) return { w1Epoch, w2Epoch, p0: null, pW1: null, a1: null, a2: null, amplitude: null, direction: null, w1Passed: false, w2Passed: false }
-
-    const p0 = p0Entry.price
     const nowEpoch = Math.floor(Date.now() / 1000)
     const w1Passed = nowEpoch >= w1Epoch
     const w2Passed = nowEpoch >= w2Epoch
 
-    // P_W1 = price closest to window_1 end
-    let pW1: number | null = null
-    if (w1Passed) {
-      const candidates = btcPrices.filter((p) => isoToEpoch(p.timestamp) <= w1Epoch)
-      if (candidates.length > 0) pW1 = candidates[candidates.length - 1].price
+    // After backend has computed BTC trend (post w2), use authoritative
+    // backend values (kline-open based, matching Strategy service).
+    const cs = currentSlot
+    if (cs?.btc_trend_computed && cs.btc_p0 != null) {
+      const bp0 = cs.btc_p0
+      const bpW1 = cs.btc_p_w1 ?? null
+      const bpW2 = cs.btc_p_w2 ?? null
+      const ba1 = cs.btc_a1 ?? null
+      const ba2 = cs.btc_a2 ?? null
+      const bAmp = ba1 != null && ba2 != null ? Math.abs(ba1 + ba2) : null
+      const bDir = ba1 != null && ba2 != null && ba1 + ba2 !== 0 ? (ba1 + ba2 > 0 ? "up" : "down") : null
+      return { w1Epoch, w2Epoch, p0: bp0, pW1: bpW1, pW2: bpW2, a1: ba1, a2: ba2, amplitude: bAmp, direction: bDir, w1Passed, w2Passed }
     }
 
-    // a1 = (latest_or_pW1 - p0) / p0
-    // After W1, a1 is locked to pW1; before W1, show evolving a1 from latest price
+    // Before backend computes: real-time estimate from WebSocket prices.
+    // Use _closest price to each window boundary (matching Strategy's
+    // _closest_open logic).
+    const closestPrice = (targetEpoch: number): number | null => {
+      let best: number | null = null
+      let bestDist = Infinity
+      for (const p of btcPrices) {
+        const ep = isoToEpoch(p.timestamp)
+        const dist = Math.abs(ep - targetEpoch)
+        if (dist < bestDist) {
+          bestDist = dist
+          best = p.price
+        }
+      }
+      return best
+    }
+
+    // P0 = price closest to session start
+    const p0 = closestPrice(startEpoch)
+    if (p0 == null || p0 === 0) return { w1Epoch, w2Epoch, p0: null, pW1: null, pW2: null, a1: null, a2: null, amplitude: null, direction: null, w1Passed, w2Passed }
+
+    // P_W1: locked to closest price once W1 passes; else use latest
+    let pW1: number | null = null
+    if (w1Passed) {
+      pW1 = closestPrice(w1Epoch)
+    }
+
+    // P_W2: locked to closest price once W2 passes; else null
+    let pW2: number | null = null
+    if (w2Passed) {
+      pW2 = closestPrice(w2Epoch)
+    }
+
+    // a1: before W1 evolves with latest price; after W1 locked
     const a1Price = w1Passed && pW1 != null ? pW1 : latestBtc
     const a1 = p0 > 0 ? (a1Price - p0) / p0 : null
 
-    // a2 = only computed once W1 has passed
+    // a2: not computed until W1; between W1→W2 evolves with latest; after W2 locked
     let a2: number | null = null
     if (w1Passed && pW1 != null && pW1 > 0) {
-      const currentP = latestBtc
-      a2 = (currentP - pW1) / pW1
+      const a2Price = w2Passed && pW2 != null ? pW2 : latestBtc
+      a2 = (a2Price - pW1) / pW1
     }
 
     // amplitude = |a1 + a2| when both available
     const amplitude = a1 != null && a2 != null ? Math.abs(a1 + a2) : (a1 != null ? Math.abs(a1) : null)
     const direction = a1 != null && a2 != null && a1 + a2 !== 0 ? (a1 + a2 > 0 ? "up" : "down") : null
 
-    return { w1Epoch, w2Epoch, p0, pW1, a1, a2, amplitude, direction, w1Passed, w2Passed }
-  }, [btcPrices, startEpoch, config?.composite_config, latestBtc])
+    return { w1Epoch, w2Epoch, p0, pW1, pW2, a1, a2, amplitude, direction, w1Passed, w2Passed }
+  }, [btcPrices, startEpoch, config?.composite_config, config?.current_config, latestBtc, currentSlot])
 
   // Poly chart data — merge up/down with epoch, filter to 15-min window
   const epochSet = new Set<number>()
@@ -359,9 +382,9 @@ export default function LiveSessionPage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-semibold tracking-tight">实时场次监控</h1>
-          {config?.active_strategy && (
+          {config?.active_preset_name && (
             <Badge variant="outline" className="font-mono text-xs">
-              {config.active_strategy}
+              {config.active_preset_type === "composite" ? "复合: " : ""}{config.active_preset_name}
             </Badge>
           )}
           {config?.executor_mode && (
@@ -440,14 +463,19 @@ export default function LiveSessionPage() {
               </div>
               {/* BTC trend status from backend */}
               {currentSlot.btc_trend_computed && (
-                <div className="mt-2 flex items-center gap-2 text-xs">
+                <div className="mt-2 flex items-center gap-2 text-xs flex-wrap">
                   <span className="text-muted-foreground">BTC趋势:</span>
                   {currentSlot.btc_trend_passed ? (
                     <Badge className="bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 text-xs">
-                      通过 {currentSlot.btc_direction === "up" ? "↑" : "↓"} {currentSlot.btc_amplitude != null ? (currentSlot.btc_amplitude * 100).toFixed(3) + "%" : ""}
+                      通过 {currentSlot.btc_direction === "UP" ? "↑" : "↓"} |a₁+a₂|={currentSlot.btc_amplitude != null ? (currentSlot.btc_amplitude * 100).toFixed(3) + "%" : ""}
                     </Badge>
                   ) : (
                     <Badge variant="destructive" className="text-xs">未通过 — 跳过</Badge>
+                  )}
+                  {currentSlot.btc_a1 != null && currentSlot.btc_a2 != null && (
+                    <span className="font-mono text-muted-foreground">
+                      a₁={((currentSlot.btc_a1) * 100).toFixed(4)}% a₂={((currentSlot.btc_a2) * 100).toFixed(4)}%
+                    </span>
                   )}
                   {currentSlot.matched_branch && (
                     <Badge variant="outline" className="font-mono text-xs">{currentSlot.matched_branch}</Badge>
@@ -498,7 +526,7 @@ export default function LiveSessionPage() {
           </div>
           {/* Real-time sita indicators */}
           {sitaInfo && sitaInfo.p0 != null && (
-            <div className="mt-2 grid grid-cols-2 gap-2 rounded-md border p-2 text-xs md:grid-cols-5">
+            <div className="mt-2 grid grid-cols-3 gap-2 rounded-md border p-2 text-xs md:grid-cols-7">
               <div>
                 <span className="text-muted-foreground">P₀</span>
                 <p className="font-mono font-medium">${sitaInfo.p0.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
@@ -510,26 +538,37 @@ export default function LiveSessionPage() {
                 </p>
               </div>
               <div>
-                <span className="text-muted-foreground">a₁{!sitaInfo.w1Passed && " (实时)"}</span>
+                <span className="text-muted-foreground">P<sub>W2</sub></span>
+                <p className="font-mono font-medium">
+                  {sitaInfo.pW2 != null ? `$${sitaInfo.pW2.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "等待..."}
+                </p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">a₁ (P₀→P<sub>W1</sub>){!sitaInfo.w1Passed ? " 实时" : ""}</span>
                 <p className={cn("font-mono font-medium", sitaInfo.a1 != null && sitaInfo.a1 > 0 ? "text-green-600" : sitaInfo.a1 != null && sitaInfo.a1 < 0 ? "text-red-600" : "")}>
                   {sitaInfo.a1 != null ? (sitaInfo.a1 >= 0 ? "+" : "") + (sitaInfo.a1 * 100).toFixed(4) + "%" : "—"}
                 </p>
               </div>
               <div>
-                <span className="text-muted-foreground">a₂{sitaInfo.w1Passed && !sitaInfo.w2Passed && " (实时)"}</span>
+                <span className="text-muted-foreground">a₂ (P<sub>W1</sub>→P<sub>W2</sub>){sitaInfo.w1Passed && !sitaInfo.w2Passed ? " 实时" : ""}</span>
                 <p className={cn("font-mono font-medium", sitaInfo.a2 != null && sitaInfo.a2 > 0 ? "text-green-600" : sitaInfo.a2 != null && sitaInfo.a2 < 0 ? "text-red-600" : "")}>
                   {sitaInfo.a2 != null ? (sitaInfo.a2 >= 0 ? "+" : "") + (sitaInfo.a2 * 100).toFixed(4) + "%" : "—"}
                 </p>
               </div>
               <div>
-                <span className="text-muted-foreground">振幅 |a₁+a₂|</span>
+                <span className="text-muted-foreground">合计动量 |a₁+a₂|</span>
                 <p className="font-mono font-semibold">
                   {sitaInfo.amplitude != null ? (sitaInfo.amplitude * 100).toFixed(4) + "%" : "—"}
-                  {sitaInfo.direction && (
-                    <span className={cn("ml-1", sitaInfo.direction === "up" ? "text-green-600" : "text-red-600")}>
-                      {sitaInfo.direction === "up" ? "↑" : "↓"}
+                </p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">方向</span>
+                <p className="font-mono font-semibold">
+                  {sitaInfo.direction ? (
+                    <span className={cn(sitaInfo.direction === "up" ? "text-green-600" : "text-red-600")}>
+                      {sitaInfo.direction === "up" ? "↑ UP" : "↓ DOWN"}
                     </span>
-                  )}
+                  ) : "—"}
                 </p>
               </div>
             </div>

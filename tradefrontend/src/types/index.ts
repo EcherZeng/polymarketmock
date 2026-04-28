@@ -6,13 +6,10 @@ export interface HealthResponse {
 }
 
 export type SessionState =
-  | "discovered"
-  | "preparing"
+  | "pending"
   | "active"
-  | "closing"
+  | "settling"
   | "settled"
-  | "skipped"
-  | "error"
 
 export interface SessionSlot {
   slug: string
@@ -115,15 +112,23 @@ export interface StrategyInfo {
   builtin?: boolean
 }
 
-export interface ConfigResponse {
-  local_strategies: StrategyInfo[]
+export interface CatalogResponse {
   backtest_strategies: StrategyInfo[]
   composite_presets: CompositePreset[]
+}
+
+export interface ConfigStateResponse {
   current_config: Record<string, unknown>
   composite_config: CompositeConfigInfo | null
   allowed_keys?: Record<string, [number, number]>
   executor_mode?: string
-  active_strategy?: string
+  active_preset_name?: string | null
+  active_preset_type?: string  // "single" | "composite" | "none"
+}
+
+export interface MutationWithState {
+  ok: boolean
+  state: ConfigStateResponse
 }
 
 export interface CompositePreset {
@@ -190,7 +195,13 @@ export interface WsSessionStatus {
     btc_trend_passed?: boolean | null
     btc_amplitude?: number | null
     btc_direction?: string | null
+    btc_a1?: number | null
+    btc_a2?: number | null
+    btc_p0?: number | null
+    btc_p_w1?: number | null
+    btc_p_w2?: number | null
     matched_branch?: string | null
+    skipped?: boolean
     no_trades?: boolean
   } | null
   next_session: {
@@ -201,6 +212,28 @@ export interface WsSessionStatus {
     has_position: boolean
   } | null
   settling_count: number
+  portfolio: WsPortfolio
+}
+
+export interface WsPortfolio {
+  balance: number
+  initial_balance: number
+  positions: Record<string, number>
+  equity: number
+  realised_pnl: number
+  unrealised_pnl: number
+}
+
+export interface WsPnlData {
+  total: {
+    total_pnl: number
+    total_trade_pnl: number
+    total_settlement_pnl: number
+    total_sessions: number
+    winning_sessions: number
+    losing_sessions: number
+  }
+  recent: { slug: string; state: string; total_pnl: number }[]
 }
 
 export interface PriceSnapshot {

@@ -6,7 +6,7 @@ Strategy/core/anchor_pricing.py but adapted for live trading context.
 
 from __future__ import annotations
 
-from core.types import TokenMarketData
+from models.types import TokenMarketData
 
 # ── Anchor pricing thresholds ────────────────────────────────────────────────
 
@@ -150,6 +150,9 @@ class OrderbookBuilder:
             self._last_trade[asset_id] = price
             hist = self._price_history.setdefault(asset_id, [])
             hist.append(price)
+            # Cap history to prevent unbounded growth
+            if len(hist) > 200:
+                self._price_history[asset_id] = hist[-200:]
 
     def handle_best_bid_ask(self, asset_id: str, data: dict) -> None:
         """Handle 'best_bid_ask' event — update top-of-book if no full book."""

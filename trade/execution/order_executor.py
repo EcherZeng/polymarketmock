@@ -11,8 +11,8 @@ from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import ApiCreds, OrderArgs, OrderType
 
 from config import settings
-from core.base_executor import BaseExecutor
-from core.types import LiveFill, LiveSignal
+from execution.base_executor import BaseExecutor
+from models.types import LiveFill, LiveSignal
 
 logger = logging.getLogger(__name__)
 
@@ -219,29 +219,6 @@ class OrderExecutor(BaseExecutor):
             timestamp=datetime.now(timezone.utc).isoformat(),
             session_slug=session_slug,
         )
-
-    # ── Cancel all ────────────────────────────────────────────
-
-    async def cancel_all(self) -> None:
-        """Cancel all open orders."""
-        if not self.is_ready:
-            return
-        loop = asyncio.get_running_loop()
-        try:
-            await loop.run_in_executor(None, self._client.cancel_all)  # type: ignore
-            logger.info("All open orders cancelled")
-        except Exception as e:
-            logger.error("cancel_all failed: %s", e)
-
-    async def cancel_order(self, order_id: str) -> None:
-        """Cancel a specific order."""
-        if not self.is_ready:
-            return
-        loop = asyncio.get_running_loop()
-        try:
-            await loop.run_in_executor(None, self._client.cancel, order_id)  # type: ignore
-        except Exception as e:
-            logger.error("cancel(%s) failed: %s", order_id, e)
 
     # ── P0-2: Balance sync ────────────────────────────────────
 

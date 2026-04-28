@@ -15,13 +15,10 @@ import { cn, fmtUsd, pnlColor, epochToIso, fmtDateTimeCst } from "@/lib/utils"
 import type { SessionState } from "@/types"
 
 const stateLabel: Record<SessionState, string> = {
-  discovered: "已发现",
-  preparing: "准备中",
+  pending: "等待中",
   active: "交易中",
-  closing: "关闭中",
+  settling: "结算中",
   settled: "已结算",
-  skipped: "已跳过",
-  error: "错误",
 }
 
 export default function SessionsPage() {
