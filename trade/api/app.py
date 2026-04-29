@@ -47,49 +47,49 @@ async def lifespan(app: FastAPI):
         hub = LiveHub()
         btc_streamer = BtcPriceStreamer(hub)
 
-    await store.start()
-    await scanner.start()
-    await executor.start()
-    await btc_streamer.start()
+        await store.start()
+        await scanner.start()
+        await executor.start()
+        await btc_streamer.start()
 
-    # ── P0-2: Sync balance from API (real mode only) ──────────
-    if settings.executor_mode == "real" and executor.is_ready:
-        real_balance = await executor.get_balance()
-        if real_balance is not None:
-            tracker.set_balance(real_balance)
+        # ── P0-2: Sync balance from API (real mode only) ──────────
+        if settings.executor_mode == "real" and executor.is_ready:
+            real_balance = await executor.get_balance()
+            if real_balance is not None:
+                tracker.set_balance(real_balance)
 
-    # ── P0-5: Verify allowance for SELL (real mode only) ──────
-    if settings.executor_mode == "real" and executor.is_ready:
-        await executor.check_allowance()
+        # ── P0-5: Verify allowance for SELL (real mode only) ──────
+        if settings.executor_mode == "real" and executor.is_ready:
+            await executor.check_allowance()
 
-    # ── P0-3: Restore positions from DuckDB ───────────────────
-    for fill in store.get_unsettled_fills():
-        tracker.apply_fill(fill)
+        # ── P0-3: Restore positions from DuckDB ───────────────────
+        for fill in store.get_unsettled_fills():
+            tracker.apply_fill(fill)
 
-    manager = SessionManager(
-        scanner=scanner,
-        executor=executor,
-        tracker=tracker,
-        settlement=settlement,
-        store=store,
-        hub=hub,
-        btc_streamer=btc_streamer,
-    )
-    await manager.start()
+        manager = SessionManager(
+            scanner=scanner,
+            executor=executor,
+            tracker=tracker,
+            settlement=settlement,
+            store=store,
+            hub=hub,
+            btc_streamer=btc_streamer,
+        )
+        await manager.start()
 
-    # Inject into routes & ws handler
-    init_routes(manager, tracker, store, btc_streamer)
-    init_ws(hub, manager, tracker, store, btc_streamer)
+        # Inject into routes & ws handler
+        init_routes(manager, tracker, store, btc_streamer)
+        init_ws(hub, manager, tracker, store, btc_streamer)
 
-    # Store refs on app for access
-    app.state.scanner = scanner
-    app.state.executor = executor
-    app.state.tracker = tracker
-    app.state.settlement = settlement
-    app.state.store = store
-    app.state.manager = manager
-    app.state.hub = hub
-    app.state.btc_streamer = btc_streamer
+        # Store refs on app for access
+        app.state.scanner = scanner
+        app.state.executor = executor
+        app.state.tracker = tracker
+        app.state.settlement = settlement
+        app.state.store = store
+        app.state.manager = manager
+        app.state.hub = hub
+        app.state.btc_streamer = btc_streamer
 
         yield
 
