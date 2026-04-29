@@ -137,9 +137,13 @@ class OrderExecutor(BaseExecutor):
             logger.error("SELL signal has no valid limit_price")
             return None
 
+        # Floor to 0.01 precision to avoid leaving dust positions
+        import math
+        shares = math.floor(signal.amount_usdc * 100) / 100
+
         order_args = OrderArgs(
             price=price,
-            size=round(signal.amount_usdc, 2),  # For SELL, amount is shares
+            size=shares,
             side="SELL",
             token_id=signal.token_id,
         )

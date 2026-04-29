@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,13 +25,27 @@ from portfolio.settlement_tracker import SettlementTracker
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ── Startup ───────────────────────────────────────────────
-    scanner = MarketScanner()
-    executor = create_executor(settings.executor_mode)
-    tracker = PositionTracker(initial_balance=settings.initial_balance)
-    settlement = SettlementTracker()
-    store = DataStore()
-    hub = LiveHub()
-    btc_streamer = BtcPriceStreamer(hub)
+    # ── P0-0: Acquire process lock to prevent concurrent instances ──
+    lock_file = settings.data_dir / ".trade.lock"
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    
+    if lock_file.exists():
+        import sys
+        import logging
+        logging.error("Another trade service instance is running (lock file exists: %s)", lock_file)
+        logging.error("If you're sure no other instance is running, delete the lock file manually.")
+        sys.exit(1)
+    
+    lock_file.write_text(str(datetime.now(timezone.utc).isoformat()))
+    
+    try:
+        scanner = MarketScanner()
+        executor = create_executor(settings.executor_mode)
+        tracker = PositionTracker(initial_balance=settings.initial_balance)
+        settlement = SettlementTracker()
+        store = DataStore()
+        hub = LiveHub()
+        btc_streamer = BtcPriceStreamer(hub)
 
     await store.start()
     await scanner.start()
@@ -76,18 +91,23 @@ async def lifespan(app: FastAPI):
     app.state.hub = hub
     app.state.btc_streamer = btc_streamer
 
-    yield
+        yield
 
-    # ── Shutdown ──────────────────────────────────────────────
-    await btc_streamer.stop()
-    await manager.stop()
-    await scanner.stop()
-    await executor.stop()
-    await settlement.close()
-    await store.stop()
-    # Close shared httpx client for BTC kline fetches
-    from engine.btc_trend import close_client as close_btc_client
-    await close_btc_client()
+        # ── Shutdown ──────────────────────────────────────────────
+        await btc_streamer.stop()
+        await manager.stop()
+        await scanner.stop()
+        await executor.stop()
+        await settlement.close()
+        await store.stop()
+        # Close shared httpx client for BTC kline fetches
+        from engine.btc_trend import close_client as close_btc_client
+        await close_btc_client()
+    
+    finally:
+        # ── Release process lock ──────────────────────────────────
+        if lock_file.exists():
+            lock_file.unlink()
 
 
 app = FastAPI(

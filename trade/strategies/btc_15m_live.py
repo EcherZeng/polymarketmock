@@ -112,13 +112,14 @@ class Btc15mLiveStrategy:
             return LiveSignal(token_id=token_id, side="SELL", amount_usdc=shares,
                               limit_price=sell_price, reason="stop_loss")
 
-        # Force close near expiry
+        # Force close near expiry — only if profitable, let stop-loss handle losses
         if ctx.time_remaining_s <= self.force_close_remaining_s:
             profit = (sell_price - self._entry_price) * shares
-            if profit < self.min_close_profit:
-                return None
-            return LiveSignal(token_id=token_id, side="SELL", amount_usdc=shares,
-                              limit_price=sell_price, reason="force_close")
+            if profit > 0:  # Only close if profitable
+                return LiveSignal(token_id=token_id, side="SELL", amount_usdc=shares,
+                                  limit_price=sell_price, reason="force_close")
+            # If losing, let stop-loss or settlement handle it
+            return None
 
         return None
 

@@ -91,6 +91,7 @@ class SessionManager:
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
         self._paused = False
+        self._tick_lock = asyncio.Lock()
 
         self._last_price_write: dict[str, float] = {}
         self._last_btc_record: float = 0.0
@@ -222,7 +223,8 @@ class SessionManager:
     async def _run_loop(self) -> None:
         while not self._stop.is_set():
             try:
-                await self._tick()
+                async with self._tick_lock:
+                    await self._tick()
             except asyncio.CancelledError:
                 return
             except Exception as e:
@@ -323,6 +325,9 @@ class SessionManager:
 
         if not slot.btc_trend_computed:
             await self._maybe_compute_btc_trend(slot, remaining)
+            # Wait until BTC trend is computed before allowing entry
+            if not slot.btc_trend_computed:
+                return
 
         ctx = self._build_context(slot, remaining)
 
