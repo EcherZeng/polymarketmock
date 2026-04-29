@@ -8,9 +8,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { toast } from "sonner"
-import { AlertTriangle, Layers, CheckCircle2, X } from "lucide-react"
+import { AlertTriangle, Layers, CheckCircle2, X, DollarSign } from "lucide-react"
 import { cn, descText } from "@/lib/utils"
 
 function ExecutorModeToggle() {
@@ -68,6 +69,71 @@ function ExecutorModeToggle() {
         </Label>
       </div>
     </div>
+  )
+}
+
+function MockBalanceSetting() {
+  const queryClient = useQueryClient()
+  const { data: config } = useConfigState()
+  const [balanceInput, setBalanceInput] = useState("")
+
+  const balanceMut = useMutation({
+    mutationFn: (balance: number) => tradeApi.setBalance(balance),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["trade", "status"] })
+      queryClient.invalidateQueries({ queryKey: ["trade", "balance"] })
+      toast.success(`已设置模拟余额为 $${data.balance.toFixed(2)}`)
+      setBalanceInput("")
+    },
+    onError: (err: Error) => {
+      toast.error(`设置余额失败: ${err.message}`)
+    },
+  })
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    const val = parseFloat(balanceInput)
+    if (isNaN(val) || val < 0) {
+      toast.error("请输入有效的余额（≥0）")
+      return
+    }
+    balanceMut.mutate(val)
+  }
+
+  const currentMode = config?.executor_mode ?? "mock"
+  if (currentMode !== "mock") {
+    return null
+  }
+
+  return (
+    <Card className="border-blue-200 dark:border-blue-800">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <DollarSign className="h-4 w-4 text-blue-600" />
+          模拟余额设置
+        </CardTitle>
+        <CardDescription>
+          仅在模拟模式下可用 — 设置虚拟账户初始余额
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={handleSubmit} className="flex gap-2">
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            placeholder="输入余额，例如: 1000"
+            value={balanceInput}
+            onChange={(e) => setBalanceInput(e.target.value)}
+            className="flex-1"
+            disabled={balanceMut.isPending}
+          />
+          <Button type="submit" disabled={balanceMut.isPending || !balanceInput}>
+            {balanceMut.isPending ? "设置中..." : "设置余额"}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -140,6 +206,9 @@ export default function SettingsPage() {
           <ExecutorModeToggle />
         </CardContent>
       </Card>
+
+      {/* ── Mock Balance Setting (only in mock mode) ──────────── */}
+      <MockBalanceSetting />
 
       {/* ── Active Strategy ──────────── */}
       <Card className={cn(

@@ -64,6 +64,9 @@ export const tradeApi = {
   setExecutorMode: (mode: string) =>
     api.put<{ executor_mode: string; changed: boolean }>("/executor-mode", { mode }).then((r) => r.data),
 
+  setBalance: (balance: number) =>
+    api.put<{ balance: number; mode: string }>("/balance", { balance }).then((r) => r.data),
+
   pause: () => api.post("/pause").then((r) => r.data),
 
   resume: () => api.post("/resume").then((r) => r.data),
